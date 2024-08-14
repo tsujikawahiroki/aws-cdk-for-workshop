@@ -88,6 +88,17 @@ export interface TopicProps {
    * @default TracingConfig.PASS_THROUGH
    */
   readonly tracingConfig?: TracingConfig;
+
+  /**
+   * The display name to use for an Amazon SNS topic with SMS subscriptions.
+   *
+   * The display name must be maximum 100 characters long, including hyphens (-), underscores (_), spaces, and tabs.
+   *
+   * @see https://docs.aws.amazon.com/sns/latest/dg/sns-create-topic.html
+   *
+   * @default - no display name
+   */
+  readonly displayName?: string;
 }
 
 /**
@@ -289,6 +300,10 @@ export class Topic extends TopicBase {
       throw new Error(`signatureVersion must be "1" or "2", received: "${props.signatureVersion}"`);
     }
 
+    if (props.displayName && !Token.isUnresolved(props.displayName) && props.displayName.length > 100) {
+      throw new Error(`displayName must be less than 100 characters, got ${props.displayName.length}`);
+    }
+
     const resource = new CfnTopic(this, 'Resource', {
       archivePolicy: props.messageRetentionPeriodInDays ? {
         MessageRetentionPeriod: props.messageRetentionPeriodInDays,
@@ -300,6 +315,7 @@ export class Topic extends TopicBase {
       signatureVersion: props.signatureVersion,
       deliveryStatusLogging: Lazy.any({ produce: () => this.renderLoggingConfigs() }, { omitEmptyArray: true }),
       tracingConfig: props.tracingConfig,
+      displayName: props.displayName,
     });
 
     this.topicArn = this.getResourceArnAttribute(resource.ref, {
