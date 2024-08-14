@@ -148,6 +148,29 @@ describe('Topic', () => {
         signatureVersion: '3',
       })).toThrow(/signatureVersion must be "1" or "2", received: "3"/);
     });
+
+    test('specify displayName', () => {
+      const stack = new cdk.Stack();
+
+      new sns.Topic(stack, 'MyTopic', {
+         displayName: 'MyDisplayName',
+      });
+
+      Template.fromStack(stack).hasResourceProperties('AWS::SNS::Topic', {
+        DisplayName: 'MyDisplayName',
+      });
+    });
+
+    test('throw error when displayName is too long', () => {
+      const stack = new cdk.Stack();
+
+      expect(() => {
+        new sns.Topic(stack, 'MyTopic', {
+          displayName: 'a'.repeat(101)
+        });
+      }).toThrow('displayName must be less than 100 characters, got 101');
+    });
+
   });
 
   test('can add a policy to the topic', () => {
