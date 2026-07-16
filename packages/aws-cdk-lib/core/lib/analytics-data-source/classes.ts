@@ -13393,8 +13393,6 @@ export const AWS_CDK_CONSTRUCTOR_PROPS: { [key: string]: any } = {
       'lifecycleRegistryId': '*',
       'removalPolicy': 'RemovalPolicy',
       'imageScanOnPush': 'boolean',
-      'imageTagMutability': 'TagMutability',
-      'imageTagMutabilityExclusionFilters': '*',
       'autoDeleteImages': 'boolean',
       'emptyOnDelete': 'boolean',
       'addToResourcePolicy': [

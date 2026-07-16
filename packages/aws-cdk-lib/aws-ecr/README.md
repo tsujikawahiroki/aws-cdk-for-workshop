@@ -119,53 +119,6 @@ repository.grantPullPush(role);
 
 By using these methods, you can grant specific operational permissions on the ECR repository to IAM entities. This allows for proper management of access to the repository and ensures security.
 
-### Image tag immutability
-
-You can set tag immutability on images in your repository using the `imageTagMutability` construct prop.
-
-```ts
-new ecr.Repository(this, 'Repo', { imageTagMutability: ecr.TagMutability.IMMUTABLE });
-```
-
-#### Image tag mutability with exclusion filters
-
-ECR supports more granular control over image tag mutability by allowing you to specify exclusion filters. This enables you to make your repository immutable while allowing specific tag patterns to remain mutable (or vice versa).
-
-There are two new mutability options that work with exclusion filters:
-
-- `MUTABLE_WITH_EXCLUSION`: Tags are mutable by default, except those matching the exclusion filters
-- `IMMUTABLE_WITH_EXCLUSION`: Tags are immutable by default, except those matching the exclusion filters
-
-Use `ImageTagMutabilityExclusionFilter.wildcard()` to create filters with wildcard patterns:
-
-```ts
-// Make all tags immutable except for those starting with 'dev-' or 'test-'
-new ecr.Repository(this, 'Repo', {
-  imageTagMutability: ecr.TagMutability.IMMUTABLE_WITH_EXCLUSION,
-  imageTagMutabilityExclusionFilters: [
-    ecr.ImageTagMutabilityExclusionFilter.wildcard('dev-*'),
-    ecr.ImageTagMutabilityExclusionFilter.wildcard('test-*'),
-  ],
-});
-```
-
-```ts
-// Make all tags mutable except for production releases
-new ecr.Repository(this, 'Repo', {
-  imageTagMutability: ecr.TagMutability.MUTABLE_WITH_EXCLUSION,
-  imageTagMutabilityExclusionFilters: [
-    ecr.ImageTagMutabilityExclusionFilter.wildcard('prod-*'),
-    ecr.ImageTagMutabilityExclusionFilter.wildcard('release-v*'),
-  ],
-});
-```
-
-##### Exclusion filter pattern rules
-
-- Patterns can contain alphanumeric characters, dots (.), underscores (_), hyphens (-), and asterisks (*) as wildcards
-- Maximum pattern length is 128 characters
-- You can specify up to 5 exclusion filters per repository
-
 ### Encryption
 
 By default, Amazon ECR uses server-side encryption with Amazon S3-managed encryption keys which encrypts your data at rest using an AES-256 encryption algorithm. For more control over the encryption for your Amazon ECR repositories, you can use server-side encryption with KMS keys stored in AWS Key Management Service (AWS KMS). Read more about this feature in the [ECR Developer Guide](https://docs.aws.amazon.com/AmazonECR/latest/userguide/encryption-at-rest.html).

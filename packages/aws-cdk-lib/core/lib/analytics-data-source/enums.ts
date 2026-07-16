@@ -4242,9 +4242,7 @@ export const AWS_CDK_ENUMS: { [key: string]: any } = {
   ],
   "TagMutability": [
     "MUTABLE",
-    "IMMUTABLE",
-    "IMMUTABLE_WITH_EXCLUSION",
-    "MUTABLE_WITH_EXCLUSION"
+    "IMMUTABLE"
   ],
   "TagOperation": [
     "STRINGEQUALS",

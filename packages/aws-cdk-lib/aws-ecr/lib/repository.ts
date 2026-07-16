@@ -596,23 +596,6 @@ export interface RepositoryProps {
   readonly imageScanOnPush?: boolean;
 
   /**
-   * The tag mutability setting for the repository. If this parameter is omitted, the default setting of MUTABLE will be used which will allow image tags to be overwritten.
-   *
-   *  @default TagMutability.MUTABLE
-   */
-  readonly imageTagMutability?: TagMutability;
-
-  /**
-   * The image tag mutability exclusion filters for the repository.
-   *
-   * These filters specify which image tags can override the repository's default image tag mutability setting.
-   *
-   * @default undefined - AWS ECR default is no exclusion filters
-   * @see https://docs.aws.amazon.com/AmazonECR/latest/userguide/image-tag-mutability.html
-   */
-  readonly imageTagMutabilityExclusionFilters?: ImageTagMutabilityExclusionFilter[];
-
-  /**
    * Whether all images should be automatically deleted when the repository is
    * removed from the stack or when the stack is deleted.
    *
@@ -845,7 +828,6 @@ export class Repository extends RepositoryBase {
     this._policyDocument = Box.fromValue(undefined);
 
     Repository.validateRepositoryName(this.physicalName);
-    this.validateTagMutability(props.imageTagMutability, props.imageTagMutabilityExclusionFilters);
 
     this._resource = new CfnRepository(this, 'Resource', {
       repositoryName: this.physicalName,
@@ -853,10 +835,6 @@ export class Repository extends RepositoryBase {
       repositoryPolicyText: this._policyDocument,
       lifecyclePolicy: this.lifecycleRules.derive(rules => this.renderLifecyclePolicy(rules)),
       imageScanningConfiguration: props.imageScanOnPush !== undefined ? { scanOnPush: props.imageScanOnPush } : undefined,
-      imageTagMutability: props.imageTagMutability,
-      imageTagMutabilityExclusionFilters: props.imageTagMutabilityExclusionFilters?.map(
-        filter => filter._render(),
-      ),
       encryptionConfiguration: this.parseEncryption(props),
       emptyOnDelete: props.emptyOnDelete,
     });
@@ -941,38 +919,6 @@ export class Repository extends RepositoryBase {
     }
 
     this.lifecycleRules.push({ ...rule });
-  }
-
-  private validateTagMutability(tagMutability?: TagMutability, exclusionFilters?: ImageTagMutabilityExclusionFilter[]): void {
-    const EXCLUSION_REQUIRED_TAG_MUTABILITY = [
-      TagMutability.IMMUTABLE_WITH_EXCLUSION,
-      TagMutability.MUTABLE_WITH_EXCLUSION,
-    ];
-
-    const requiresExclusion = tagMutability && EXCLUSION_REQUIRED_TAG_MUTABILITY.includes(tagMutability);
-    const hasExclusionFilters = !!exclusionFilters;
-
-    if (hasExclusionFilters && !requiresExclusion) {
-      throw new ValidationError(
-        lit`ImageTagMutabilityRequiresExclusionFilters`,
-        `imageTagMutability must be 'IMMUTABLE_WITH_EXCLUSION' or 'MUTABLE_WITH_EXCLUSION' when imageTagMutabilityExclusionFilters is provided, got: ${tagMutability}.`,
-        this,
-      );
-    }
-
-    const filterCount = exclusionFilters?.length;
-
-    if (filterCount !== undefined && (filterCount < 1 || filterCount > 5)) {
-      throw new ValidationError(lit`ExclusionFiltersCountOutOfRange`, `imageTagMutabilityExclusionFilters must contain between 1 and 5 filters, got ${filterCount}.`, this);
-    }
-
-    if (requiresExclusion && !hasExclusionFilters) {
-      throw new ValidationError(
-        lit`ExclusionFiltersRequiredForMutabilityWithExclusion`,
-        `imageTagMutabilityExclusionFilters must be specified when imageTagMutability is '${tagMutability}'.`,
-        this,
-      );
-    }
   }
 
   /**
@@ -1160,55 +1106,6 @@ export enum TagMutability {
    * all image tags within the repository will be immutable which will prevent them from being overwritten.
    */
   IMMUTABLE = 'IMMUTABLE',
-
-  /**
-   * all image tags within the repository will be immutable, while allowing you to define some filters for tags that can be changed.
-   */
-  IMMUTABLE_WITH_EXCLUSION = 'IMMUTABLE_WITH_EXCLUSION',
-
-  /**
-   * allow image tags to be overwritten while allowing you to define some filters for tags that should remain unchanged.
-   */
-  MUTABLE_WITH_EXCLUSION = 'MUTABLE_WITH_EXCLUSION',
-}
-
-/**
- * Represents an image tag mutability exclusion filter for ECR repository
- */
-export class ImageTagMutabilityExclusionFilter {
-  /**
-   * Creates a wildcard filter for image tag mutability exclusion
-   * @param pattern The wildcard pattern to match image tags (e.g., 'dev-*', 'release-v*')
-   */
-  public static wildcard(pattern: string): ImageTagMutabilityExclusionFilter {
-    return new ImageTagMutabilityExclusionFilter('WILDCARD', pattern);
-  }
-
-  private constructor(
-    private readonly filterType: string,
-    private readonly filterValue: string,
-  ) {
-    if (!filterValue) {
-      throw new UnscopedValidationError(lit`FilterPatternCannotBeEmpty`, 'Pattern cannot be empty');
-    }
-    if (filterValue.length > 128) {
-      throw new UnscopedValidationError(lit`FilterPatternExceedsMaxLength`, `Pattern cannot exceed 128 characters, got: ${filterValue.length} characters.`);
-    }
-    if (!/^[0-9a-zA-Z._*-]+$/.test(filterValue)) {
-      throw new UnscopedValidationError(lit`FilterPatternContainsInvalidCharacters`, `Pattern '${filterValue}' contains invalid characters. Only alphanumeric characters, dots, underscores, asterisks, and hyphens are allowed.`);
-    }
-  }
-
-  /**
-   * Renders the filter to CloudFormation properties
-   * @internal
-   */
-  public _render(): CfnRepository.ImageTagMutabilityExclusionFilterProperty {
-    return {
-      imageTagMutabilityExclusionFilterType: this.filterType,
-      imageTagMutabilityExclusionFilterValue: this.filterValue,
-    };
-  }
 }
 
 /**
