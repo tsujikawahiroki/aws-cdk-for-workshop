@@ -4,7 +4,6 @@
    "Type": "AWS::SNS::Topic",
    "Properties": {
     "ContentBasedDeduplication": true,
-    "DisplayName": "fooDisplayName",
     "FifoTopic": true,
     "TopicName": "fooTopic.fifo"
    }

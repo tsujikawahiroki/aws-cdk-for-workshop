@@ -1,0 +1,81 @@
+{
+  "/SNSTest/DefaultTest/DeployAssert": [
+    {
+      "type": "aws:cdk:warning",
+      "data": "No cross-stack-reference strength configured, defaulting to \"strong\". We recommend you set feature flag \"@aws-cdk/core:defaultCrossStackReferences\" to \"both\", then deploy everywhere, then set it to \"weak\". Alternatively, set it to \"strong\" explicitly to lock in the current producer-protecting behavior. (See: https://github.com/aws/aws-cdk/blob/main/packages/aws-cdk-lib/README.md#reference-strength) [ack: @aws-cdk/core:crossStackReferencesDefaultStrong]",
+      "trace": [
+        "Annotations.addMessage (/codebuild/output/src1239594497/src/repo/packages/aws-cdk-lib/core/lib/annotations.js:244:29)",
+        "Annotations.addWarningV2 (/codebuild/output/src1239594497/src/repo/packages/aws-cdk-lib/core/lib/annotations.js:113:18)",
+        "resolveValue (/codebuild/output/src1239594497/src/repo/packages/aws-cdk-lib/core/lib/private/refs.js:165:54)",
+        "resolveReferences (/codebuild/output/src1239594497/src/repo/packages/aws-cdk-lib/core/lib/private/refs.js:128:30)",
+        "prepareApp (/codebuild/output/src1239594497/src/repo/packages/aws-cdk-lib/core/lib/private/prepare-app.js:46:36)",
+        "synthesize (/codebuild/output/src1239594497/src/repo/packages/aws-cdk-lib/core/lib/private/synthesis.js:73:36)",
+        "App.synth (/codebuild/output/src1239594497/src/repo/packages/aws-cdk-lib/core/lib/stage.js:220:96)",
+        "App.synth (/codebuild/output/src1239594497/src/repo/packages/aws-cdk-lib/core/lib/app.js:217:27)",
+        "Object.<anonymous> (/codebuild/output/src1239594497/src/repo/packages/@aws-cdk-testing/framework-integ/test/aws-sns/test/integ.sns.js:135:5)",
+        "Module._compile (node:internal/modules/cjs/loader:1521:14)",
+        "Module._extensions..js (node:internal/modules/cjs/loader:1623:10)",
+        "Module.load (node:internal/modules/cjs/loader:1266:32)",
+        "Module._load (node:internal/modules/cjs/loader:1091:12)",
+        "Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:164:12)",
+        "node:internal/main/run_main_module:28:49"
+      ]
+    }
+  ],
+  "/SNSTest/DefaultTest/DeployAssert/BootstrapVersion": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "BootstrapVersion"
+    }
+  ],
+  "/SNSTest/DefaultTest/DeployAssert/CheckBootstrapVersion": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "CheckBootstrapVersion"
+    }
+  ],
+  "/SNSTest/DefaultTest/DeployAssert/LambdaInvokecaa1b8e69bc5f16c6d74368e6c52fd10/Default": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": "*"
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": "*"
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": "*"
+    }
+  ],
+  "/SNSTest/DefaultTest/DeployAssert/LambdaInvokecaa1b8e69bc5f16c6d74368e6c52fd10/Invoke": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "LambdaInvokecaa1b8e69bc5f16c6d74368e6c52fd10InvokeE670FC7D"
+    }
+  ],
+  "/SNSTest/DefaultTest/DeployAssert/LambdaInvokecaa1b8e69bc5f16c6d74368e6c52fd10/AssertionResults": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "AssertionResultsLambdaInvokecaa1b8e69bc5f16c6d74368e6c52fd10"
+    }
+  ],
+  "/SNSTest/DefaultTest/DeployAssert/SingletonFunction1488541a7b23466481b69b4408076b81/Role": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "SingletonFunction1488541a7b23466481b69b4408076b81Role37ABCE73"
+    }
+  ],
+  "/SNSTest/DefaultTest/DeployAssert/SingletonFunction1488541a7b23466481b69b4408076b81/Handler": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "SingletonFunction1488541a7b23466481b69b4408076b81HandlerCD40AE9F"
+    }
+  ],
+  "/SNSTest/DefaultTest/DeployAssert/LambdaInvokecaa1b8e69bc5f16c6d74368e6c52fd10/Default/Default": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "LambdaInvokecaa1b8e69bc5f16c6d74368e6c52fd10"
+    }
+  ]
+}

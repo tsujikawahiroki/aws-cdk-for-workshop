@@ -1,0 +1,30 @@
+{
+  "/SNSFifoInteg/MyTopic": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": {
+        "topicName": "*",
+        "contentBasedDeduplication": true,
+        "fifo": true
+      }
+    }
+  ],
+  "/SNSFifoInteg/BootstrapVersion": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "BootstrapVersion"
+    }
+  ],
+  "/SNSFifoInteg/CheckBootstrapVersion": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "CheckBootstrapVersion"
+    }
+  ],
+  "/SNSFifoInteg/MyTopic/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "MyTopic86869434"
+    }
+  ]
+}

@@ -1,11 +1,11 @@
 {
-  "/integ-tests/DefaultTest/DeployAssert/BootstrapVersion": [
+  "/SNSTopicPolicyInteg/DefaultTest/DeployAssert/BootstrapVersion": [
     {
       "type": "aws:cdk:logicalId",
       "data": "BootstrapVersion"
     }
   ],
-  "/integ-tests/DefaultTest/DeployAssert/CheckBootstrapVersion": [
+  "/SNSTopicPolicyInteg/DefaultTest/DeployAssert/CheckBootstrapVersion": [
     {
       "type": "aws:cdk:logicalId",
       "data": "CheckBootstrapVersion"

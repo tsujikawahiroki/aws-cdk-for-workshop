@@ -57,7 +57,6 @@
       "SuccessFeedbackSampleRate": "50"
      }
     ],
-    "DisplayName": "fooDisplayName",
     "KmsMasterKeyId": {
      "Fn::GetAtt": [
       "CustomKey1E6D0D07",
@@ -115,7 +114,6 @@
   "MyTopicSignatureVersionEDDB6A3B": {
    "Type": "AWS::SNS::Topic",
    "Properties": {
-    "DisplayName": "fooDisplayNameSignatureVersion",
     "SignatureVersion": "2",
     "TopicName": "fooTopicSignatureVersion"
    }
@@ -123,7 +121,6 @@
   "MyTopicTracingConfigE05AF123": {
    "Type": "AWS::SNS::Topic",
    "Properties": {
-    "DisplayName": "fooDisplayNameTracingConfig",
     "TopicName": "fooTopicTracingConfig",
     "TracingConfig": "Active"
    }
@@ -131,7 +128,6 @@
   "MyTopic288CE2107": {
    "Type": "AWS::SNS::Topic",
    "Properties": {
-    "DisplayName": "fooDisplayName2",
     "TopicName": "fooTopic2"
    }
   },
@@ -196,7 +192,6 @@
   "MyTopic3134CFDFB": {
    "Type": "AWS::SNS::Topic",
    "Properties": {
-    "DisplayName": "fooDisplayName3",
     "KmsMasterKeyId": {
      "Fn::GetAtt": [
       "CustomKey1E6D0D07",

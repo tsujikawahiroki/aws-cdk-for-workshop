@@ -3,7 +3,6 @@
   "TopicBFC7AF6E": {
    "Type": "AWS::SNS::Topic",
    "Properties": {
-    "DisplayName": "fooDisplay",
     "TopicName": "fooTopic"
    }
   },
@@ -50,7 +49,6 @@
   "TopicAddPolicy7DB03706": {
    "Type": "AWS::SNS::Topic",
    "Properties": {
-    "DisplayName": "topicDisplayNameAddPolicy",
     "TopicName": "topicAddPolicy"
    }
   },

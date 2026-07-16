@@ -570,7 +570,6 @@
    "Type": "AWS::ECR::Repository",
    "Properties": {
     "EmptyOnDelete": true,
-    "ImageTagMutability": "IMMUTABLE",
     "LifecyclePolicy": {
      "LifecyclePolicyText": "{\"rules\":[{\"rulePriority\":1,\"description\":\"Garbage collect old image versions\",\"selection\":{\"tagStatus\":\"any\",\"countType\":\"imageCountMoreThan\",\"countNumber\":3},\"action\":{\"type\":\"expire\"}}]}"
     },
@@ -583,7 +582,6 @@
    "Type": "AWS::ECR::Repository",
    "Properties": {
     "EmptyOnDelete": true,
-    "ImageTagMutability": "IMMUTABLE",
     "LifecyclePolicy": {
      "LifecyclePolicyText": "{\"rules\":[{\"rulePriority\":1,\"description\":\"Garbage collect old image versions\",\"selection\":{\"tagStatus\":\"any\",\"countType\":\"imageCountMoreThan\",\"countNumber\":3},\"action\":{\"type\":\"expire\"}}]}"
     },

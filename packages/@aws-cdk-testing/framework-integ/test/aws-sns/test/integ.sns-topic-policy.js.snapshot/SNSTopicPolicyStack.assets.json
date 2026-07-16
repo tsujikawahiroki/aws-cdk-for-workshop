@@ -1,15 +1,16 @@
 {
-  "version": "38.0.1",
+  "version": "54.0.0",
   "files": {
-    "a2e03faff837f5b6f5c47d6e7e6ca3c90397e9be8cc83d53fa17416fdf27756c": {
+    "9b7b02e83fdb149765596e68c4dd9beb1c6936fea277d8ff477bb79577c2e1a8": {
+      "displayName": "SNSTopicPolicyStack Template",
       "source": {
         "path": "SNSTopicPolicyStack.template.json",
         "packaging": "file"
       },
       "destinations": {
-        "current_account-current_region": {
+        "current_account-current_region-dc285fd2": {
           "bucketName": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}",
-          "objectKey": "a2e03faff837f5b6f5c47d6e7e6ca3c90397e9be8cc83d53fa17416fdf27756c.json",
+          "objectKey": "9b7b02e83fdb149765596e68c4dd9beb1c6936fea277d8ff477bb79577c2e1a8.json",
           "assumeRoleArn": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cdk-hnb659fds-file-publishing-role-${AWS::AccountId}-${AWS::Region}"
         }
       }
