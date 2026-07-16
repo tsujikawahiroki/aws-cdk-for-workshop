@@ -15,7 +15,7 @@
     "build-all": "tsc -b"
   },
   "devDependencies": {
-    "@nx/workspace": "^16.10.0",
+    "@nx/workspace": "^18.3.4",
     "@types/node": "18.11.19",
     "@types/prettier": "2.6.0",
     "@yarnpkg/lockfile": "^1.1.0",
