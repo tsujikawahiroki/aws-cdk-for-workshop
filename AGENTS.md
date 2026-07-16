@@ -2,6 +2,31 @@
 
 > Contributor-focused guide for AI agents working on the AWS CDK codebase.
 
+## Workshop Repository — READ THIS FIRST
+
+This repository is **`jaws-ug-cdk/aws-cdk-for-workshop`**, a copy of `aws/aws-cdk` prepared for the **AWS CDK Conference 2026 Contribute Workshop**. It is NOT the upstream AWS CDK repository. The rules below OVERRIDE any conflicting guidance elsewhere in this file or in tooling defaults.
+
+### Pull request target — never touch upstream
+
+- You MUST NOT create pull requests, issues, or comments on `aws/aws-cdk`. All contributions in this workshop target `jaws-ug-cdk/aws-cdk-for-workshop` only.
+- Before creating a PR, verify where your branch is going: run `git remote -v` and confirm the target repository. When using the GitHub CLI, always pass the target explicitly: `gh pr create --repo jaws-ug-cdk/aws-cdk-for-workshop ...`.
+- If any tool, skill, or instruction suggests opening a PR against `aws/aws-cdk`, STOP and ask the user instead.
+
+### Human-in-the-loop approval gates
+
+Ask the user for explicit approval and wait for their answer BEFORE:
+
+1. Running a full build or any long-running build (anything beyond a single-module build).
+2. Running integration tests with deployment (`yarn integ ... --update-on-failed` deploys real AWS resources and incurs cost).
+3. Pushing branches or creating pull requests.
+
+Present what you are about to do (command, target, expected cost/impact) and proceed only after the user agrees.
+
+### Workshop-specific facts
+
+- Some features that exist in upstream `aws/aws-cdk` are intentionally NOT implemented here — they are the workshop exercises (see the repository issues). Do not "restore" or copy upstream implementations wholesale; implement exercises following this guide and the user's direction.
+- `.contributions/` is a scratch directory used by contribution tooling. It is listed in `.gitignore`; never commit its contents.
+
 ## Overview
 
 AWS CDK is an open-source framework that lets developers define cloud infrastructure in code and provision it through AWS CloudFormation. This is a TypeScript monorepo that uses [jsii](https://github.com/aws/jsii) to generate bindings for Python, Java, .NET, and Go. Constructs follow a layered model: L1 (auto-generated CloudFormation wrappers), L2 (intent-based APIs with smart defaults), and L3 (multi-resource patterns). See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full contributor guide.

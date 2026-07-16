@@ -64,6 +64,9 @@ type-fingerprints.txt
 # Kiro-specific files
 .kiro/
 
+# Contribution tooling scratch directory (CDK Contribution Skill)
+.contributions/
+
 # Lock files (allow root yarn.lock and anything in test directories)
 yarn.lock
 package-lock.json
