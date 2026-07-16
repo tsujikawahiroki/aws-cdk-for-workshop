@@ -1,13 +1,16 @@
-import {
-  WebSocketRouteIntegration,
-  WebSocketIntegrationType,
+import type {
   WebSocketRouteIntegrationBindOptions,
   WebSocketRouteIntegrationConfig,
   ContentHandling,
 } from '../../../aws-apigatewayv2';
+import {
+  WebSocketRouteIntegration,
+  WebSocketIntegrationType,
+} from '../../../aws-apigatewayv2';
 import { ServicePrincipal } from '../../../aws-iam';
-import { IFunction } from '../../../aws-lambda';
-import { Duration, Stack } from '../../../core';
+import type { IFunction } from '../../../aws-lambda';
+import type { Duration } from '../../../core';
+import { Stack } from '../../../core';
 
 /**
  * Props for Lambda type integration for a WebSocket Api.
@@ -34,7 +37,6 @@ export interface WebSocketLambdaIntegrationProps {
  * Lambda WebSocket Integration
  */
 export class WebSocketLambdaIntegration extends WebSocketRouteIntegration {
-
   private readonly _id: string;
 
   /**

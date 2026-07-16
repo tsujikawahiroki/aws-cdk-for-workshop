@@ -1,8 +1,8 @@
 import * as path from 'path';
+import * as cdk from 'aws-cdk-lib';
 import { Template } from 'aws-cdk-lib/assertions';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as s3 from 'aws-cdk-lib/aws-s3';
-import * as cdk from 'aws-cdk-lib';
 import * as cxapi from 'aws-cdk-lib/cx-api';
 import * as gamelift from '../lib';
 
@@ -95,7 +95,6 @@ describe('script', () => {
             },
           },
         });
-
       });
     });
 
@@ -109,7 +108,6 @@ describe('script', () => {
             Key: 'content',
           },
         });
-
       });
     });
 

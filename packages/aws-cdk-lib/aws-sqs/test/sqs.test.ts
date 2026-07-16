@@ -3,8 +3,10 @@ import * as iam from '../../aws-iam';
 import * as kms from '../../aws-kms';
 import { CfnParameter, Duration, Stack, App, Token } from '../../core';
 import * as sqs from '../lib';
+import { QueueGrants } from '../lib';
+import { validateRedriveAllowPolicy } from '../lib/validate-queue-props';
 
-/* eslint-disable quote-props */
+/* eslint-disable @stylistic/quote-props */
 
 test('default properties', () => {
   const stack = new Stack();
@@ -62,6 +64,17 @@ test('with a dead letter queue', () => {
   expect(queue.deadLetterQueue).toEqual(dlqProps);
 });
 
+test('multiple prop validation errors are presented to the user (out-of-range retentionPeriod and deliveryDelay)', () => {
+  // GIVEN
+  const stack = new Stack();
+
+  // THEN
+  expect(() => new sqs.Queue(stack, 'MyQueue', {
+    retentionPeriod: Duration.seconds(30),
+    deliveryDelay: Duration.minutes(16),
+  })).toThrow('Queue initialization failed due to the following validation error(s):\n- delivery delay must be between 0 and 900 seconds, but 960 was provided\n- message retention period must be between 60 and 1,209,600 seconds, but 30 was provided');
+});
+
 test('message retention period must be between 1 minute to 14 days', () => {
   // GIVEN
   const stack = new Stack();
@@ -69,11 +82,11 @@ test('message retention period must be between 1 minute to 14 days', () => {
   // THEN
   expect(() => new sqs.Queue(stack, 'MyQueue', {
     retentionPeriod: Duration.seconds(30),
-  })).toThrow(/message retention period must be 60 seconds or more/);
+  })).toThrow('Queue initialization failed due to the following validation error(s):\n- message retention period must be between 60 and 1,209,600 seconds, but 30 was provided');
 
   expect(() => new sqs.Queue(stack, 'AnotherQueue', {
     retentionPeriod: Duration.days(15),
-  })).toThrow(/message retention period must be 1209600 seconds or less/);
+  })).toThrow('Queue initialization failed due to the following validation error(s):\n- message retention period must be between 60 and 1,209,600 seconds, but 1296000 was provided');
 });
 
 test('message retention period can be provided as a parameter', () => {
@@ -81,7 +94,7 @@ test('message retention period can be provided as a parameter', () => {
   const stack = new Stack();
   const parameter = new CfnParameter(stack, 'my-retention-period', {
     type: 'Number',
-    default: 30,
+    default: 60,
   });
 
   // WHEN
@@ -94,7 +107,7 @@ test('message retention period can be provided as a parameter', () => {
     'Parameters': {
       'myretentionperiod': {
         'Type': 'Number',
-        'Default': 30,
+        'Default': 60,
       },
     },
     'Resources': {
@@ -109,6 +122,55 @@ test('message retention period can be provided as a parameter', () => {
         'DeletionPolicy': 'Delete',
       },
     },
+  });
+});
+
+test.each([
+  { size: 1023, valid: false, description: 'just below lower bound' },
+  { size: 1024, valid: true, description: 'at lower bound' },
+  { size: 1048576, valid: true, description: 'at upper bound' },
+  { size: 1048577, valid: false, description: 'just above upper bound' },
+])('maxMessageSizeBytes validation for $size bytes ($description)', ({ size, valid }) => {
+  const stack = new Stack();
+  const constructId = `QueueWithSize${size}`;
+  const action = () => new sqs.Queue(stack, constructId, { maxMessageSizeBytes: size });
+
+  if (valid) {
+    expect(action).not.toThrow();
+  } else {
+    expect(action).toThrow(`Queue initialization failed due to the following validation error(s):\n- maximum message size must be between 1,024 and 1,048,576 bytes, but ${size} was provided`);
+  }
+});
+
+test('maxMessageSizeBytes works with CDK tokens', () => {
+  const stack = new Stack();
+  const parameter = new CfnParameter(stack, 'MessageSize', { type: 'Number' });
+
+  // Should not throw for tokens (validation skipped)
+  expect(() => new sqs.Queue(stack, 'TokenQueue', {
+    maxMessageSizeBytes: parameter.valueAsNumber,
+  })).not.toThrow();
+});
+
+test('multiple validation errors include maxMessageSizeBytes', () => {
+  const stack = new Stack();
+
+  expect(() => new sqs.Queue(stack, 'MultiError', {
+    maxMessageSizeBytes: 2000000,
+    retentionPeriod: Duration.seconds(30),
+  })).toThrow(/maximum message size must be between 1,024 and 1,048,576 bytes.*message retention period must be between 60 and 1,209,600 seconds/s);
+});
+
+test('maxMessageSizeBytes synthesizes correct CloudFormation', () => {
+  const stack = new Stack();
+
+  new sqs.Queue(stack, 'LargeMessageQueue', {
+    maxMessageSizeBytes: 1048576,
+  });
+
+  const template = Template.fromStack(stack);
+  template.hasResourceProperties('AWS::SQS::Queue', {
+    MaximumMessageSize: 1048576,
   });
 });
 
@@ -152,6 +214,65 @@ test('addToPolicy will automatically create a policy for this queue', () => {
         },
       },
     },
+  });
+});
+
+describe('validateRedriveAllowPolicy', () => {
+  test('does not throw for valid policy', () => {
+    // GIVEN
+    const stack = new Stack();
+
+    // WHEN
+    const redriveAllowPolicy = { redrivePermission: sqs.RedrivePermission.ALLOW_ALL };
+
+    // THEN
+    expect(() => validateRedriveAllowPolicy(stack, redriveAllowPolicy)).not.toThrow();
+  });
+
+  test('throws when sourceQueues is provided with ALLOW_ALL permission', () => {
+    // GIVEN
+    const stack = new Stack();
+
+    // WHEN
+    const sourceQueue = new sqs.Queue(stack, 'SourceQueue');
+    const redriveAllowPolicy = {
+      redrivePermission: sqs.RedrivePermission.ALLOW_ALL,
+      sourceQueues: [sourceQueue],
+    };
+
+    // THEN
+    expect(() => validateRedriveAllowPolicy(stack, redriveAllowPolicy))
+      .toThrow("Queue initialization failed due to the following validation error(s):\n- sourceQueues cannot be configured when RedrivePermission is set to 'allowAll' or 'denyAll'");
+  });
+
+  test('throws when sourceQueues is not provided with BY_QUEUE permission', () => {
+    // GIVEN
+    const stack = new Stack();
+
+    // WHEN
+    const redriveAllowPolicy = {
+      redrivePermission: sqs.RedrivePermission.BY_QUEUE,
+    };
+
+    // THEN
+    expect(() => validateRedriveAllowPolicy(stack, redriveAllowPolicy))
+      .toThrow("Queue initialization failed due to the following validation error(s):\n- At least one source queue must be specified when RedrivePermission is set to 'byQueue'");
+  });
+
+  test('throws when more than 10 sourceQueues are provided', () => {
+    // GIVEN
+    const stack = new Stack();
+
+    // WHEN
+    const sourceQueues = Array(11).fill(null).map((_, i) => new sqs.Queue(stack, `SourceQueue${i}`));
+    const redriveAllowPolicy = {
+      redrivePermission: sqs.RedrivePermission.BY_QUEUE,
+      sourceQueues,
+    };
+
+    // THEN
+    expect(() => validateRedriveAllowPolicy(stack, redriveAllowPolicy))
+      .toThrow("Queue initialization failed due to the following validation error(s):\n- Up to 10 sourceQueues can be specified. Set RedrivePermission to 'allowAll' to specify more");
   });
 });
 
@@ -378,6 +499,62 @@ describe('grants', () => {
         ],
         'Version': '2012-10-17',
       },
+    });
+  });
+
+  test('grant on CfnQueue with KMS key grants key permissions', () => {
+    const stack = new Stack();
+    const key = new kms.CfnKey(stack, 'Key');
+    const cfnQueue = new sqs.CfnQueue(stack, 'Queue', {
+      kmsMasterKeyId: key.attrKeyId,
+    });
+    const role = new iam.Role(stack, 'Role', {
+      assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
+    });
+
+    QueueGrants.fromQueue(cfnQueue).sendMessages(role);
+
+    Template.fromStack(stack).hasResourceProperties('AWS::KMS::Key', {
+      KeyPolicy: {
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Action: [
+              'kms:Decrypt',
+              'kms:Encrypt',
+              'kms:ReEncrypt*',
+              'kms:GenerateDataKey*',
+            ],
+            Resource: '*',
+            Principal: { 'AWS': { 'Fn::GetAtt': ['Role1ABCC5F0', 'Arn'] } },
+          }),
+        ]),
+      },
+    });
+  });
+
+  test('grant on CfnQueue adds statement to queue policy', () => {
+    const stack = new Stack();
+    const cfnQueue = new sqs.CfnQueue(stack, 'Queue');
+    const principal = new iam.ServicePrincipal('lambda.amazonaws.com');
+
+    QueueGrants.fromQueue(cfnQueue).sendMessages(principal);
+
+    const template = Template.fromStack(stack);
+    template.hasResourceProperties('AWS::SQS::QueuePolicy', {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Action: [
+              'sqs:SendMessage',
+              'sqs:GetQueueAttributes',
+              'sqs:GetQueueUrl',
+            ],
+            Principal: { Service: 'lambda.amazonaws.com' },
+            Resource: { 'Fn::GetAtt': ['Queue', 'Arn'] },
+          }),
+        ]),
+      },
+      Queues: [{ 'Ref': 'Queue' }],
     });
   });
 });
@@ -673,6 +850,28 @@ test('test a queue throws when deduplicationScope specified on non fifo queue', 
       deduplicationScope: sqs.DeduplicationScope.MESSAGE_GROUP,
     });
   }).toThrow();
+});
+
+test('fifo: false is dropped from properties', () => {
+  // GIVEN
+  const stack = new Stack();
+
+  // WHEN
+  new sqs.Queue(stack, 'Queue', {
+    fifo: false,
+  });
+
+  // THEN
+  Template.fromStack(stack).templateMatches({
+    'Resources': {
+      'Queue4A7E3555': {
+        'Type': 'AWS::SQS::Queue',
+        'Properties': Match.absent(),
+        'UpdateReplacePolicy': 'Delete',
+        'DeletionPolicy': 'Delete',
+      },
+    },
+  });
 });
 
 test('test metrics', () => {

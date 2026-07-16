@@ -1,6 +1,10 @@
 import { Construct } from 'constructs';
-import { CfnJobDefinition } from './batch.generated';
+import type { CfnJobDefinition } from './batch.generated';
 import * as cdk from '../../core';
+import type { IArrayBox } from '../../core/lib/helpers-internal';
+import { Box } from '../../core/lib/helpers-internal';
+import { noBoxStackTraces } from '../../core/lib/no-box-stack-traces';
+import { lit } from '../../core/lib/private/literal-string';
 
 /**
  * The properties for defining Linux-specific options that are applied to the container.
@@ -32,24 +36,25 @@ export interface LinuxParametersProps {
   readonly maxSwap?: cdk.Size;
 
   /**
-    * This allows you to tune a container's memory swappiness behavior. This parameter
-    * maps to the --memory-swappiness option to docker run. The swappiness relates
-    * to the kernel's tendency to swap memory. A value of 0 will cause swapping to
-    * not happen unless absolutely necessary. A value of 100 will cause pages to
-    * be swapped very aggressively.
-    *
-    * This parameter is only supported when you are using the EC2 launch type.
-    * Accepted values are whole numbers between 0 and 100. If a value is not
-    * specified for maxSwap then this parameter is ignored.
-    *
-    * @default 60
-    */
+   * This allows you to tune a container's memory swappiness behavior. This parameter
+   * maps to the --memory-swappiness option to docker run. The swappiness relates
+   * to the kernel's tendency to swap memory. A value of 0 will cause swapping to
+   * not happen unless absolutely necessary. A value of 100 will cause pages to
+   * be swapped very aggressively.
+   *
+   * This parameter is only supported when you are using the EC2 launch type.
+   * Accepted values are whole numbers between 0 and 100. If a value is not
+   * specified for maxSwap then this parameter is ignored.
+   *
+   * @default 60
+   */
   readonly swappiness?: number;
 }
 
 /**
  * Linux-specific options that are applied to the container.
  */
+@noBoxStackTraces
 export class LinuxParameters extends Construct {
   /**
    * Whether the init process is enabled
@@ -74,18 +79,35 @@ export class LinuxParameters extends Construct {
   /**
    * Device mounts
    */
-  protected readonly devices = new Array<Device>();
+  private readonly _devices: IArrayBox<Device>;
+
+  /**
+   * @deprecated - use addDevices instead
+   */
+  protected get devices(): Device[] {
+    return this._devices.getMutable();
+  }
 
   /**
    * TmpFs mounts
    */
-  protected readonly tmpfs = new Array<Tmpfs>();
+  private readonly _tmpfs: IArrayBox<Tmpfs>;
+
+  /**
+   * @deprecated - use addTmpfs instead
+   */
+  protected get tmpfs(): Tmpfs[] {
+    return this._tmpfs.getMutable();
+  }
 
   /**
    * Constructs a new instance of the LinuxParameters class.
    */
   constructor(scope: Construct, id: string, props: LinuxParametersProps = {}) {
     super(scope, id);
+
+    this._devices = Box.fromArray();
+    this._tmpfs = Box.fromArray();
 
     this.validateProps(props);
 
@@ -101,7 +123,7 @@ export class LinuxParameters extends Construct {
       props.swappiness !== undefined &&
       (!Number.isInteger(props.swappiness) || props.swappiness < 0 || props.swappiness > 100)
     ) {
-      throw new Error(`swappiness: Must be an integer between 0 and 100; received ${props.swappiness}.`);
+      throw new cdk.ValidationError(lit`InvalidSwappiness`, `swappiness: Must be an integer between 0 and 100; received ${props.swappiness}.`, this);
     }
   }
 
@@ -109,7 +131,7 @@ export class LinuxParameters extends Construct {
    * Adds one or more host devices to a container.
    */
   public addDevices(...device: Device[]) {
-    this.devices.push(...device);
+    this._devices.push(...device);
   }
 
   /**
@@ -118,7 +140,7 @@ export class LinuxParameters extends Construct {
    * Only works with EC2 launch type.
    */
   public addTmpfs(...tmpfs: Tmpfs[]) {
-    this.tmpfs.push(...tmpfs);
+    this._tmpfs.push(...tmpfs);
   }
 
   /**
@@ -131,8 +153,8 @@ export class LinuxParameters extends Construct {
       sharedMemorySize: this.sharedMemorySize?.toMebibytes(),
       maxSwap: this.maxSwap?.toMebibytes(),
       swappiness: this.swappiness,
-      devices: cdk.Lazy.any({ produce: () => this.devices.map(renderDevice) }, { omitEmptyArray: true }),
-      tmpfs: cdk.Lazy.any({ produce: () => this.tmpfs.map(renderTmpfs) }, { omitEmptyArray: true }),
+      devices: this._devices.map(renderDevice),
+      tmpfs: this._tmpfs.map(renderTmpfs),
     };
   }
 }

@@ -20,7 +20,6 @@ describe('integration', () => {
         credentialsRole: role,
       },
     })).toThrow(/'credentialsPassthrough' and 'credentialsRole' are mutually exclusive/);
-
   });
 
   test('integration connectionType VpcLink requires vpcLink to be set', () => {
@@ -31,7 +30,6 @@ describe('integration', () => {
         connectionType: apigw.ConnectionType.VPC_LINK,
       },
     })).toThrow(/'connectionType' of VPC_LINK requires 'vpcLink' prop to be set/);
-
   });
 
   test('uri is self determined from the NLB', () => {
@@ -186,14 +184,13 @@ describe('integration', () => {
   });
 
   test('validates timeout is valid', () => {
-
     expect(() => new apigw.Integration({
       type: apigw.IntegrationType.HTTP_PROXY,
       integrationHttpMethod: 'ANY',
       options: {
         timeout: cdk.Duration.millis(2),
       },
-    })).toThrow(/Integration timeout must be between 50 milliseconds and 29 seconds/);
+    })).toThrow(/Integration timeout must be greater than 50 milliseconds/);
 
     expect(() => new apigw.Integration({
       type: apigw.IntegrationType.HTTP_PROXY,
@@ -201,11 +198,10 @@ describe('integration', () => {
       options: {
         timeout: cdk.Duration.seconds(50),
       },
-    })).toThrow(/Integration timeout must be between 50 milliseconds and 29 seconds/);
+    })).not.toThrow();
   });
 
   test('sets timeout', () => {
-
     // GIVEN
     const stack = new cdk.Stack();
     const api = new apigw.RestApi(stack, 'restapi');
@@ -227,7 +223,6 @@ describe('integration', () => {
         TimeoutInMillis: 1000,
       },
     });
-
   });
 
   test('validates integrationHttpMethod is required for non-MOCK integration types', () => {
@@ -246,5 +241,62 @@ describe('integration', () => {
         timeout: cdk.Duration.seconds(15),
       },
     })).not.toThrow();
+  });
+
+  describe('responseTransferMode', () => {
+    test.each([
+      [apigw.ResponseTransferMode.STREAM, 'STREAM'],
+      [apigw.ResponseTransferMode.BUFFERED, 'BUFFERED'],
+      [undefined, Match.absent()],
+    ])('responseTransferMode %s sets expected value (%s)', (transferMode, expectedMode) => {
+      // GIVEN
+      const stack = new cdk.Stack();
+      const api = new apigw.RestApi(stack, 'my-api');
+
+      // WHEN
+      const integration = new apigw.Integration({
+        type: apigw.IntegrationType.AWS_PROXY,
+        integrationHttpMethod: 'ANY',
+        options: {
+          responseTransferMode: transferMode,
+        },
+      });
+      api.root.addMethod('ANY', integration);
+
+      // THEN
+      Template.fromStack(stack).hasResourceProperties('AWS::ApiGateway::Method', {
+        HttpMethod: 'ANY',
+        Integration: {
+          ResponseTransferMode: expectedMode,
+        },
+      });
+    });
+  });
+
+  test.each([
+    apigw.IntegrationType.AWS_PROXY,
+    apigw.IntegrationType.HTTP_PROXY,
+  ])('allows responseTransferMode STREAM with supported integration type %s', (integrationType) => {
+    expect(() => new apigw.Integration({
+      type: integrationType,
+      integrationHttpMethod: 'ANY',
+      options: {
+        responseTransferMode: apigw.ResponseTransferMode.STREAM,
+      },
+    })).not.toThrow();
+  });
+
+  test.each([
+    apigw.IntegrationType.AWS,
+    apigw.IntegrationType.HTTP,
+    apigw.IntegrationType.MOCK,
+  ])('throws when responseTransferMode STREAM is used with unsupported integration type %s', (integrationType) => {
+    expect(() => new apigw.Integration({
+      type: integrationType,
+      integrationHttpMethod: 'ANY',
+      options: {
+        responseTransferMode: apigw.ResponseTransferMode.STREAM,
+      },
+    })).toThrow(/ResponseTransferMode STREAM is only supported for AWS_PROXY and HTTP_PROXY integration types/);
   });
 });

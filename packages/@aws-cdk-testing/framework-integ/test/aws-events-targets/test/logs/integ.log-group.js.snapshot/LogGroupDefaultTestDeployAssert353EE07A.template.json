@@ -1,6 +1,6 @@
 {
  "Resources": {
-  "AwsApiCallEventBridgeputEvents491d3c41b7d274b2b26e0818cead6935": {
+  "AwsApiCallEventBridgeputEventsf13be98170521239036de88aaa211257": {
    "Type": "Custom::DeployAssert@SdkCallEventBridgeputEvents",
    "Properties": {
     "ServiceToken": {
@@ -12,10 +12,10 @@
     "service": "EventBridge",
     "api": "putEvents",
     "parameters": {
-     "Entries": "[{\"Detail\":\"{\\\"date\\\":\\\"abc1713893576449\\\"}\",\"DetailType\":\"cdk-integ-custom-rule\",\"Source\":\"cdk-integ\"}]"
+     "Entries": "[{\"Detail\":\"{\\\"date\\\":\\\"abc1780567338616\\\"}\",\"DetailType\":\"cdk-integ-custom-rule\",\"Source\":\"cdk-integ\"}]"
     },
     "flattenResponse": "false",
-    "salt": "1713893576460"
+    "salt": "1780567338632"
    },
    "UpdateReplacePolicy": "Delete",
    "DeletionPolicy": "Delete"
@@ -72,15 +72,6 @@
          "Resource": [
           "*"
          ]
-        },
-        {
-         "Action": [
-          "logs:DescribeResourcePolicies"
-         ],
-         "Effect": "Allow",
-         "Resource": [
-          "*"
-         ]
         }
        ]
       }
@@ -91,12 +82,12 @@
   "SingletonFunction1488541a7b23466481b69b4408076b81HandlerCD40AE9F": {
    "Type": "AWS::Lambda::Function",
    "Properties": {
-    "Runtime": "nodejs18.x",
+    "Runtime": "nodejs24.x",
     "Code": {
      "S3Bucket": {
       "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
      },
-     "S3Key": "cfdb46b4f2c6702b4a1cc8e23ca426e8de43d13567e73a8453d01c1176393814.zip"
+     "S3Key": "6611813c56ee5ec64f812f46caf03748d8b30fea6e344cc7ac25035891a6dfe8.zip"
     },
     "Timeout": 120,
     "Handler": "index.handler",
@@ -105,10 +96,14 @@
       "SingletonFunction1488541a7b23466481b69b4408076b81Role37ABCE73",
       "Arn"
      ]
+    },
+    "LoggingConfig": {
+     "LogFormat": "JSON",
+     "ApplicationLogLevel": "FATAL"
     }
    }
   },
-  "AwsApiCallCloudWatchLogsfilterLogEvents502d3307ab2120ba266bfc467733050a": {
+  "AwsApiCallCloudWatchLogsfilterLogEvents91f5de6614fd9debf8d6482100778f79": {
    "Type": "Custom::DeployAssert@SdkCallCloudWatchLogsfilterLogEvents",
    "Properties": {
     "ServiceToken": {
@@ -119,7 +114,7 @@
     },
     "service": "CloudWatchLogs",
     "api": "filterLogEvents",
-    "expected": "{\"$StringLike\":\"abc1713893576449\"}",
+    "expected": "{\"$StringLike\":\"abc1780567338616\"}",
     "actualPath": "events.0.message",
     "parameters": {
      "logGroupName": {
@@ -134,53 +129,27 @@
        ]
       ]
      },
-     "startTime": "1713893576449",
+     "startTime": "1780567338616",
      "limit": "1"
     },
     "flattenResponse": "true",
     "outputPaths": [
      "events.0.message"
     ],
-    "salt": "1713893576461"
+    "salt": "1780567338633"
    },
    "DependsOn": [
-    "AwsApiCallEventBridgeputEvents491d3c41b7d274b2b26e0818cead6935"
+    "AwsApiCallEventBridgeputEventsf13be98170521239036de88aaa211257"
    ],
-   "UpdateReplacePolicy": "Delete",
-   "DeletionPolicy": "Delete"
-  },
-  "AwsApiCallCloudWatchLogsdescribeResourcePolicies": {
-   "Type": "Custom::DeployAssert@SdkCallCloudWatchLogsdescribeResourcePo",
-   "Properties": {
-    "ServiceToken": {
-     "Fn::GetAtt": [
-      "SingletonFunction1488541a7b23466481b69b4408076b81HandlerCD40AE9F",
-      "Arn"
-     ]
-    },
-    "service": "CloudWatchLogs",
-    "api": "describeResourcePolicies",
-    "expected": "{\"$ObjectLike\":{\"resourcePolicies\":{\"$ArrayWith\":[{\"$ObjectLike\":{\"policyName\":\"loggroupeventsEventsLogGroupPolicyloggroupeventsCustomRule99E1EEF62FFABD78\",\"policyDocument\":{\"$SerializedJson\":{\"$ObjectLike\":{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"Service\":\"events.amazonaws.com\"},\"Action\":[\"logs:PutLogEvents\",\"logs:CreateLogStream\"],\"Resource\":{\"$StringLike\":\"^arn:aws:logs:.*:.*:log-group:log-group-events-loggroup.*$\"}}]}}}}},{\"$ObjectLike\":{\"policyName\":\"loggroupeventsEventsLogGroupPolicyloggroupeventsTimer37DF74C17EF314A8E\",\"policyDocument\":{\"$SerializedJson\":{\"$ObjectLike\":{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"Service\":\"events.amazonaws.com\"},\"Action\":[\"logs:PutLogEvents\",\"logs:CreateLogStream\"],\"Resource\":{\"$StringLike\":\"^arn:aws:logs:.*:.*:log-group:MyLogGroupNameToBeImported:[*]$\"}}]}}}}},{\"$ObjectLike\":{\"policyName\":\"loggroupeventsEventsLogGroupPolicyloggroupeventsTimerC63340B025F606BE\",\"policyDocument\":{\"$SerializedJson\":{\"$ObjectLike\":{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"Service\":\"events.amazonaws.com\"},\"Action\":[\"logs:PutLogEvents\",\"logs:CreateLogStream\"],\"Resource\":{\"$StringLike\":\"^arn:aws:logs:.*:.*:log-group:log-group-events-loggroup.*$\"}}]}}}}}]}}}",
-    "flattenResponse": "false",
-    "salt": "1713893576462"
-   },
    "UpdateReplacePolicy": "Delete",
    "DeletionPolicy": "Delete"
   }
  },
  "Outputs": {
-  "AssertionResultsAwsApiCallCloudWatchLogsfilterLogEvents502d3307ab2120ba266bfc467733050a": {
+  "AssertionResultsAwsApiCallCloudWatchLogsfilterLogEvents91f5de6614fd9debf8d6482100778f79": {
    "Value": {
     "Fn::GetAtt": [
-     "AwsApiCallCloudWatchLogsfilterLogEvents502d3307ab2120ba266bfc467733050a",
-     "assertion"
-    ]
-   }
-  },
-  "AssertionResultsAwsApiCallCloudWatchLogsdescribeResourcePolicies": {
-   "Value": {
-    "Fn::GetAtt": [
-     "AwsApiCallCloudWatchLogsdescribeResourcePolicies",
+     "AwsApiCallCloudWatchLogsfilterLogEvents91f5de6614fd9debf8d6482100778f79",
      "assertion"
     ]
    }

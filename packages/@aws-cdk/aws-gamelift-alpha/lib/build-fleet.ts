@@ -1,10 +1,14 @@
+import { CfnFleet } from 'aws-cdk-lib/aws-gamelift';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as cdk from 'aws-cdk-lib/core';
-import { Construct } from 'constructs';
-import { IBuild } from './build';
-import { FleetBase, FleetProps, IFleet } from './fleet-base';
-import { CfnFleet } from 'aws-cdk-lib/aws-gamelift';
-import { Port, IPeer, IngressRule } from './ingress-rule';
+import { memoizedGetter } from 'aws-cdk-lib/core/lib/helpers-internal';
+import { addConstructMetadata, MethodMetadata } from 'aws-cdk-lib/core/lib/metadata-resource';
+import { propertyInjectable } from 'aws-cdk-lib/core/lib/prop-injectable';
+import type { Construct } from 'constructs';
+import type { IBuild } from './build';
+import type { FleetProps, IFleet } from './fleet-base';
+import { FleetBase } from './fleet-base';
+import type { Port, IPeer, IngressRule } from './ingress-rule';
 
 /**
  * Represents a GameLift Fleet used to run a custom game build.
@@ -43,7 +47,10 @@ export interface BuildFleetProps extends FleetProps {
  *
  * @resource AWS::GameLift::Fleet
  */
+@propertyInjectable
 export class BuildFleet extends FleetBase implements IBuildFleet {
+  /** Uniquely identifies this class. */
+  public static readonly PROPERTY_INJECTION_ID: string = '@aws-cdk.aws-gamelift-alpha.BuildFleet';
 
   /**
    * Import an existing fleet from its identifier.
@@ -58,16 +65,6 @@ export class BuildFleet extends FleetBase implements IBuildFleet {
   static fromBuildFleetArn(scope: Construct, id: string, buildFleetArn: string): IBuildFleet {
     return this.fromFleetAttributes(scope, id, { fleetArn: buildFleetArn });
   }
-
-  /**
-   * The Identifier of the fleet.
-   */
-  public readonly fleetId: string;
-
-  /**
-   * The ARN of the fleet.
-   */
-  public readonly fleetArn: string;
 
   /**
    * The build content of the fleet
@@ -85,11 +82,14 @@ export class BuildFleet extends FleetBase implements IBuildFleet {
   public readonly grantPrincipal: iam.IPrincipal;
 
   private readonly ingressRules: IngressRule[] = [];
+  private resource: CfnFleet;
 
   constructor(scope: Construct, id: string, props: BuildFleetProps) {
     super(scope, id, {
       physicalName: props.fleetName,
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     if (!cdk.Token.isUnresolved(props.fleetName)) {
       if (props.fleetName.length > 1024) {
@@ -115,9 +115,19 @@ export class BuildFleet extends FleetBase implements IBuildFleet {
       this.warnVpcPeeringAuthorizations(this);
     }
 
+    // Add home region location with capacity settings
+    this.addInternalLocation({
+      region: cdk.Stack.of(this).region,
+      capacity: {
+        desiredCapacity: props.desiredCapacity,
+        minSize: props.minSize ?? 0,
+        maxSize: props.maxSize ?? 1,
+      },
+    });
+
     // Add all locations
-    if (props.locations && props.locations?.length > 100) {
-      throw new Error(`No more than 100 locations are allowed per fleet, given ${props.locations.length}`);
+    if (props.locations && props.locations?.length > 99) {
+      throw new Error(`No more than 99 remote locations are allowed per fleet, given ${props.locations.length}`);
     }
     (props.locations || []).forEach(this.addInternalLocation.bind(this));
 
@@ -135,20 +145,17 @@ export class BuildFleet extends FleetBase implements IBuildFleet {
     });
     this.grantPrincipal = this.role;
 
-    const resource = new CfnFleet(this, 'Resource', {
+    this.resource = new CfnFleet(this, 'Resource', {
       buildId: this.content.buildId,
       certificateConfiguration: {
         certificateType: props.useCertificate ? 'GENERATED': 'DISABLED',
       },
       description: props.description,
-      desiredEc2Instances: props.desiredCapacity,
       ec2InboundPermissions: cdk.Lazy.any({ produce: () => this.parseIngressRules() }),
       ec2InstanceType: props.instanceType.toString(),
       fleetType: props.useSpot ? 'SPOT' : 'ON_DEMAND',
       instanceRoleArn: this.role.roleArn,
       locations: cdk.Lazy.any({ produce: () => this.parseLocations() }),
-      maxSize: props.maxSize ? props.maxSize : 1,
-      minSize: props.minSize ? props.minSize : 0,
       name: this.physicalName,
       newGameSessionProtectionPolicy: props.protectNewGameSession ? 'FullProtection' : 'NoProtection',
       peerVpcAwsAccountId: props.peerVpc && props.peerVpc.env.account,
@@ -156,9 +163,16 @@ export class BuildFleet extends FleetBase implements IBuildFleet {
       resourceCreationLimitPolicy: this.parseResourceCreationLimitPolicy(props),
       runtimeConfiguration: this.parseRuntimeConfiguration(props),
     });
+  }
 
-    this.fleetId = this.getResourceNameAttribute(resource.ref);
-    this.fleetArn = cdk.Stack.of(scope).formatArn({
+  @memoizedGetter
+  public get fleetId(): string {
+    return this.getResourceNameAttribute(this.resource.ref);
+  }
+
+  @memoizedGetter
+  public get fleetArn(): string {
+    return cdk.Stack.of(this).formatArn({
       service: 'gamelift',
       resource: 'fleet',
       resourceName: this.fleetId,
@@ -172,6 +186,7 @@ export class BuildFleet extends FleetBase implements IBuildFleet {
    * @param source A range of allowed IP addresses
    * @param port The port range used for ingress traffic
    */
+  @MethodMetadata()
   public addIngressRule(source: IPeer, port: Port) {
     this.addInternalIngressRule({
       source: source,

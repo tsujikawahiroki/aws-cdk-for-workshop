@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { Template } from '../../assertions';
+import { Match, Template } from '../../assertions';
 import { Vpc, SecurityGroup, SubnetType } from '../../aws-ec2';
 import { DatabaseSecret, DatabaseClusterEngine, AuroraMysqlEngineVersion, ServerlessCluster, DatabaseCluster, ClusterInstance, AuroraPostgresEngineVersion } from '../../aws-rds';
 import * as cdk from '../../core';
@@ -33,7 +33,7 @@ describe('Rds Data Source configuration', () => {
       username: 'clusteradmin',
     });
     serverlessCluster = new ServerlessCluster(stack, 'AuroraCluster', {
-      engine: DatabaseClusterEngine.auroraMysql({ version: AuroraMysqlEngineVersion.VER_2_07_1 }),
+      engine: DatabaseClusterEngine.auroraMysql({ version: AuroraMysqlEngineVersion.VER_3_07_1 }),
       credentials: { username: 'clusteradmin' },
       clusterIdentifier: 'db-endpoint-test',
       vpc,
@@ -227,6 +227,23 @@ describe('Rds Data Source configuration', () => {
       Type: 'RELATIONAL_DATABASE',
       Name: 'custom',
       Description: 'custom description',
+    });
+  });
+
+  test.each([
+    [appsync.DataSourceMetricsConfig.ENABLED, 'ENABLED'],
+    [appsync.DataSourceMetricsConfig.DISABLED, 'DISABLED'],
+    [undefined, Match.absent()],
+  ])('appsync configures metrics config correctly to set %s', (metricsConfig, expected) => {
+    // WHEN
+    api.addRdsDataSource('ds', serverlessCluster, secret, undefined, {
+      metricsConfig: metricsConfig,
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::AppSync::DataSource', {
+      Type: 'RELATIONAL_DATABASE',
+      MetricsConfig: expected,
     });
   });
 
@@ -494,7 +511,7 @@ describe('adding rds data source from imported api', () => {
       username: 'clusteradmin',
     });
     serverlessCluster = new ServerlessCluster(stack, 'AuroraCluster', {
-      engine: DatabaseClusterEngine.auroraMysql({ version: AuroraMysqlEngineVersion.VER_2_07_1 }),
+      engine: DatabaseClusterEngine.auroraMysql({ version: AuroraMysqlEngineVersion.VER_3_07_1 }),
       credentials: { username: 'clusteradmin' },
       clusterIdentifier: 'db-endpoint-test',
       vpc,

@@ -19,7 +19,7 @@ export interface IsCompleteResponse {
    * Additional/changes to resource attributes.
    */
   readonly Data?: { [name: string]: any };
-};
+}
 
 export abstract class ResourceHandler {
   protected readonly requestId: string;
@@ -63,7 +63,6 @@ export abstract class ResourceHandler {
   }
 
   protected log(x: any) {
-    // eslint-disable-next-line no-console
     console.log(JSON.stringify(x, undefined, 2));
   }
 

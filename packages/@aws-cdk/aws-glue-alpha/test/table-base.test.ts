@@ -259,7 +259,7 @@ describe('parition indexes', () => {
       }],
       partitionIndexes: indexes,
       dataFormat: glue.DataFormat.JSON,
-    })).toThrowError('Maximum number of partition indexes allowed is 3');
+    })).toThrow('Maximum number of partition indexes allowed is 3');
   });
 
   test('no indexName', () => {
@@ -302,7 +302,7 @@ describe('parition indexes', () => {
       expect(() => table.addPartitionIndex({
         indexName: 'my-part',
         keyNames: ['part'],
-      })).toThrowError(/The table must have partition keys to create a partition index/);
+      })).toThrow(/The table must have partition keys to create a partition index/);
     });
 
     test('fails if partition index does not match partition keys', () => {
@@ -325,7 +325,7 @@ describe('parition indexes', () => {
       expect(() => table.addPartitionIndex({
         indexName: 'my-part',
         keyNames: ['not-part'],
-      })).toThrowError(/All index keys must also be partition keys/);
+      })).toThrow(/All index keys must also be partition keys/);
     });
 
     test('fails with index name < 1 character', () => {
@@ -348,7 +348,7 @@ describe('parition indexes', () => {
       expect(() => table.addPartitionIndex({
         indexName: '',
         keyNames: ['part'],
-      })).toThrowError(/Index name must be between 1 and 255 characters, but got 0/);
+      })).toThrow(/Index name must be between 1 and 255 characters, but got 0/);
     });
   });
 });
@@ -359,7 +359,7 @@ describe('validate', () => {
       createTable({
         columns: [],
       });
-    }).toThrowError('you must specify at least one column for the table');
+    }).toThrow('you must specify at least one column for the table');
   });
 
   test('unique column names', () => {
@@ -373,7 +373,7 @@ describe('validate', () => {
           type: glue.Schema.STRING,
         }],
       });
-    }).toThrowError("column names and partition keys must be unique, but 'col1' is duplicated");
+    }).toThrow("column names and partition keys must be unique, but 'col1' is duplicated");
   });
 
   test('unique partition keys', () => {
@@ -391,7 +391,7 @@ describe('validate', () => {
           type: glue.Schema.STRING,
         }],
       });
-    }).toThrowError("column names and partition keys must be unique, but 'p1' is duplicated");
+    }).toThrow("column names and partition keys must be unique, but 'p1' is duplicated");
   });
 
   test('column names and partition keys are all unique', () => {
@@ -406,7 +406,7 @@ describe('validate', () => {
           type: glue.Schema.STRING,
         }],
       });
-    }).toThrowError("column names and partition keys must be unique, but 'col1' is duplicated");
+    }).toThrow("column names and partition keys must be unique, but 'col1' is duplicated");
   });
 
   test('unique storage descriptor parameters', () => {
@@ -427,7 +427,7 @@ describe('validate', () => {
         glue.StorageParameter.custom('foo', 'bar'),
         glue.StorageParameter.custom(glue.StorageParameters.COMPRESSION_TYPE, 'true'),
       ],
-    })).toThrowError('Duplicate storage parameter key: compression_type');
+    })).toThrow('Duplicate storage parameter key: compression_type');
   });
 });
 
@@ -449,7 +449,7 @@ describe('Table.fromTableArn', () => {
     const stack = new cdk.Stack();
 
     // THEN
-    expect(() => glue.ExternalTable.fromTableArn(stack, 'boom', '')).toThrowError(/ARNs must start with \"arn:\" and have at least 6 components: /);
+    expect(() => glue.ExternalTable.fromTableArn(stack, 'boom', '')).toThrow(/ARNs must start with \"arn:\" and have at least 6 components: /);
   });
 });
 
@@ -581,6 +581,266 @@ test('can specify a description', () => {
       Name: 'my_table',
       Description: 'This is a test table.',
     },
+  });
+});
+
+describe('Partition Projection', () => {
+  test('creates table with INTEGER partition projection', () => {
+    const app = new cdk.App();
+    const stack = new cdk.Stack(app, 'Stack');
+    const database = new glue.Database(stack, 'Database');
+    new glue.S3Table(stack, 'Table', {
+      database,
+      columns: [{
+        name: 'col1',
+        type: glue.Schema.STRING,
+      }],
+      partitionKeys: [{
+        name: 'year',
+        type: glue.Schema.INTEGER,
+      }],
+      dataFormat: glue.DataFormat.JSON,
+      partitionProjection: {
+        year: glue.PartitionProjectionConfiguration.integer({
+          min: 2020,
+          max: 2023,
+          interval: 1,
+          digits: 4,
+        }),
+      },
+    });
+
+    Template.fromStack(stack).hasResourceProperties('AWS::Glue::Table', {
+      TableInput: {
+        Parameters: {
+          'projection.enabled': 'true',
+          'projection.year.type': 'integer',
+          'projection.year.range': '2020,2023',
+          'projection.year.interval': '1',
+          'projection.year.digits': '4',
+        },
+      },
+    });
+  });
+
+  test('creates table with DATE partition projection', () => {
+    const app = new cdk.App();
+    const stack = new cdk.Stack(app, 'Stack');
+    const database = new glue.Database(stack, 'Database');
+    new glue.S3Table(stack, 'Table', {
+      database,
+      columns: [{
+        name: 'data',
+        type: glue.Schema.STRING,
+      }],
+      partitionKeys: [{
+        name: 'date',
+        type: glue.Schema.STRING,
+      }],
+      dataFormat: glue.DataFormat.JSON,
+      partitionProjection: {
+        date: glue.PartitionProjectionConfiguration.date({
+          min: '2020-01-01',
+          max: '2023-12-31',
+          format: 'yyyy-MM-dd',
+          interval: 1,
+          intervalUnit: glue.DateIntervalUnit.DAYS,
+        }),
+      },
+    });
+
+    Template.fromStack(stack).hasResourceProperties('AWS::Glue::Table', {
+      TableInput: {
+        Parameters: {
+          'projection.enabled': 'true',
+          'projection.date.type': 'date',
+          'projection.date.range': '2020-01-01,2023-12-31',
+          'projection.date.format': 'yyyy-MM-dd',
+          'projection.date.interval': '1',
+          'projection.date.interval.unit': 'DAYS',
+        },
+      },
+    });
+  });
+
+  test('creates table with ENUM partition projection', () => {
+    const app = new cdk.App();
+    const stack = new cdk.Stack(app, 'Stack');
+    const database = new glue.Database(stack, 'Database');
+    new glue.S3Table(stack, 'Table', {
+      database,
+      columns: [{
+        name: 'data',
+        type: glue.Schema.STRING,
+      }],
+      partitionKeys: [{
+        name: 'region',
+        type: glue.Schema.STRING,
+      }],
+      dataFormat: glue.DataFormat.JSON,
+      partitionProjection: {
+        region: glue.PartitionProjectionConfiguration.enum({
+          values: ['us-east-1', 'us-west-2', 'eu-west-1'],
+        }),
+      },
+    });
+
+    Template.fromStack(stack).hasResourceProperties('AWS::Glue::Table', {
+      TableInput: {
+        Parameters: {
+          'projection.enabled': 'true',
+          'projection.region.type': 'enum',
+          'projection.region.values': 'us-east-1,us-west-2,eu-west-1',
+        },
+      },
+    });
+  });
+
+  test('creates table with INJECTED partition projection', () => {
+    const app = new cdk.App();
+    const stack = new cdk.Stack(app, 'Stack');
+    const database = new glue.Database(stack, 'Database');
+    new glue.S3Table(stack, 'Table', {
+      database,
+      columns: [{
+        name: 'data',
+        type: glue.Schema.STRING,
+      }],
+      partitionKeys: [{
+        name: 'custom',
+        type: glue.Schema.STRING,
+      }],
+      dataFormat: glue.DataFormat.JSON,
+      partitionProjection: {
+        custom: glue.PartitionProjectionConfiguration.injected(),
+      },
+    });
+
+    Template.fromStack(stack).hasResourceProperties('AWS::Glue::Table', {
+      TableInput: {
+        Parameters: {
+          'projection.enabled': 'true',
+          'projection.custom.type': 'injected',
+        },
+      },
+    });
+  });
+
+  test('creates table with multiple partition projections', () => {
+    const app = new cdk.App();
+    const stack = new cdk.Stack(app, 'Stack');
+    const database = new glue.Database(stack, 'Database');
+    new glue.S3Table(stack, 'Table', {
+      database,
+      columns: [{
+        name: 'data',
+        type: glue.Schema.STRING,
+      }],
+      partitionKeys: [
+        {
+          name: 'year',
+          type: glue.Schema.INTEGER,
+        },
+        {
+          name: 'month',
+          type: glue.Schema.INTEGER,
+        },
+        {
+          name: 'region',
+          type: glue.Schema.STRING,
+        },
+      ],
+      dataFormat: glue.DataFormat.JSON,
+      partitionProjection: {
+        year: glue.PartitionProjectionConfiguration.integer({
+          min: 2020,
+          max: 2023,
+        }),
+        month: glue.PartitionProjectionConfiguration.integer({
+          min: 1,
+          max: 12,
+          digits: 2,
+        }),
+        region: glue.PartitionProjectionConfiguration.enum({
+          values: ['us-east-1', 'us-west-2'],
+        }),
+      },
+    });
+
+    Template.fromStack(stack).hasResourceProperties('AWS::Glue::Table', {
+      TableInput: {
+        Parameters: {
+          'projection.enabled': 'true',
+          'projection.year.type': 'integer',
+          'projection.year.range': '2020,2023',
+          'projection.month.type': 'integer',
+          'projection.month.range': '1,12',
+          'projection.month.digits': '2',
+          'projection.region.type': 'enum',
+          'projection.region.values': 'us-east-1,us-west-2',
+        },
+      },
+    });
+  });
+
+  test('throws when partition projection conflicts with manual parameters', () => {
+    const app = new cdk.App();
+    const stack = new cdk.Stack(app, 'Stack');
+    const database = new glue.Database(stack, 'Database');
+
+    expect(() => {
+      new glue.S3Table(stack, 'Table', {
+        database,
+        columns: [{
+          name: 'col1',
+          type: glue.Schema.STRING,
+        }],
+        partitionKeys: [{
+          name: 'year',
+          type: glue.Schema.INTEGER,
+        }],
+        dataFormat: glue.DataFormat.JSON,
+        parameters: {
+          'projection.year.type': 'integer',
+        },
+        partitionProjection: {
+          year: glue.PartitionProjectionConfiguration.integer({
+            min: 2020,
+            max: 2023,
+          }),
+        },
+      });
+    }).toThrow('Partition projection parameters conflict with manually specified parameters: projection.year.type. Use the partitionProjection property instead of manually specifying projection parameters.');
+  });
+
+  test('throws when projection.enabled conflicts with partitionProjection', () => {
+    const app = new cdk.App();
+    const stack = new cdk.Stack(app, 'Stack');
+    const database = new glue.Database(stack, 'Database');
+
+    expect(() => {
+      new glue.S3Table(stack, 'Table', {
+        database,
+        columns: [{
+          name: 'col1',
+          type: glue.Schema.STRING,
+        }],
+        partitionKeys: [{
+          name: 'year',
+          type: glue.Schema.INTEGER,
+        }],
+        dataFormat: glue.DataFormat.JSON,
+        parameters: {
+          'projection.enabled': 'true',
+        },
+        partitionProjection: {
+          year: glue.PartitionProjectionConfiguration.integer({
+            min: 2020,
+            max: 2023,
+          }),
+        },
+      });
+    }).toThrow('Parameter "projection.enabled" conflicts with partitionProjection configuration. Use the partitionProjection property instead of manually specifying projection.enabled.');
   });
 });
 

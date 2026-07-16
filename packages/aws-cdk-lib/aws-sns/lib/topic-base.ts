@@ -1,16 +1,22 @@
-import * as constructs from 'constructs';
-import { Construct } from 'constructs';
+import type { Construct } from 'constructs';
 import { TopicPolicy } from './policy';
-import { ITopicSubscription } from './subscriber';
+import { TopicGrants } from './sns-grants.generated';
+import type { ITopicRef, TopicReference } from './sns.generated';
+import type { ITopicSubscription } from './subscriber';
 import { Subscription } from './subscription';
-import * as notifications from '../../aws-codestarnotifications';
+import type * as notifications from '../../aws-codestarnotifications';
 import * as iam from '../../aws-iam';
-import { IResource, Resource, ResourceProps, Token } from '../../core';
+import type { GrantOnKeyResult, IEncryptedResource, IGrantable } from '../../aws-iam';
+import type { IKey } from '../../aws-kms';
+import type { IResource, ResourceProps } from '../../core';
+import { Resource, Token } from '../../core';
+import { ValidationError } from '../../core/lib/errors';
+import { lit } from '../../core/lib/private/literal-string';
 
 /**
  * Represents an SNS topic
  */
-export interface ITopic extends IResource, notifications.INotificationRuleTarget {
+export interface ITopic extends IResource, notifications.INotificationRuleTarget, ITopicRef {
   /**
    * The ARN of the topic
    *
@@ -24,6 +30,17 @@ export interface ITopic extends IResource, notifications.INotificationRuleTarget
    * @attribute
    */
   readonly topicName: string;
+
+  /**
+   * A KMS Key, either managed by this CDK app, or imported.
+   *
+   * This property applies only to server-side encryption.
+   *
+   * @see https://docs.aws.amazon.com/sns/latest/dg/sns-server-side-encryption.html
+   *
+   * @default None
+   */
+  readonly masterKey?: IKey;
 
   /**
    * Enables content-based deduplication for FIFO topics.
@@ -57,19 +74,31 @@ export interface ITopic extends IResource, notifications.INotificationRuleTarget
    * Grant topic publishing permissions to the given identity
    */
   grantPublish(identity: iam.IGrantable): iam.Grant;
+
+  /**
+   * Grant topic subscribing permissions to the given identity
+   */
+  grantSubscribe(identity: iam.IGrantable): iam.Grant;
 }
 
 /**
  * Either a new or imported Topic
  */
-export abstract class TopicBase extends Resource implements ITopic {
+export abstract class TopicBase extends Resource implements ITopic, IEncryptedResource {
   public abstract readonly topicArn: string;
 
   public abstract readonly topicName: string;
 
+  public abstract readonly masterKey?: IKey;
+
   public abstract readonly fifo: boolean;
 
   public abstract readonly contentBasedDeduplication: boolean;
+
+  /**
+   * Collection of grant methods for a Topic
+   */
+  public readonly grants: TopicGrants = TopicGrants.fromTopic(this);
 
   /**
    * Controls automatic creation of policy objects.
@@ -91,6 +120,12 @@ export abstract class TopicBase extends Resource implements ITopic {
     this.node.addValidation({ validate: () => this.policy?.document.validateForResourcePolicy() ?? [] });
   }
 
+  public get topicRef(): TopicReference {
+    return {
+      topicArn: this.topicArn,
+    };
+  }
+
   /**
    * Subscribe some endpoint to this topic
    */
@@ -106,7 +141,7 @@ export abstract class TopicBase extends Resource implements ITopic {
     // We use the subscriber's id as the construct id. There's no meaning
     // to subscribing the same subscriber twice on the same topic.
     if (scope.node.tryFindChild(id)) {
-      throw new Error(`A subscription with id "${id}" already exists under the scope ${scope.node.path}`);
+      throw new ValidationError(lit`SubscriptionAlreadyExistsUnder`, `A subscription with id "${id}" already exists under the scope ${scope.node.path}`, scope);
     }
 
     const subscription = new Subscription(scope, id, {
@@ -127,23 +162,40 @@ export abstract class TopicBase extends Resource implements ITopic {
    * Adds a statement to the IAM resource policy associated with this topic.
    *
    * If this topic was created in this stack (`new Topic`), a topic policy
-   * will be automatically created upon the first call to `addToResourcePolicy`. If
-   * the topic is imported (`Topic.import`), then this is a no-op.
+   * will be automatically created upon the first call to `addToResourcePolicy`.
+   * However, if `enforceSSL` is set to `true`, the policy has already been created
+   * before the first call to this method.
+   *
+   * If the topic is imported (`Topic.import`), then this is a no-op.
    */
   public addToResourcePolicy(statement: iam.PolicyStatement): iam.AddToResourcePolicyResult {
-    if (!this.policy && this.autoCreatePolicy) {
-      this.policy = new TopicPolicy(this, 'Policy', { topics: [this] });
-    }
+    this.createTopicPolicy();
 
     if (this.policy) {
       this.policy.document.addStatements(statement);
-
-      if (this.enforceSSL) {
-        this.policy.document.addStatements(this.createSSLPolicyDocument());
-      }
       return { statementAdded: true, policyDependable: this.policy };
     }
     return { statementAdded: false };
+  }
+
+  /**
+   * Adds a SSL policy to the topic resource policy.
+   */
+  protected addSSLPolicy(): void {
+    this.createTopicPolicy();
+
+    if (this.policy) {
+      this.policy.document.addStatements(this.createSSLPolicyDocument());
+    }
+  }
+
+  /**
+   * Creates a topic policy for this topic.
+   */
+  protected createTopicPolicy(): void {
+    if (!this.policy && this.autoCreatePolicy) {
+      this.policy = new TopicPolicy(this, 'Policy', { topics: [this] });
+    }
   }
 
   /**
@@ -152,7 +204,7 @@ export abstract class TopicBase extends Resource implements ITopic {
    * For more information, see https://docs.aws.amazon.com/sns/latest/dg/sns-security-best-practices.html#enforce-encryption-data-in-transit.
    */
   protected createSSLPolicyDocument(): iam.PolicyStatement {
-    return new iam.PolicyStatement ({
+    return new iam.PolicyStatement({
       sid: 'AllowPublishThroughSSLOnly',
       actions: ['sns:Publish'],
       effect: iam.Effect.DENY,
@@ -164,23 +216,41 @@ export abstract class TopicBase extends Resource implements ITopic {
     });
   }
 
+  public grantOnKey(grantee: IGrantable, ...actions: string[]): GrantOnKeyResult {
+    const grant = this.masterKey
+      ? this.masterKey.grant(grantee, ...actions)
+      : undefined;
+
+    return { grant };
+  }
+
   /**
    * Grant topic publishing permissions to the given identity
+   *
+   * The use of this method is discouraged. Please use `grants.publish()` instead.
+   *
+   * [disable-awslint:no-grants]
    */
   public grantPublish(grantee: iam.IGrantable) {
-    return iam.Grant.addToPrincipalOrResource({
-      grantee,
-      actions: ['sns:Publish'],
-      resourceArns: [this.topicArn],
-      resource: this,
-    });
+    return this.grants.publish(grantee);
+  }
+
+  /**
+   * Grant topic subscribing permissions to the given identity
+   *
+   * The use of this method is discouraged. Please use `grants.subscribe()` instead.
+   *
+   * [disable-awslint:no-grants]
+   */
+  public grantSubscribe(grantee: iam.IGrantable) {
+    return this.grants.subscribe(grantee);
   }
 
   /**
    * Represents a notification target
    * That allows SNS topic to associate with this rule target.
    */
-  public bindAsNotificationRuleTarget(_scope: constructs.Construct): notifications.NotificationRuleTargetConfig {
+  public bindAsNotificationRuleTarget(_scope: Construct): notifications.NotificationRuleTargetConfig {
     // SNS topic need to grant codestar-notifications service to publish
     // @see https://docs.aws.amazon.com/dtconsole/latest/userguide/set-up-sns.html
     this.grantPublish(new iam.ServicePrincipal('codestar-notifications.amazonaws.com'));
@@ -206,5 +276,4 @@ export abstract class TopicBase extends Resource implements ITopic {
     }
     return `TokenSubscription:${nextSuffix}`;
   }
-
 }

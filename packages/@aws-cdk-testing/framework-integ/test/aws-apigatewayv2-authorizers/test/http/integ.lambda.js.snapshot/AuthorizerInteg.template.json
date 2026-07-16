@@ -38,7 +38,7 @@
      "S3Bucket": {
       "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
      },
-     "S3Key": "d7d3785243d748927f2a8d6edcecf909f96191df27a815e305aaeba98bcd2c64.zip"
+     "S3Key": "9b3143f6d2fe3103f2f3162c221163ad6a5a0ba2219cc1e5af2e300325588714.zip"
     },
     "Handler": "index.handler",
     "Role": {
@@ -47,11 +47,28 @@
       "Arn"
      ]
     },
-    "Runtime": "nodejs18.x"
+    "Runtime": "nodejs20.x"
    },
    "DependsOn": [
     "authfunctionServiceRoleFCB72198"
    ]
+  },
+  "AuthRole900B840B": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRole",
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "apigateway.amazonaws.com"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   }
   },
   "MyHttpApi8AEAAC21": {
    "Type": "AWS::ApiGatewayV2::Api",
@@ -153,6 +170,12 @@
     "ApiId": {
      "Ref": "MyHttpApi8AEAAC21"
     },
+    "AuthorizerCredentialsArn": {
+     "Fn::GetAtt": [
+      "AuthRole900B840B",
+      "Arn"
+     ]
+    },
     "AuthorizerPayloadFormatVersion": "2.0",
     "AuthorizerResultTtlInSeconds": 300,
     "AuthorizerType": "REQUEST",
@@ -184,46 +207,6 @@
      "$request.header.X-API-Key"
     ],
     "Name": "my-simple-authorizer"
-   }
-  },
-  "MyHttpApiAuthorizerIntegMyHttpApiLambdaAuthorizerB89228D7Permission82260331": {
-   "Type": "AWS::Lambda::Permission",
-   "Properties": {
-    "Action": "lambda:InvokeFunction",
-    "FunctionName": {
-     "Fn::GetAtt": [
-      "authfunction96361832",
-      "Arn"
-     ]
-    },
-    "Principal": "apigateway.amazonaws.com",
-    "SourceArn": {
-     "Fn::Join": [
-      "",
-      [
-       "arn:",
-       {
-        "Ref": "AWS::Partition"
-       },
-       ":execute-api:",
-       {
-        "Ref": "AWS::Region"
-       },
-       ":",
-       {
-        "Ref": "AWS::AccountId"
-       },
-       ":",
-       {
-        "Ref": "MyHttpApi8AEAAC21"
-       },
-       "/authorizers/",
-       {
-        "Ref": "MyHttpApiLambdaAuthorizerB8A0E2A4"
-       }
-      ]
-     ]
-    }
    }
   },
   "MyHttpApiWithDefaultAuthorizerE08800A1": {
@@ -360,7 +343,7 @@
      "S3Bucket": {
       "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
      },
-     "S3Key": "54deaef2af5b9afbfc9cbcbb9261b1c0d4cce6560831d7ae1959f3da899011c8.zip"
+     "S3Key": "0793b3c94d0be9d628975dbbcd1dc523196de50a41fb1920880248ae3c24259b.zip"
     },
     "Handler": "index.handler",
     "Role": {
@@ -369,7 +352,7 @@
       "Arn"
      ]
     },
-    "Runtime": "nodejs18.x"
+    "Runtime": "nodejs20.x"
    },
    "DependsOn": [
     "lambdaServiceRole494E4CA6"
@@ -497,6 +480,14 @@
      ]
     ]
    }
+  },
+  "AuthorizerId": {
+   "Value": {
+    "Ref": "MyHttpApiLambdaAuthorizerB8A0E2A4"
+   }
+  },
+  "AuthorizationType": {
+   "Value": "CUSTOM"
   }
  },
  "Parameters": {

@@ -1,25 +1,48 @@
-import { Construct } from 'constructs';
-import { IClusterEngine } from './cluster-engine';
+import type { Construct } from 'constructs';
+import type { IClusterEngine } from './cluster-engine';
 import { DatabaseSecret } from './database-secret';
 import { Endpoint } from './endpoint';
-import { IParameterGroup } from './parameter-group';
+import type { IParameterGroup } from './parameter-group';
 import { DATA_API_ACTIONS } from './perms';
 import { applyDefaultRotationOptions, defaultDeletionProtection, renderCredentials } from './private/util';
-import { Credentials, RotationMultiUserOptions, RotationSingleUserOptions, SnapshotCredentials } from './props';
-import { CfnDBCluster, CfnDBClusterProps } from './rds.generated';
-import { ISubnetGroup, SubnetGroup } from './subnet-group';
+import type { Credentials, RotationMultiUserOptions, RotationSingleUserOptions, SnapshotCredentials } from './props';
+import type { CfnDBClusterProps } from './rds.generated';
+import { CfnDBCluster } from './rds.generated';
+import type { ISubnetGroup } from './subnet-group';
+import { SubnetGroup } from './subnet-group';
 import * as ec2 from '../../aws-ec2';
 import * as iam from '../../aws-iam';
-import * as kms from '../../aws-kms';
+import type * as kms from '../../aws-kms';
 import * as secretsmanager from '../../aws-secretsmanager';
-import { Resource, Duration, Token, Annotations, RemovalPolicy, IResource, Stack, Lazy, FeatureFlags, ArnFormat } from '../../core';
+import type {
+  Duration,
+  IResource,
+} from '../../core';
+import {
+  Annotations,
+  ArnFormat,
+  FeatureFlags,
+  Lazy,
+  RemovalPolicy,
+  Resource,
+  Stack,
+  Token,
+} from '../../core';
+import { ValidationError } from '../../core/lib/errors';
+import type { IBox } from '../../core/lib/helpers-internal';
+import { Box } from '../../core/lib/helpers-internal';
+import { addConstructMetadata, MethodMetadata } from '../../core/lib/metadata-resource';
+import { noBoxStackTraces } from '../../core/lib/no-box-stack-traces';
+import { lit } from '../../core/lib/private/literal-string';
+import { propertyInjectable } from '../../core/lib/prop-injectable';
 import * as cxapi from '../../cx-api';
+import type { aws_rds } from '../../interfaces';
 
 /**
-  * Interface representing a serverless database cluster.
-  *
+ * Interface representing a serverless database cluster.
+ *
  */
-export interface IServerlessCluster extends IResource, ec2.IConnectable, secretsmanager.ISecretAttachmentTarget {
+export interface IServerlessCluster extends IResource, ec2.IConnectable, secretsmanager.ISecretAttachmentTarget, aws_rds.IDBClusterRef {
   /**
    * Identifier of the cluster
    */
@@ -44,6 +67,8 @@ export interface IServerlessCluster extends IResource, ec2.IConnectable, secrets
 
   /**
    * Grant the given identity to access to the Data API.
+   *
+   * [disable-awslint:no-grants]
    *
    * @param grantee The principal to grant access to
    */
@@ -92,7 +117,7 @@ interface ServerlessClusterNewProps {
    * Whether to enable the Data API.
    *
    * @see https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/data-api.html
-    *
+   *
    * @default false
    */
   readonly enableDataApi?: boolean;
@@ -150,7 +175,7 @@ interface ServerlessClusterNewProps {
    * @default - a new subnet group is created if `vpc` was provided.
    *   If the `vpc` property was not provided, no subnet group will be associated with the DB cluster
    */
-  readonly subnetGroup?: ISubnetGroup;
+  readonly subnetGroup?: aws_rds.IDBSubnetGroupRef;
 
   /**
    * Whether to copy tags to the snapshot when a snapshot is created.
@@ -338,7 +363,7 @@ abstract class ServerlessClusterBase extends Resource implements IServerlessClus
   /**
    * The secret attached to this cluster
    */
-  public abstract readonly secret?: secretsmanager.ISecret
+  public abstract readonly secret?: secretsmanager.ISecret;
 
   protected abstract enableDataApi?: boolean;
 
@@ -355,13 +380,25 @@ abstract class ServerlessClusterBase extends Resource implements IServerlessClus
   }
 
   /**
+   * A reference to this serverless cluster
+   */
+  public get dbClusterRef(): aws_rds.DBClusterReference {
+    return {
+      dbClusterIdentifier: this.clusterIdentifier,
+      dbClusterArn: this.clusterArn,
+    };
+  }
+
+  /**
    * Grant the given identity to access to the Data API, including read access to the secret attached to the cluster if present
+   *
+   * [disable-awslint:no-grants]
    *
    * @param grantee The principal to grant access to
    */
   public grantDataApiAccess(grantee: iam.IGrantable): iam.Grant {
     if (this.enableDataApi === false) {
-      throw new Error('Cannot grant Data API access when the Data API is disabled');
+      throw new ValidationError(lit`CannotGrantDataAccessData`, 'Cannot grant Data API access when the Data API is disabled', this);
     }
 
     this.enableDataApi = true;
@@ -369,7 +406,6 @@ abstract class ServerlessClusterBase extends Resource implements IServerlessClus
       grantee,
       actions: DATA_API_ACTIONS,
       resourceArns: ['*'],
-      scope: this,
     });
     this.secret?.grantRead(grantee);
     return ret;
@@ -391,35 +427,45 @@ abstract class ServerlessClusterBase extends Resource implements IServerlessClus
  *
  * @resource AWS::RDS::DBCluster
  */
+@noBoxStackTraces
 abstract class ServerlessClusterNew extends ServerlessClusterBase {
   public readonly connections: ec2.Connections;
   protected readonly newCfnProps: CfnDBClusterProps;
   protected readonly securityGroups: ec2.ISecurityGroup[];
-  protected enableDataApi?: boolean;
+  private readonly _enableDataApi: IBox<boolean | undefined>;
+
+  protected get enableDataApi(): boolean | undefined {
+    return this._enableDataApi.get() as boolean | undefined;
+  }
+  protected set enableDataApi(value: boolean | undefined) {
+    this._enableDataApi.set(value);
+  }
 
   constructor(scope: Construct, id: string, props: ServerlessClusterNewProps) {
     super(scope, id);
 
+    this._enableDataApi = Box.fromValue<boolean | undefined>(undefined);
+
     if (props.vpc === undefined) {
       if (props.vpcSubnets !== undefined) {
-        throw new Error('A VPC is required to use vpcSubnets in ServerlessCluster. Please add a VPC or remove vpcSubnets');
+        throw new ValidationError(lit`RequiredVpcSubnetsServerlessCluster`, 'A VPC is required to use vpcSubnets in ServerlessCluster. Please add a VPC or remove vpcSubnets', this);
       }
       if (props.subnetGroup !== undefined) {
-        throw new Error('A VPC is required to use subnetGroup in ServerlessCluster. Please add a VPC or remove subnetGroup');
+        throw new ValidationError(lit`RequiredSubnetGroupServerlessCluster`, 'A VPC is required to use subnetGroup in ServerlessCluster. Please add a VPC or remove subnetGroup', this);
       }
       if (props.securityGroups !== undefined) {
-        throw new Error('A VPC is required to use securityGroups in ServerlessCluster. Please add a VPC or remove securityGroups');
+        throw new ValidationError(lit`RequiredSecurityGroupsServerlessCluster`, 'A VPC is required to use securityGroups in ServerlessCluster. Please add a VPC or remove securityGroups', this);
       }
     }
 
-    let subnetGroup: ISubnetGroup | undefined = props.subnetGroup;
+    let subnetGroup: ISubnetGroup | aws_rds.IDBSubnetGroupRef | undefined = props.subnetGroup;
     this.securityGroups = props.securityGroups ?? [];
     if (props.vpc !== undefined) {
       const { subnetIds } = props.vpc.selectSubnets(props.vpcSubnets);
 
       // Cannot test whether the subnets are in different AZs, but at least we can test the amount.
       if (subnetIds.length < 2) {
-        Annotations.of(this).addError(`Cluster requires at least 2 subnets, got ${subnetIds.length}`);
+        Annotations.of(this)._addTrackableError(lit`InsufficientSubnets`, `Cluster requires at least 2 subnets, got ${subnetIds.length}`);
       }
 
       subnetGroup = props.subnetGroup ?? new SubnetGroup(this, 'Subnets', {
@@ -440,7 +486,7 @@ abstract class ServerlessClusterNew extends ServerlessClusterBase {
     if (props.backupRetention) {
       const backupRetentionDays = props.backupRetention.toDays();
       if (backupRetentionDays < 1 || backupRetentionDays > 35) {
-        throw new Error(`backup retention period must be between 1 and 35 days. received: ${backupRetentionDays}`);
+        throw new ValidationError(lit`BackupRetentionPeriodDaysReceived`, `backup retention period must be between 1 and 35 days. received: ${backupRetentionDays}`, this);
       }
     }
 
@@ -460,12 +506,12 @@ abstract class ServerlessClusterNew extends ServerlessClusterBase {
       databaseName: props.defaultDatabaseName,
       dbClusterIdentifier: clusterIdentifier,
       dbClusterParameterGroupName: clusterParameterGroupConfig?.parameterGroupName,
-      dbSubnetGroupName: subnetGroup?.subnetGroupName,
+      dbSubnetGroupName: subnetGroup?.dbSubnetGroupRef.dbSubnetGroupName,
       deletionProtection: defaultDeletionProtection(props.deletionProtection, props.removalPolicy),
       engine: props.engine.engineType,
       engineVersion: props.engine.engineVersion?.fullVersion,
       engineMode: 'serverless',
-      enableHttpEndpoint: Lazy.any({ produce: () => this.enableDataApi }),
+      enableHttpEndpoint: this._enableDataApi,
       scalingConfiguration: props.scaling ? this.renderScalingConfiguration(props.scaling) : undefined,
       storageEncrypted: true,
       vpcSecurityGroupIds: this.securityGroups.map(sg => sg.securityGroupId),
@@ -484,16 +530,16 @@ abstract class ServerlessClusterNew extends ServerlessClusterBase {
     const timeout = options.timeout?.toSeconds();
 
     if (minCapacity && maxCapacity && minCapacity > maxCapacity) {
-      throw new Error('maximum capacity must be greater than or equal to minimum capacity.');
+      throw new ValidationError(lit`MaximumCapacityGreaterEqualMinimum`, 'maximum capacity must be greater than or equal to minimum capacity.', this);
     }
 
     const secondsToAutoPause = options.autoPause?.toSeconds();
     if (secondsToAutoPause && (secondsToAutoPause < 300 || secondsToAutoPause > 86400)) {
-      throw new Error('auto pause time must be between 5 minutes and 1 day.');
+      throw new ValidationError(lit`AutoPauseTimeMinutesDay`, 'auto pause time must be between 5 minutes and 1 day.', this);
     }
 
     if (timeout && (timeout < 60 || timeout > 600)) {
-      throw new Error(`timeout must be between 60 and 600 seconds, but got ${timeout} seconds.`);
+      throw new ValidationError(lit`TimeoutSeconds`, `timeout must be between 60 and 600 seconds, but got ${timeout} seconds.`, this);
     }
 
     return {
@@ -532,19 +578,24 @@ export interface ServerlessClusterProps extends ServerlessClusterNewProps {
  * @resource AWS::RDS::DBCluster
  *
  */
+@propertyInjectable
 export class ServerlessCluster extends ServerlessClusterNew {
+  /**
+   * Uniquely identifies this class.
+   */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-rds.ServerlessCluster';
+
   /**
    * Import an existing DatabaseCluster from properties
    */
   public static fromServerlessClusterAttributes(
     scope: Construct, id: string, attrs: ServerlessClusterAttributes,
   ): IServerlessCluster {
-
     return new ImportedServerlessCluster(scope, id, attrs);
   }
 
   public readonly clusterIdentifier: string;
-  public readonly clusterEndpoint: Endpoint;
+  private readonly _clusterEndpoint: IBox<Endpoint>;
   public readonly clusterReadEndpoint: Endpoint;
 
   public readonly secret?: secretsmanager.ISecret;
@@ -557,6 +608,8 @@ export class ServerlessCluster extends ServerlessClusterNew {
 
   constructor(scope: Construct, id: string, props: ServerlessClusterProps) {
     super(scope, id, props);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     this.vpc = props.vpc;
     this.vpcSubnets = props.vpcSubnets;
@@ -580,7 +633,7 @@ export class ServerlessCluster extends ServerlessClusterNew {
 
     // create a number token that represents the port of the cluster
     const portAttribute = Token.asNumber(cluster.attrEndpointPort);
-    this.clusterEndpoint = new Endpoint(cluster.attrEndpointAddress, portAttribute);
+    this._clusterEndpoint = Box.fromValue(new Endpoint(cluster.attrEndpointAddress, portAttribute));
     this.clusterReadEndpoint = new Endpoint(cluster.attrReadEndpointAddress, portAttribute);
 
     cluster.applyRemovalPolicy(props.removalPolicy ?? RemovalPolicy.SNAPSHOT);
@@ -590,22 +643,27 @@ export class ServerlessCluster extends ServerlessClusterNew {
     }
   }
 
+  public get clusterEndpoint(): Endpoint {
+    return this._clusterEndpoint.get();
+  }
+
   /**
    * Adds the single user rotation of the master password to this cluster.
    */
+  @MethodMetadata()
   public addRotationSingleUser(options: RotationSingleUserOptions = {}): secretsmanager.SecretRotation {
     if (!this.secret) {
-      throw new Error('Cannot add single user rotation for a cluster without secret.');
+      throw new ValidationError(lit`CannotAddSingleUserRotation`, 'Cannot add single user rotation for a cluster without secret.', this);
     }
 
     if (this.vpc === undefined) {
-      throw new Error('Cannot add single user rotation for a cluster without VPC.');
+      throw new ValidationError(lit`CannotAddSingleUserRotation`, 'Cannot add single user rotation for a cluster without VPC.', this);
     }
 
     const id = 'RotationSingleUser';
     const existing = this.node.tryFindChild(id);
     if (existing) {
-      throw new Error('A single user rotation was already added to this cluster.');
+      throw new ValidationError(lit`SingleUserRotationAlreadyAdded`, 'A single user rotation was already added to this cluster.', this);
     }
 
     return new secretsmanager.SecretRotation(this, id, {
@@ -620,13 +678,14 @@ export class ServerlessCluster extends ServerlessClusterNew {
   /**
    * Adds the multi user rotation to this cluster.
    */
+  @MethodMetadata()
   public addRotationMultiUser(id: string, options: RotationMultiUserOptions): secretsmanager.SecretRotation {
     if (!this.secret) {
-      throw new Error('Cannot add multi user rotation for a cluster without secret.');
+      throw new ValidationError(lit`CannotAddMultiUserRotation`, 'Cannot add multi user rotation for a cluster without secret.', this);
     }
 
     if (this.vpc === undefined) {
-      throw new Error('Cannot add multi user rotation for a cluster without VPC.');
+      throw new ValidationError(lit`CannotAddMultiUserRotation`, 'Cannot add multi user rotation for a cluster without VPC.', this);
     }
 
     return new secretsmanager.SecretRotation(this, id, {
@@ -643,19 +702,24 @@ export class ServerlessCluster extends ServerlessClusterNew {
 /**
  * Represents an imported database cluster.
  */
+@propertyInjectable
 class ImportedServerlessCluster extends ServerlessClusterBase implements IServerlessCluster {
+  /** Uniquely identifies this class. */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-rds.ImportedServerlessCluster';
   public readonly clusterIdentifier: string;
   public readonly connections: ec2.Connections;
 
   public readonly secret?: secretsmanager.ISecret;
 
-  protected readonly enableDataApi = true
+  protected readonly enableDataApi = true;
 
   private readonly _clusterEndpoint?: Endpoint;
   private readonly _clusterReadEndpoint?: Endpoint;
 
   constructor(scope: Construct, id: string, attrs: ServerlessClusterAttributes) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, attrs);
 
     this.clusterIdentifier = attrs.clusterIdentifier;
 
@@ -673,14 +737,14 @@ class ImportedServerlessCluster extends ServerlessClusterBase implements IServer
 
   public get clusterEndpoint() {
     if (!this._clusterEndpoint) {
-      throw new Error('Cannot access `clusterEndpoint` of an imported cluster without an endpoint address and port');
+      throw new ValidationError(lit`CannotAccessClusterEndpointImported`, 'Cannot access `clusterEndpoint` of an imported cluster without an endpoint address and port', this);
     }
     return this._clusterEndpoint;
   }
 
   public get clusterReadEndpoint() {
     if (!this._clusterReadEndpoint) {
-      throw new Error('Cannot access `clusterReadEndpoint` of an imported cluster without a readerEndpointAddress and port');
+      throw new ValidationError(lit`CannotAccessClusterReadEndpoint`, 'Cannot access `clusterReadEndpoint` of an imported cluster without a readerEndpointAddress and port', this);
     }
     return this._clusterReadEndpoint;
   }
@@ -713,14 +777,22 @@ export interface ServerlessClusterFromSnapshotProps extends ServerlessClusterNew
  *
  * @resource AWS::RDS::DBCluster
  */
+@propertyInjectable
 export class ServerlessClusterFromSnapshot extends ServerlessClusterNew {
+  /**
+   * Uniquely identifies this class.
+   */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-rds.ServerlessClusterFromSnapshot';
+
   public readonly clusterIdentifier: string;
-  public readonly clusterEndpoint: Endpoint;
+  private readonly _clusterEndpoint: IBox<Endpoint>;
   public readonly clusterReadEndpoint: Endpoint;
   public readonly secret?: secretsmanager.ISecret;
 
   constructor(scope: Construct, id: string, props: ServerlessClusterFromSnapshotProps) {
     super(scope, id, props);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     this.enableDataApi = props.enableDataApi;
 
@@ -728,7 +800,7 @@ export class ServerlessClusterFromSnapshot extends ServerlessClusterNew {
     let secret = credentials?.secret;
     if (!secret && credentials?.generatePassword) {
       if (!credentials.username) {
-        throw new Error('`credentials` `username` must be specified when `generatePassword` is set to true');
+        throw new ValidationError(lit`MustBeSpecifiedTrue`, '`credentials` `username` must be specified when `generatePassword` is set to true', this);
       }
 
       secret = new DatabaseSecret(this, 'Secret', {
@@ -750,7 +822,7 @@ export class ServerlessClusterFromSnapshot extends ServerlessClusterNew {
 
     // create a number token that represents the port of the cluster
     const portAttribute = Token.asNumber(cluster.attrEndpointPort);
-    this.clusterEndpoint = new Endpoint(cluster.attrEndpointAddress, portAttribute);
+    this._clusterEndpoint = Box.fromValue(new Endpoint(cluster.attrEndpointAddress, portAttribute));
     this.clusterReadEndpoint = new Endpoint(cluster.attrReadEndpointAddress, portAttribute);
 
     cluster.applyRemovalPolicy(props.removalPolicy ?? RemovalPolicy.SNAPSHOT);
@@ -758,5 +830,9 @@ export class ServerlessClusterFromSnapshot extends ServerlessClusterNew {
     if (secret) {
       this.secret = secret.attach(this);
     }
+  }
+
+  public get clusterEndpoint(): Endpoint {
+    return this._clusterEndpoint.get();
   }
 }

@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
-import { ITarget, InputTransformation, Pipe, TargetConfig } from '@aws-cdk/aws-pipes-alpha';
+import type { ITarget, TargetConfig } from '@aws-cdk/aws-pipes-alpha';
+import { InputTransformation, Pipe } from '@aws-cdk/aws-pipes-alpha';
 import { ExpectedResult, IntegTest } from '@aws-cdk/integ-tests-alpha';
 import * as cdk from 'aws-cdk-lib';
 import { SqsSource } from '../lib';
@@ -9,6 +10,8 @@ const stack = new cdk.Stack(app, 'aws-cdk-pipes-sources-sqs');
 const sourceQueue = new cdk.aws_sqs.Queue(stack, 'SourceQueue');
 const targetQueue = new cdk.aws_sqs.Queue(stack, 'TargetQueue');
 
+// When this module is promoted from alpha, TestTarget should
+// be replaced with SqsTarget from @aws-cdk/aws-pipes-targets-alpha
 class TestTarget implements ITarget {
   targetArn: string;
   inputTransformation: InputTransformation = InputTransformation.fromEventPath('$.body');

@@ -4,8 +4,9 @@ import * as ec2 from '../../../aws-ec2';
 import * as ecs from '../../../aws-ecs';
 import * as elbv2 from '../../../aws-elasticloadbalancingv2';
 import * as iam from '../../../aws-iam';
+import type { Stack } from '../../../core';
 import * as cdk from '../../../core';
-import { Duration, Stack } from '../../../core';
+import { Duration } from '../../../core';
 import * as codedeploy from '../../lib';
 
 const mockCluster = 'my-cluster';
@@ -140,15 +141,7 @@ describe('CodeDeploy ECS DeploymentGroup', () => {
           Action: 'sts:AssumeRole',
           Effect: 'Allow',
           Principal: {
-            Service: {
-              'Fn::FindInMap': [
-                'ServiceprincipalMap',
-                {
-                  Ref: 'AWS::Region',
-                },
-                'codedeploy',
-              ],
-            },
+            Service: 'codedeploy.amazonaws.com',
           },
         }],
         Version: '2012-10-17',

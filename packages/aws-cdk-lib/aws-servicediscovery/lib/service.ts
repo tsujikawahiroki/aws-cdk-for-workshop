@@ -1,16 +1,25 @@
-import { Construct } from 'constructs';
+import type { Construct } from 'constructs';
 import { AliasTargetInstance } from './alias-target-instance';
-import { CnameInstance, CnameInstanceBaseProps } from './cname-instance';
-import { IInstance } from './instance';
-import { IpInstance, IpInstanceBaseProps } from './ip-instance';
-import { INamespace, NamespaceType } from './namespace';
-import { NonIpInstance, NonIpInstanceBaseProps } from './non-ip-instance';
+import type { CnameInstanceBaseProps } from './cname-instance';
+import { CnameInstance } from './cname-instance';
+import type { IInstance } from './instance';
+import type { IpInstanceBaseProps } from './ip-instance';
+import { IpInstance } from './ip-instance';
+import type { INamespace } from './namespace';
+import { NamespaceType } from './namespace';
+import type { NonIpInstanceBaseProps } from './non-ip-instance';
+import { NonIpInstance } from './non-ip-instance';
 import { defaultDiscoveryType } from './private/utils';
 import { CfnService } from './servicediscovery.generated';
-import * as elbv2 from '../../aws-elasticloadbalancingv2';
-import { Duration, IResource, Resource } from '../../core';
+import type * as elbv2 from '../../aws-elasticloadbalancingv2';
+import type { IResource } from '../../core';
+import { Duration, Resource, ValidationError } from '../../core';
+import { addConstructMetadata, MethodMetadata } from '../../core/lib/metadata-resource';
+import { lit } from '../../core/lib/private/literal-string';
+import { propertyInjectable } from '../../core/lib/prop-injectable';
+import type { IServiceRef, ServiceReference } from '../../interfaces/generated/aws-servicediscovery-interfaces.generated';
 
-export interface IService extends IResource {
+export interface IService extends IResource, IServiceRef {
   /**
    * A name for the Cloudmap Service.
    * @attribute
@@ -150,6 +159,13 @@ abstract class ServiceBase extends Resource implements IService {
   public abstract routingPolicy: RoutingPolicy;
   public abstract readonly serviceName: string;
   public abstract discoveryType: DiscoveryType;
+
+  public get serviceRef(): ServiceReference {
+    return {
+      serviceId: this.serviceId,
+      serviceArn: this.serviceArn,
+    };
+  }
 }
 
 export interface ServiceAttributes {
@@ -165,7 +181,10 @@ export interface ServiceAttributes {
 /**
  * Define a CloudMap Service
  */
+@propertyInjectable
 export class Service extends ServiceBase {
+  /** Uniquely identifies this class. */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-servicediscovery.Service';
 
   public static fromServiceAttributes(scope: Construct, id: string, attrs: ServiceAttributes): IService {
     class Import extends ServiceBase {
@@ -218,13 +237,16 @@ export class Service extends ServiceBase {
 
   constructor(scope: Construct, id: string, props: ServiceProps) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     const namespaceType = props.namespace.type;
     const discoveryType = props.discoveryType || defaultDiscoveryType(props.namespace);
 
     if (namespaceType == NamespaceType.HTTP && discoveryType == DiscoveryType.DNS_AND_API) {
-      throw new Error(
-        'Cannot specify `discoveryType` of DNS_AND_API when using an HTTP namespace.',
+      throw new ValidationError(
+        lit`HttpNamespaceCannotUseDnsAndApi`,
+        'Cannot specify `discoveryType` of DNS_AND_API when using an HTTP namespace.', this,
       );
     }
 
@@ -233,22 +255,23 @@ export class Service extends ServiceBase {
       discoveryType === DiscoveryType.API &&
       (props.routingPolicy || props.dnsRecordType)
     ) {
-      throw new Error(
-        'Cannot specify `routingPolicy` or `dnsRecord` when using an HTTP namespace.',
+      throw new ValidationError(
+        lit`HttpNamespaceCannotSpecifyRoutingPolicyOrDnsRecord`,
+        'Cannot specify `routingPolicy` or `dnsRecord` when using an HTTP namespace.', this,
       );
     }
 
     if (props.healthCheck && props.customHealthCheck) {
-      throw new Error('Cannot specify both `healthCheckConfig` and `healthCheckCustomConfig`.');
+      throw new ValidationError(lit`CannotSpecifyBothHealthCheckConfigs`, 'Cannot specify both `healthCheckConfig` and `healthCheckCustomConfig`.', this);
     }
 
     if (namespaceType === NamespaceType.DNS_PRIVATE && props.healthCheck) {
-      throw new Error('Cannot specify `healthCheckConfig` for a Private DNS namespace.');
+      throw new ValidationError(lit`CannotSpecifyHealthCheckForPrivateDns`, 'Cannot specify `healthCheckConfig` for a Private DNS namespace.', this);
     }
 
     if (props.routingPolicy === RoutingPolicy.MULTIVALUE
         && props.dnsRecordType === DnsRecordType.CNAME) {
-      throw new Error('Cannot use `CNAME` record when routing policy is `Multivalue`.');
+      throw new ValidationError(lit`CannotUseCnameWithMultivalue`, 'Cannot use `CNAME` record when routing policy is `Multivalue`.', this);
     }
 
     // Additional validation for eventual attachment of LBs
@@ -257,13 +280,13 @@ export class Service extends ServiceBase {
     // routingPolicy anyway, so might as well do the validation as well.
     if (props.routingPolicy === RoutingPolicy.MULTIVALUE
         && props.loadBalancer) {
-      throw new Error('Cannot register loadbalancers when routing policy is `Multivalue`.');
+      throw new ValidationError(lit`CannotRegisterLoadBalancerWithMultivalue`, 'Cannot register loadbalancers when routing policy is `Multivalue`.', this);
     }
 
     if (props.healthCheck
         && props.healthCheck.type === HealthCheckType.TCP
         && props.healthCheck.resourcePath) {
-      throw new Error('Cannot specify `resourcePath` when using a `TCP` health check.');
+      throw new ValidationError(lit`CannotSpecifyResourcePathWithTcp`, 'Cannot specify `resourcePath` when using a `TCP` health check.', this);
     }
 
     // Set defaults where necessary
@@ -277,7 +300,7 @@ export class Service extends ServiceBase {
       && (!(dnsRecordType === DnsRecordType.A
         || dnsRecordType === DnsRecordType.AAAA
         || dnsRecordType === DnsRecordType.A_AAAA))) {
-      throw new Error('Must support `A` or `AAAA` records to register loadbalancers.');
+      throw new ValidationError(lit`LoadBalancerRequiresAOrAaaaRecords`, 'Must support `A` or `AAAA` records to register loadbalancers.', this);
     }
 
     const dnsConfig: CfnService.DnsConfigProperty | undefined =
@@ -323,7 +346,8 @@ export class Service extends ServiceBase {
   /**
    * Registers an ELB as a new instance with unique name instanceId in this service.
    */
-  public registerLoadBalancer(id: string, loadBalancer: elbv2.ILoadBalancerV2, customAttributes?: {[key: string]: string}): IInstance {
+  @MethodMetadata()
+  public registerLoadBalancer(id: string, loadBalancer: elbv2.ILoadBalancerV2, customAttributes?: { [key: string]: string }): IInstance {
     return new AliasTargetInstance(this, id, {
       service: this,
       dnsName: loadBalancer.loadBalancerDnsName,
@@ -334,6 +358,7 @@ export class Service extends ServiceBase {
   /**
    * Registers a resource that is accessible using values other than an IP address or a domain name (CNAME).
    */
+  @MethodMetadata()
   public registerNonIpInstance(id: string, props: NonIpInstanceBaseProps): IInstance {
     return new NonIpInstance(this, id, {
       service: this,
@@ -344,6 +369,7 @@ export class Service extends ServiceBase {
   /**
    * Registers a resource that is accessible using an IP address.
    */
+  @MethodMetadata()
   public registerIpInstance(id: string, props: IpInstanceBaseProps): IInstance {
     return new IpInstance(this, id, {
       service: this,
@@ -354,6 +380,7 @@ export class Service extends ServiceBase {
   /**
    * Registers a resource that is accessible using a CNAME.
    */
+  @MethodMetadata()
   public registerCnameInstance(id: string, props: CnameInstanceBaseProps): IInstance {
     return new CnameInstance(this, id, {
       service: this,

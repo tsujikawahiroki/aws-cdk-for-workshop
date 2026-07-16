@@ -183,7 +183,6 @@ test('CertificateValidation.fromEmail', () => {
 });
 
 describe('CertificateValidation.fromDns', () => {
-
   test('without a hosted zone', () => {
     const stack = new Stack();
 
@@ -261,7 +260,7 @@ describe('CertificateValidation.fromDns', () => {
       subjectAlternativeNames: ['*.test.example.com'],
     });
 
-    //Wildcard domain names are de-duped.
+    // Wildcard domain names are de-duped.
     Template.fromStack(stack).hasResourceProperties('AWS::CertificateManager::Certificate', {
       DomainName: 'test.example.com',
       DomainValidationOptions: [
@@ -289,7 +288,7 @@ describe('CertificateValidation.fromDns', () => {
       subjectAlternativeNames: ['*.test.example.com', '*.foo.test.example.com', 'bar.test.example.com'],
     });
 
-    //Wildcard domain names are de-duped.
+    // Wildcard domain names are de-duped.
     Template.fromStack(stack).hasResourceProperties('AWS::CertificateManager::Certificate', {
       DomainName: 'test.example.com',
       DomainValidationOptions: [
@@ -315,7 +314,6 @@ describe('CertificateValidation.fromDns', () => {
       ValidationMethod: 'DNS',
     });
   });
-
 });
 
 test('CertificateValidation.fromDnsMultiZone', () => {
@@ -362,6 +360,48 @@ test('CertificateValidation.fromDnsMultiZone', () => {
       },
     ],
     ValidationMethod: 'DNS',
+  });
+});
+
+describe('Certificate export setting', () => {
+  test('leaves certificate export setting untouched by default', () => {
+    const stack = new Stack();
+
+    new Certificate(stack, 'Certificate', {
+      domainName: 'test.example.com',
+    });
+
+    const certificateNodes = Template.fromStack(stack).findResources('AWS::CertificateManager::Certificate');
+    expect(certificateNodes.Certificate4E7ABB08).toBeDefined();
+    expect(certificateNodes.Certificate4E7ABB08.CertificateTransparencyLoggingPreference).toBeUndefined();
+  });
+
+  test('can enable certificate export', () => {
+    const stack = new Stack();
+
+    new Certificate(stack, 'Certificate', {
+      domainName: 'test.example.com',
+      allowExport: true,
+    });
+
+    Template.fromStack(stack).hasResourceProperties('AWS::CertificateManager::Certificate', {
+      DomainName: 'test.example.com',
+      CertificateExport: 'ENABLED',
+    });
+  });
+
+  test('can disable certificate export', () => {
+    const stack = new Stack();
+
+    new Certificate(stack, 'Certificate', {
+      domainName: 'test.example.com',
+      allowExport: false,
+    });
+
+    Template.fromStack(stack).hasResourceProperties('AWS::CertificateManager::Certificate', {
+      DomainName: 'test.example.com',
+      CertificateExport: Match.absent(),
+    });
   });
 });
 

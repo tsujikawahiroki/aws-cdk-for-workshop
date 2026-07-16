@@ -16,7 +16,13 @@
        "KeyId": "alias/aws/kinesis"
       }
      ]
-    }
+    },
+    "Tags": [
+     {
+      "Key": "stage",
+      "Value": "IntegTest"
+     }
+    ]
    },
    "UpdateReplacePolicy": "Retain",
    "DeletionPolicy": "Retain"
@@ -149,6 +155,14 @@
       "TableClass": "STANDARD_INFREQUENT_ACCESS",
       "Tags": [
        {
+        "Key": "stage",
+        "Value": "IntegTest"
+       },
+       {
+        "Key": "tagAspectKey",
+        "Value": "tagAspectValue"
+       },
+       {
         "Key": "USE2ReplicaTagKey",
         "Value": "USE2ReplicaTagValue"
        }
@@ -160,6 +174,9 @@
       },
       "GlobalSecondaryIndexes": [
        {
+        "ContributorInsightsSpecification": {
+         "Enabled": true
+        },
         "IndexName": "gsi1",
         "ReadProvisionedThroughputSettings": {
          "ReadCapacityUnits": 15
@@ -184,6 +201,14 @@
       "Region": "us-west-2",
       "TableClass": "STANDARD",
       "Tags": [
+       {
+        "Key": "stage",
+        "Value": "IntegTest"
+       },
+       {
+        "Key": "tagAspectKey",
+        "Value": "tagAspectValue"
+       },
        {
         "Key": "USW2ReplicaTagKey",
         "Value": "USW2ReplicaTagValue"
@@ -232,6 +257,14 @@
       "TableClass": "STANDARD_INFREQUENT_ACCESS",
       "Tags": [
        {
+        "Key": "stage",
+        "Value": "IntegTest"
+       },
+       {
+        "Key": "tagAspectKey",
+        "Value": "tagAspectValue"
+       },
+       {
         "Key": "primaryTableTagKey",
         "Value": "primaryTableTagValue"
        }
@@ -245,7 +278,6 @@
     "StreamSpecification": {
      "StreamViewType": "NEW_AND_OLD_IMAGES"
     },
-    "TableName": "my-global-table",
     "TimeToLiveSpecification": {
      "AttributeName": "attr",
      "Enabled": true

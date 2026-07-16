@@ -1,7 +1,8 @@
 import { describeDeprecated, testDeprecated } from '@aws-cdk/cdk-build-tools';
 import { evaluateCFN } from './evaluate-cfn';
 import { toCloudFormation } from './util';
-import { Arn, ArnComponents, ArnFormat, Aws, CfnOutput, ScopedAws, Stack, Token } from '../lib';
+import type { ArnComponents } from '../lib';
+import { Arn, ArnFormat, Aws, CfnOutput, ScopedAws, Stack, Token } from '../lib';
 import { Intrinsic } from '../lib/private/intrinsic';
 
 describe('arn', () => {
@@ -101,12 +102,10 @@ describe('arn', () => {
   });
 
   describeDeprecated('Arn.parse(s)', () => {
-
     describe('fails', () => {
       test('if doesn\'t start with "arn:"', () => {
         const stack = new Stack();
         expect(() => stack.parseArn('barn:foo:x:a:1:2')).toThrow(/ARNs must start with "arn:".*barn:foo/);
-
       });
 
       test('if the ARN doesnt have enough components', () => {
@@ -249,9 +248,8 @@ describe('arn', () => {
 
       expect(parsed.sep).toEqual('/');
 
-      // eslint-disable-next-line max-len
       expect(stack.resolve(parsed.resource)).toEqual({ 'Fn::Select': [0, { 'Fn::Split': ['/', { 'Fn::Select': [5, { 'Fn::Split': [':', theToken] }] }] }] });
-      // eslint-disable-next-line max-len
+
       expect(stack.resolve(parsed.resourceName)).toEqual({ 'Fn::Select': [1, { 'Fn::Split': ['/', { 'Fn::Select': [5, { 'Fn::Split': [':', theToken] }] }] }] });
     });
 

@@ -1,8 +1,14 @@
-import { Duration, IResource, Lazy, Resource } from 'aws-cdk-lib/core';
-import { Construct } from 'constructs';
-import { IFirewallDomainList } from './firewall-domain-list';
-import { FirewallRuleGroupAssociation, FirewallRuleGroupAssociationOptions } from './firewall-rule-group-association';
 import { CfnFirewallRuleGroup } from 'aws-cdk-lib/aws-route53resolver';
+import type { IResource } from 'aws-cdk-lib/core';
+import { Duration, Resource } from 'aws-cdk-lib/core';
+import type { IArrayBox } from 'aws-cdk-lib/core/lib/helpers-internal';
+import { Box, noBoxStackTraces } from 'aws-cdk-lib/core/lib/helpers-internal';
+import { addConstructMetadata, MethodMetadata } from 'aws-cdk-lib/core/lib/metadata-resource';
+import { propertyInjectable } from 'aws-cdk-lib/core/lib/prop-injectable';
+import type { Construct } from 'constructs';
+import type { IFirewallDomainList } from './firewall-domain-list';
+import type { FirewallRuleGroupAssociationOptions } from './firewall-rule-group-association';
+import { FirewallRuleGroupAssociation } from './firewall-rule-group-association';
 
 /**
  * A Firewall Rule Group
@@ -153,7 +159,12 @@ export abstract class DnsBlockResponse {
 /**
  * A Firewall Rule Group
  */
+@noBoxStackTraces
+@propertyInjectable
 export class FirewallRuleGroup extends Resource implements IFirewallRuleGroup {
+  /** Uniquely identifies this class. */
+  public static readonly PROPERTY_INJECTION_ID: string = '@aws-cdk.aws-route53resolver-alpha.FirewallRuleGroup';
+
   /**
    * Import an existing Firewall Rule Group
    */
@@ -221,16 +232,18 @@ export class FirewallRuleGroup extends Resource implements IFirewallRuleGroup {
    */
   public readonly firewallRuleGroupStatusMessage: string;
 
-  private readonly rules: FirewallRule[];
+  private readonly rules: IArrayBox<FirewallRule>;
 
   constructor(scope: Construct, id: string, props: FirewallRuleGroupProps = {}) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
-    this.rules = props.rules ?? [];
+    this.rules = Box.fromArray(props.rules ?? []);
 
     const ruleGroup = new CfnFirewallRuleGroup(this, 'Resource', {
       name: props.name,
-      firewallRules: Lazy.any({ produce: () => this.rules.map(renderRule) }),
+      firewallRules: this.rules.map(renderRule),
     });
 
     this.firewallRuleGroupId = ruleGroup.attrId;
@@ -248,6 +261,7 @@ export class FirewallRuleGroup extends Resource implements IFirewallRuleGroup {
   /**
    * Adds a rule to this group
    */
+  @MethodMetadata()
   public addRule(rule: FirewallRule): FirewallRuleGroup {
     this.rules.push(rule);
     return this;
@@ -256,6 +270,7 @@ export class FirewallRuleGroup extends Resource implements IFirewallRuleGroup {
   /**
    * Associates this Firewall Rule Group with a VPC
    */
+  @MethodMetadata()
   public associate(id: string, props: FirewallRuleGroupAssociationOptions): FirewallRuleGroupAssociation {
     return new FirewallRuleGroupAssociation(this, id, {
       ...props,

@@ -1,5 +1,7 @@
 import { Fn } from './cfn-fn';
-import { Stack } from './stack';
+import { UnscopedValidationError } from './errors';
+import { lit } from './private/literal-string';
+import type { Stack } from './stack';
 import { Token } from './token';
 import { filterUndefined } from './util';
 
@@ -15,7 +17,7 @@ export enum ArnFormat {
    * even if it contains slashes,
    * like in 'arn:aws:s3:::bucket/object.zip'.
    */
-  // eslint-disable-next-line @aws-cdk/no-literal-partition
+  // eslint-disable-next-line @cdklabs/no-literal-partition
   NO_RESOURCE_NAME = 'arn:aws:service:region:account:resource',
 
   /**
@@ -26,7 +28,7 @@ export enum ArnFormat {
    * even if it contains slashes,
    * like in 'arn:aws:apigateway:region:account:resource:/test/mydemoresource/*'.
    */
-  // eslint-disable-next-line @aws-cdk/no-literal-partition
+  // eslint-disable-next-line @cdklabs/no-literal-partition
   COLON_RESOURCE_NAME = 'arn:aws:service:region:account:resource:resourceName',
 
   /**
@@ -37,17 +39,17 @@ export enum ArnFormat {
    * even if it contains colons,
    * like in 'arn:aws:cognito-sync:region:account:identitypool/us-east-1:1a1a1a1a-ffff-1111-9999-12345678:bla'.
    */
-  // eslint-disable-next-line @aws-cdk/no-literal-partition
+  // eslint-disable-next-line @cdklabs/no-literal-partition
   SLASH_RESOURCE_NAME = 'arn:aws:service:region:account:resource/resourceName',
 
   /**
    * This represents a format where the 'resource' and 'resourceName'
-   * parts are seperated with a slash,
+   * parts are separated with a slash,
    * but there is also an additional slash after the colon separating 'account' from 'resource'.
    * Like in: 'arn:aws:service:region:account:/resource/resourceName'.
    * Note that the leading slash is _not_ included in the parsed 'resource' part.
    */
-  // eslint-disable-next-line @aws-cdk/no-literal-partition
+  // eslint-disable-next-line @cdklabs/no-literal-partition
   SLASH_RESOURCE_SLASH_RESOURCE_NAME = 'arn:aws:service:region:account:/resource/resourceName',
 }
 
@@ -64,7 +66,7 @@ export interface ArnComponents {
 
   /**
    * The service namespace that identifies the AWS product (for example,
-   * 's3', 'iam', 'codepipline').
+   * 's3', 'iam', 'codepipeline').
    */
   readonly service: string;
 
@@ -141,7 +143,7 @@ export class Arn {
 
     // Catch both 'null' and 'undefined'
     if (partition == null || region == null || account == null) {
-      throw new Error(`Arn.format: partition (${partition}), region (${region}), and account (${account}) must all be passed if stack is not passed.`);
+      throw new UnscopedValidationError(lit`ArnFormatMissingStackInfo`, `Arn.format: partition (${partition}), region (${region}), and account (${account}) must all be passed if stack is not passed.`);
     }
 
     const sep = components.sep ?? (components.arnFormat === ArnFormat.COLON_RESOURCE_NAME ? ':' : '/');
@@ -153,7 +155,7 @@ export class Arn {
     ];
 
     if (sep !== '/' && sep !== ':' && sep !== '') {
-      throw new Error('resourcePathSep may only be ":", "/" or an empty string');
+      throw new UnscopedValidationError(lit`InvalidResourcePathSeparator`, 'resourcePathSep may only be ":", "/" or an empty string');
     }
 
     if (components.resourceName != null) {
@@ -324,10 +326,10 @@ export class Arn {
     // resource type (to notify authors of incorrect assumptions right away).
     const parsed = Arn.split(arn, ArnFormat.SLASH_RESOURCE_NAME);
     if (!Token.isUnresolved(parsed.resource) && parsed.resource !== resourceType) {
-      throw new Error(`Expected resource type '${resourceType}' in ARN, got '${parsed.resource}' in '${arn}'`);
+      throw new UnscopedValidationError(lit`ExpectedResourceType`, `Expected resource type '${resourceType}' in ARN, got '${parsed.resource}' in '${arn}'`);
     }
     if (!parsed.resourceName) {
-      throw new Error(`Expected resource name in ARN, didn't find one: '${arn}'`);
+      throw new UnscopedValidationError(lit`ExpectedResourceName`, `Expected resource name in ARN, didn't find one: '${arn}'`);
     }
     return parsed.resourceName;
   }
@@ -411,7 +413,7 @@ function parseArnShape(arn: string): 'token' | string[] {
     if (Token.isUnresolved(arn)) {
       return 'token';
     } else {
-      throw new Error(`ARNs must start with "arn:" and have at least 6 components: ${arn}`);
+      throw new UnscopedValidationError(lit`ArnsMustStartWithArn`, `ARNs must start with "arn:" and have at least 6 components: ${arn}`);
     }
   }
 
@@ -423,17 +425,17 @@ function parseArnShape(arn: string): 'token' | string[] {
 
   const partition = components.length > 1 ? components[1] : undefined;
   if (!partition) {
-    throw new Error('The `partition` component (2nd component) of an ARN is required: ' + arn);
+    throw new UnscopedValidationError(lit`ArnPartitionRequired`, 'The `partition` component (2nd component) of an ARN is required: ' + arn);
   }
 
   const service = components.length > 2 ? components[2] : undefined;
   if (!service) {
-    throw new Error('The `service` component (3rd component) of an ARN is required: ' + arn);
+    throw new UnscopedValidationError(lit`ArnServiceRequired`, 'The `service` component (3rd component) of an ARN is required: ' + arn);
   }
 
   const resource = components.length > 5 ? components[5] : undefined;
   if (!resource) {
-    throw new Error('The `resource` component (6th component) of an ARN is required: ' + arn);
+    throw new UnscopedValidationError(lit`ArnResourceRequired`, 'The `resource` component (6th component) of an ARN is required: ' + arn);
   }
 
   // Region can be missing in global ARNs (such as used by IAM)

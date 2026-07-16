@@ -1,15 +1,22 @@
 import { Construct } from 'constructs';
-import { NetworkMode, TaskDefinition } from './base/task-definition';
-import { ContainerImage, ContainerImageConfig } from './container-image';
-import { CredentialSpec, CredentialSpecConfig } from './credential-spec';
-import { CfnTaskDefinition } from './ecs.generated';
-import { EnvironmentFile, EnvironmentFileConfig } from './environment-file';
-import { LinuxParameters } from './linux-parameters';
-import { LogDriver, LogDriverConfig } from './log-drivers/log-driver';
-import * as iam from '../../aws-iam';
-import * as secretsmanager from '../../aws-secretsmanager';
-import * as ssm from '../../aws-ssm';
+import type { TaskDefinition } from './base/task-definition';
+import { NetworkMode } from './base/task-definition';
+import type { ContainerImage, ContainerImageConfig } from './container-image';
+import type { CredentialSpec, CredentialSpecConfig } from './credential-spec';
+import type { CfnTaskDefinition } from './ecs.generated';
+import type { EnvironmentFile, EnvironmentFileConfig } from './environment-file';
+import type { LinuxParameters } from './linux-parameters';
+import type { LogDriver, LogDriverConfig } from './log-drivers/log-driver';
+import type * as iam from '../../aws-iam';
+import type * as secretsmanager from '../../aws-secretsmanager';
+import type * as ssm from '../../aws-ssm';
 import * as cdk from '../../core';
+import { UnscopedValidationError, ValidationError } from '../../core';
+import type { IArrayBox } from '../../core/lib/helpers-internal';
+import { Box } from '../../core/lib/helpers-internal';
+import { noBoxStackTraces } from '../../core/lib/no-box-stack-traces';
+import { lit } from '../../core/lib/private/literal-string';
+import { propertyInjectable } from '../../core/lib/prop-injectable';
 
 /**
  * Specify the secret's version id or version stage
@@ -93,6 +100,8 @@ export abstract class Secret {
 
   /**
    * Grants reading the secret to a principal
+   *
+   * [disable-awslint:no-grants]
    */
   public abstract grantRead(grantee: iam.IGrantable): iam.Grant;
 }
@@ -322,6 +331,19 @@ export interface ContainerDefinitionOptions {
   readonly user?: string;
 
   /**
+   * Specifies whether Amazon ECS will resolve the container image tag provided
+   * in the container definition to an image digest.
+   *
+   * If you set the value for a container as disabled, Amazon ECS will
+   * not resolve the provided container image tag to a digest and will use the
+   * original image URI specified in the container definition for deployment.
+   *
+   * @default VersionConsistency.DISABLED if `image` is a CDK asset, VersionConsistency.ENABLED otherwise
+   * @see https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-ecs-taskdefinition-containerdefinition.html#cfn-ecs-taskdefinition-containerdefinition-versionconsistency
+   */
+  readonly versionConsistency?: VersionConsistency;
+
+  /**
    * The working directory in which to run commands inside the container.
    *
    * @default /
@@ -384,6 +406,42 @@ export interface ContainerDefinitionOptions {
    * An array of ulimits to set in the container.
    */
   readonly ulimits?: Ulimit[];
+
+  /**
+   * Enable a restart policy for a container.
+   *
+   * When you set up a restart policy, Amazon ECS can restart the container without needing to replace the task.
+   *
+   * @default - false unless `restartIgnoredExitCodes` or `restartAttemptPeriod` is set.
+   * @see https://docs.aws.amazon.com/AmazonECS/latest/developerguide/container-restart-policy.html
+   */
+  readonly enableRestartPolicy?: boolean;
+
+  /**
+   * A list of exit codes that Amazon ECS will ignore and not attempt a restart on.
+   *
+   * This property can't be used if `enableRestartPolicy` is set to false.
+   *
+   * You can specify a maximum of 50 container exit codes.
+   *
+   * @default - No exit codes are ignored.
+   */
+  readonly restartIgnoredExitCodes?: number[];
+
+  /**
+   * A period of time that the container must run for before a restart can be attempted.
+   *
+   * A container can be restarted only once every `restartAttemptPeriod` seconds.
+   * If a container isn't able to run for this time period and exits early, it will not be restarted.
+   *
+   * This property can't be used if `enableRestartPolicy` is set to false.
+   *
+   * You can set a minimum `restartAttemptPeriod` of 60 seconds and a maximum `restartAttemptPeriod`
+   * of 1800 seconds.
+   *
+   * @default - Duration.seconds(300) if `enableRestartPolicy` is true, otherwise no period.
+   */
+  readonly restartAttemptPeriod?: cdk.Duration;
 }
 
 /**
@@ -401,7 +459,14 @@ export interface ContainerDefinitionProps extends ContainerDefinitionOptions {
 /**
  * A container definition is used in a task definition to describe the containers that are launched as part of a task.
  */
+@propertyInjectable
+@noBoxStackTraces
 export class ContainerDefinition extends Construct {
+  /**
+   * Uniquely identifies this class.
+   */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-ecs.ContainerDefinition';
+
   public static readonly CONTAINER_PORT_USE_RANGE = 0;
 
   /**
@@ -412,28 +477,28 @@ export class ContainerDefinition extends Construct {
   /**
    * The mount points for data volumes in your container.
    */
-  public readonly mountPoints = new Array<MountPoint>();
+  public get mountPoints(): MountPoint[] { return this._mountPoints.getMutable(); }
 
   /**
    * The list of port mappings for the container. Port mappings allow containers to access ports
    * on the host container instance to send or receive traffic.
    */
-  public readonly portMappings = new Array<PortMapping>();
+  public get portMappings(): PortMapping[] { return this._portMappings.getMutable(); }
 
   /**
    * The data volumes to mount from another container in the same task definition.
    */
-  public readonly volumesFrom = new Array<VolumeFrom>();
+  public get volumesFrom(): VolumeFrom[] { return this._volumesFrom.getMutable(); }
 
   /**
    * An array of ulimits to set in the container.
    */
-  public readonly ulimits = new Array<Ulimit>();
+  public get ulimits(): Ulimit[] { return this._ulimits.getMutable(); }
 
   /**
    * An array dependencies defined for container startup and shutdown.
    */
-  public readonly containerDependencies = new Array<ContainerDependency>();
+  public get containerDependencies(): ContainerDependency[] { return this._containerDependencies.getMutable(); }
 
   /**
    * Specifies whether the container will be marked essential.
@@ -497,10 +562,16 @@ export class ContainerDefinition extends Construct {
    */
   public readonly pseudoTerminal?: boolean;
 
+  private readonly _mountPoints: IArrayBox<MountPoint>;
+  private readonly _portMappings: IArrayBox<PortMapping>;
+  private readonly _volumesFrom: IArrayBox<VolumeFrom>;
+  private readonly _ulimits: IArrayBox<Ulimit>;
+  private readonly _containerDependencies: IArrayBox<ContainerDependency>;
+
   /**
    * The configured container links
    */
-  private readonly links = new Array<string>();
+  private readonly _links: IArrayBox<string>;
 
   private readonly imageConfig: ContainerImageConfig;
 
@@ -512,6 +583,8 @@ export class ContainerDefinition extends Construct {
 
   private _namedPorts: Map<string, PortMapping>;
 
+  private versionConsistency?: VersionConsistency;
+
   /**
    * Constructs a new instance of the ContainerDefinition class.
    */
@@ -519,7 +592,7 @@ export class ContainerDefinition extends Construct {
     super(scope, id);
     if (props.memoryLimitMiB !== undefined && props.memoryReservationMiB !== undefined) {
       if (props.memoryLimitMiB < props.memoryReservationMiB) {
-        throw new Error('MemoryLimitMiB should not be less than MemoryReservationMiB.');
+        throw new ValidationError(lit`MemoryLimitMibShouldLessThan`, 'MemoryLimitMiB should not be less than MemoryReservationMiB.', this);
       }
     }
     this.essential = props.essential ?? true;
@@ -528,10 +601,19 @@ export class ContainerDefinition extends Construct {
     this.linuxParameters = props.linuxParameters;
     this.containerName = props.containerName ?? this.node.id;
 
+    this._mountPoints = Box.fromArray();
+    this._portMappings = Box.fromArray();
+    this._volumesFrom = Box.fromArray();
+    this._ulimits = Box.fromArray();
+    this._containerDependencies = Box.fromArray();
+    this._links = Box.fromArray();
+
     this.imageConfig = props.image.bind(this, this);
     this.imageName = this.imageConfig.imageName;
 
     this._namedPorts = new Map<string, PortMapping>();
+
+    this.versionConsistency = props.versionConsistency;
 
     if (props.logging) {
       this.logDriverConfig = props.logging.bind(this, this);
@@ -563,7 +645,7 @@ export class ContainerDefinition extends Construct {
       this.credentialSpecs = [];
 
       if (props.credentialSpecs.length > 1) {
-        throw new Error('Only one credential spec is allowed per container definition.');
+        throw new ValidationError(lit`OnlyCredentialSpecAllowed`, 'Only one credential spec is allowed per container definition.', this);
       }
 
       for (const credSpec of props.credentialSpecs) {
@@ -590,6 +672,8 @@ export class ContainerDefinition extends Construct {
     if (props.ulimits) {
       this.addUlimits(...props.ulimits);
     }
+
+    this.validateRestartPolicy(props.enableRestartPolicy, props.restartIgnoredExitCodes, props.restartAttemptPeriod);
   }
 
   /**
@@ -600,12 +684,12 @@ export class ContainerDefinition extends Construct {
    */
   public addLink(container: ContainerDefinition, alias?: string) {
     if (this.taskDefinition.networkMode !== NetworkMode.BRIDGE) {
-      throw new Error('You must use network mode Bridge to add container links.');
+      throw new ValidationError(lit`NetworkModeBridgeContainer`, 'You must use network mode Bridge to add container links.', this);
     }
     if (alias !== undefined) {
-      this.links.push(`${container.containerName}:${alias}`);
+      this._links.push(`${container.containerName}:${alias}`);
     } else {
-      this.links.push(`${container.containerName}`);
+      this._links.push(`${container.containerName}`);
     }
   }
 
@@ -613,7 +697,7 @@ export class ContainerDefinition extends Construct {
    * This method adds one or more mount points for data volumes to the container.
    */
   public addMountPoints(...mountPoints: MountPoint[]) {
-    this.mountPoints.push(...mountPoints);
+    this._mountPoints.push(...mountPoints);
   }
 
   /**
@@ -643,7 +727,7 @@ export class ContainerDefinition extends Construct {
    * This method adds one or more port mappings to the container.
    */
   public addPortMappings(...portMappings: PortMapping[]) {
-    this.portMappings.push(...portMappings.map(pm => {
+    this._portMappings.push(...portMappings.map(pm => {
       const portMap = new PortMap(this.taskDefinition.networkMode, pm);
       portMap.validate();
       const serviceConnect = new ServiceConnect(this.taskDefinition.networkMode, pm);
@@ -692,7 +776,7 @@ export class ContainerDefinition extends Construct {
           return resource;
         }
       }
-      throw new Error(`Resource value ${resource} in container definition doesn't match any inference accelerator device name in the task definition.`);
+      throw new ValidationError(lit`ResourceValueContainerDefinition`, `Resource value ${resource} in container definition doesn't match any inference accelerator device name in the task definition.`, this);
     }));
   }
 
@@ -700,21 +784,21 @@ export class ContainerDefinition extends Construct {
    * This method adds one or more ulimits to the container.
    */
   public addUlimits(...ulimits: Ulimit[]) {
-    this.ulimits.push(...ulimits);
+    this._ulimits.push(...ulimits);
   }
 
   /**
    * This method adds one or more container dependencies to the container.
    */
   public addContainerDependencies(...containerDependencies: ContainerDependency[]) {
-    this.containerDependencies.push(...containerDependencies);
+    this._containerDependencies.push(...containerDependencies);
   }
 
   /**
    * This method adds one or more volumes to the container.
    */
   public addVolumesFrom(...volumesFrom: VolumeFrom[]) {
-    this.volumesFrom.push(...volumesFrom);
+    this._volumesFrom.push(...volumesFrom);
   }
 
   /**
@@ -751,7 +835,7 @@ export class ContainerDefinition extends Construct {
   private setNamedPort(pm: PortMapping) :void {
     if (!pm.name) return;
     if (this._namedPorts.has(pm.name)) {
-      throw new Error(`Port mapping name '${pm.name}' already exists on this container`);
+      throw new ValidationError(lit`PortMappingNameAlready`, `Port mapping name '${pm.name}' already exists on this container`, this);
     }
     this._namedPorts.set(pm.name, pm);
   }
@@ -769,6 +853,18 @@ export class ContainerDefinition extends Construct {
       ...pm,
       hostPort: 0,
     };
+  }
+
+  private validateRestartPolicy(enableRestartPolicy?: boolean, restartIgnoredExitCodes?: number[], restartAttemptPeriod?: cdk.Duration) {
+    if (enableRestartPolicy === false && (restartIgnoredExitCodes !== undefined || restartAttemptPeriod !== undefined)) {
+      throw new ValidationError(lit`RestartIgnoredExitCodesRestartAttemptPeriodCannotSpecified`, 'The restartIgnoredExitCodes and restartAttemptPeriod cannot be specified if enableRestartPolicy is false', this);
+    }
+    if (restartIgnoredExitCodes && restartIgnoredExitCodes.length > 50) {
+      throw new ValidationError(lit`OnlySpecifiedRestartIgnoredExitCodes`, `Only up to 50 can be specified for restartIgnoredExitCodes, got: ${restartIgnoredExitCodes.length}`, this);
+    }
+    if (restartAttemptPeriod && (restartAttemptPeriod.toSeconds() < 60 || restartAttemptPeriod.toSeconds() > 1800)) {
+      throw new ValidationError(lit`MustBeRestartAttemptPeriodBetweenSeconds`, `The restartAttemptPeriod must be between 60 seconds and 1800 seconds, got ${restartAttemptPeriod.toSeconds()} seconds`, this);
+    }
   }
 
   /**
@@ -791,7 +887,7 @@ export class ContainerDefinition extends Construct {
    */
   public get ingressPort(): number {
     if (this.portMappings.length === 0) {
-      throw new Error(`Container ${this.containerName} hasn't defined any ports. Call addPortMappings().`);
+      throw new ValidationError(lit`ContainerHasntDefinedPorts`, `Container ${this.containerName} hasn't defined any ports. Call addPortMappings().`, this);
     }
     const defaultPortMapping = this.portMappings[0];
 
@@ -804,7 +900,7 @@ export class ContainerDefinition extends Construct {
     }
 
     if (defaultPortMapping.containerPortRange !== undefined) {
-      throw new Error(`The first port mapping of the container ${this.containerName} must expose a single port.`);
+      throw new ValidationError(lit`FirstPortMappingContainer`, `The first port mapping of the container ${this.containerName} must expose a single port.`, this);
     }
 
     return defaultPortMapping.containerPort;
@@ -815,15 +911,32 @@ export class ContainerDefinition extends Construct {
    */
   public get containerPort(): number {
     if (this.portMappings.length === 0) {
-      throw new Error(`Container ${this.containerName} hasn't defined any ports. Call addPortMappings().`);
+      throw new ValidationError(lit`ContainerHasntDefinedPorts`, `Container ${this.containerName} hasn't defined any ports. Call addPortMappings().`, this);
     }
     const defaultPortMapping = this.portMappings[0];
 
     if (defaultPortMapping.containerPortRange !== undefined) {
-      throw new Error(`The first port mapping of the container ${this.containerName} must expose a single port.`);
+      throw new ValidationError(lit`FirstPortMappingContainer`, `The first port mapping of the container ${this.containerName} must expose a single port.`, this);
     }
 
     return defaultPortMapping.containerPort;
+  }
+
+  /**
+   * Allows disabling version consistency if the user did not specify a value.
+   *
+   * Intended for CDK asset images, as asset images are tagged based upon a hash
+   * of image inputs, meaning the image won't change if the tag didn't change,
+   * making version consistency for such containers a waste of time. Literally,
+   * as version consistency can only be achieved by slowing down deployments.
+   *
+   * @see https://docs.aws.amazon.com/AmazonECS/latest/developerguide/deployment-type-ecs.html#deployment-container-image-stability
+   * @internal
+   */
+  public _defaultDisableVersionConsistency() {
+    if (!this.versionConsistency) {
+      this.versionConsistency = VersionConsistency.DISABLED;
+    }
   }
 
   /**
@@ -837,7 +950,7 @@ export class ContainerDefinition extends Construct {
       credentialSpecs: this.credentialSpecs && this.credentialSpecs.map(renderCredentialSpec),
       cpu: this.props.cpu,
       disableNetworking: this.props.disableNetworking,
-      dependsOn: cdk.Lazy.any({ produce: () => this.containerDependencies.map(renderContainerDependency) }, { omitEmptyArray: true }),
+      dependsOn: this._containerDependencies.map(renderContainerDependency),
       dnsSearchDomains: this.props.dnsSearchDomains,
       dnsServers: this.props.dnsServers,
       dockerLabels: Object.keys(this.dockerLabels).length ? this.dockerLabels : undefined,
@@ -849,30 +962,32 @@ export class ContainerDefinition extends Construct {
       interactive: this.props.interactive,
       memory: this.props.memoryLimitMiB,
       memoryReservation: this.props.memoryReservationMiB,
-      mountPoints: cdk.Lazy.any({ produce: () => this.mountPoints.map(renderMountPoint) }, { omitEmptyArray: true }),
+      mountPoints: this._mountPoints.map(renderMountPoint),
       name: this.containerName,
-      portMappings: cdk.Lazy.any({ produce: () => this.portMappings.map(renderPortMapping) }, { omitEmptyArray: true }),
+      portMappings: this._portMappings.map(renderPortMapping),
       privileged: this.props.privileged,
       pseudoTerminal: this.props.pseudoTerminal,
       readonlyRootFilesystem: this.props.readonlyRootFilesystem,
       repositoryCredentials: this.imageConfig.repositoryCredentials,
       startTimeout: this.props.startTimeout && this.props.startTimeout.toSeconds(),
       stopTimeout: this.props.stopTimeout && this.props.stopTimeout.toSeconds(),
-      ulimits: cdk.Lazy.any({ produce: () => this.ulimits.map(renderUlimit) }, { omitEmptyArray: true }),
+      ulimits: this._ulimits.map(renderUlimit),
       user: this.props.user,
-      volumesFrom: cdk.Lazy.any({ produce: () => this.volumesFrom.map(renderVolumeFrom) }, { omitEmptyArray: true }),
+      versionConsistency: this.versionConsistency,
+      volumesFrom: this._volumesFrom.map(renderVolumeFrom),
       workingDirectory: this.props.workingDirectory,
       logConfiguration: this.logDriverConfig,
       environment: this.environment && Object.keys(this.environment).length ? renderKV(this.environment, 'name', 'value') : undefined,
       environmentFiles: this.environmentFiles && renderEnvironmentFiles(cdk.Stack.of(this).partition, this.environmentFiles),
       secrets: this.secrets.length ? this.secrets : undefined,
       extraHosts: this.props.extraHosts && renderKV(this.props.extraHosts, 'hostname', 'ipAddress'),
-      healthCheck: this.props.healthCheck && renderHealthCheck(this.props.healthCheck),
-      links: cdk.Lazy.list({ produce: () => this.links }, { omitEmpty: true }),
+      healthCheck: this.props.healthCheck && renderHealthCheck(this, this.props.healthCheck),
+      links: cdk.Token.asList(this._links, { displayHint: 'links' }),
       linuxParameters: this.linuxParameters && this.linuxParameters.renderLinuxParameters(),
       resourceRequirements: (!this.props.gpuCount && this.inferenceAcceleratorResources.length == 0 ) ? undefined :
         renderResourceRequirements(this.props.gpuCount, this.inferenceAcceleratorResources),
       systemControls: this.props.systemControls && renderSystemControls(this.props.systemControls),
+      restartPolicy: renderRestartPolicy(this.props.enableRestartPolicy, this.props.restartIgnoredExitCodes, this.props.restartAttemptPeriod),
     };
   }
 }
@@ -961,26 +1076,26 @@ function renderCredentialSpec(credSpec: CredentialSpecConfig): string {
   return `${credSpec.typePrefix}:${credSpec.location}`;
 }
 
-function renderHealthCheck(hc: HealthCheck): CfnTaskDefinition.HealthCheckProperty {
+function renderHealthCheck(scope: Construct, hc: HealthCheck): CfnTaskDefinition.HealthCheckProperty {
   if (hc.interval?.toSeconds() !== undefined) {
     if (5 > hc.interval?.toSeconds() || hc.interval?.toSeconds() > 300) {
-      throw new Error('Interval must be between 5 seconds and 300 seconds.');
+      throw new ValidationError(lit`MustBeIntervalBetweenSeconds`, 'Interval must be between 5 seconds and 300 seconds.', scope);
     }
   }
 
   if (hc.timeout?.toSeconds() !== undefined) {
     if (2 > hc.timeout?.toSeconds() || hc.timeout?.toSeconds() > 120) {
-      throw new Error('Timeout must be between 2 seconds and 120 seconds.');
+      throw new ValidationError(lit`MustBeTimeoutBetweenSeconds`, 'Timeout must be between 2 seconds and 120 seconds.', scope);
     }
   }
   if (hc.interval?.toSeconds() !== undefined && hc.timeout?.toSeconds() !== undefined) {
     if (hc.interval?.toSeconds() < hc.timeout?.toSeconds()) {
-      throw new Error('Health check interval should be longer than timeout.');
+      throw new ValidationError(lit`ShouldBeHealthCheckInterval`, 'Health check interval should be longer than timeout.', scope);
     }
   }
 
   return {
-    command: getHealthCheckCommand(hc),
+    command: getHealthCheckCommand(scope, hc),
     interval: hc.interval?.toSeconds() ?? 30,
     retries: hc.retries ?? 3,
     startPeriod: hc.startPeriod?.toSeconds(),
@@ -988,12 +1103,12 @@ function renderHealthCheck(hc: HealthCheck): CfnTaskDefinition.HealthCheckProper
   };
 }
 
-function getHealthCheckCommand(hc: HealthCheck): string[] {
+function getHealthCheckCommand(scope: Construct, hc: HealthCheck): string[] {
   const cmd = hc.command;
   const hcCommand = new Array<string>();
 
   if (cmd.length === 0) {
-    throw new Error('At least one argument must be supplied for health check command.');
+    throw new ValidationError(lit`MustBeLeastArgumentSupplied`, 'At least one argument must be supplied for health check command.', scope);
   }
 
   if (cmd.length === 1) {
@@ -1213,7 +1328,6 @@ export interface PortMapping {
  * PortMap ValueObjectClass having by ContainerDefinition
  */
 export class PortMap {
-
   /**
    * The networking mode to use for the containers in the task.
    */
@@ -1235,39 +1349,39 @@ export class PortMap {
    */
   public validate(): void {
     if (!this.isvalidPortName()) {
-      throw new Error('Port mapping name cannot be an empty string.');
+      throw new UnscopedValidationError(lit`PortMappingNameCannot`, 'Port mapping name cannot be an empty string.');
     }
 
     if (this.portmapping.containerPort === ContainerDefinition.CONTAINER_PORT_USE_RANGE && this.portmapping.containerPortRange === undefined) {
-      throw new Error(`The containerPortRange must be set when containerPort is equal to ${ContainerDefinition.CONTAINER_PORT_USE_RANGE}`);
+      throw new UnscopedValidationError(lit`MustBeContainerPortRangeContainerPortEqual`, `The containerPortRange must be set when containerPort is equal to ${ContainerDefinition.CONTAINER_PORT_USE_RANGE}`);
     }
 
     if (this.portmapping.containerPort !== ContainerDefinition.CONTAINER_PORT_USE_RANGE && this.portmapping.containerPortRange !== undefined) {
-      throw new Error('Cannot set "containerPort" and "containerPortRange" at the same time.');
+      throw new UnscopedValidationError(lit`CannotContainerPortContainerPortRange`, 'Cannot set "containerPort" and "containerPortRange" at the same time.');
     }
 
     if (this.portmapping.containerPort !== ContainerDefinition.CONTAINER_PORT_USE_RANGE) {
       if ((this.networkmode === NetworkMode.AWS_VPC || this.networkmode === NetworkMode.HOST)
           && this.portmapping.hostPort !== undefined && this.portmapping.hostPort !== this.portmapping.containerPort) {
-        throw new Error('The host port must be left out or must be the same as the container port for AwsVpc or Host network mode.');
+        throw new UnscopedValidationError(lit`MustBeHostPortLeft`, 'The host port must be left out or must be the same as the container port for AwsVpc or Host network mode.');
       }
     }
 
     if (this.portmapping.containerPortRange !== undefined) {
       if (cdk.Token.isUnresolved(this.portmapping.containerPortRange)) {
-        throw new Error('The value of containerPortRange must be concrete (no Tokens)');
+        throw new UnscopedValidationError(lit`MustBeValueContainerPortRangeConcrete`, 'The value of containerPortRange must be concrete (no Tokens)');
       }
 
       if (this.portmapping.hostPort !== undefined) {
-        throw new Error('Cannot set "hostPort" while using a port range for the container.');
+        throw new UnscopedValidationError(lit`CannotSetHostPortWithRange`, 'Cannot set "hostPort" while using a port range for the container.');
       }
 
       if (this.networkmode !== NetworkMode.BRIDGE && this.networkmode !== NetworkMode.AWS_VPC) {
-        throw new Error('Either AwsVpc or Bridge network mode is required to set a port range for the container.');
+        throw new UnscopedValidationError(lit`IsRequiredEitherAwsVpcBridge`, 'Either AwsVpc or Bridge network mode is required to set a port range for the container.');
       }
 
       if (!/^\d+-\d+$/.test(this.portmapping.containerPortRange)) {
-        throw new Error('The containerPortRange must be a string in the format [start port]-[end port].');
+        throw new UnscopedValidationError(lit`MustBeContainerPortRangeStringFormat`, 'The containerPortRange must be a string in the format [start port]-[end port].');
       }
     }
   }
@@ -1278,7 +1392,6 @@ export class PortMap {
     }
     return true;
   }
-
 }
 
 /**
@@ -1317,10 +1430,10 @@ export class ServiceConnect {
    */
   public validate() :void {
     if (!this.isValidNetworkmode()) {
-      throw new Error(`Service connect related port mapping fields 'name' and 'appProtocol' are not supported for network mode ${this.networkmode}`);
+      throw new UnscopedValidationError(lit`ServiceConnectRelatedPort`, `Service connect related port mapping fields 'name' and 'appProtocol' are not supported for network mode ${this.networkmode}`);
     }
     if (!this.isValidPortName()) {
-      throw new Error('Service connect-related port mapping field \'appProtocol\' cannot be set without \'name\'');
+      throw new UnscopedValidationError(lit`ServiceConnectRelatedPortMapping`, 'Service connect-related port mapping field \'appProtocol\' cannot be set without \'name\'');
     }
   }
 
@@ -1450,6 +1563,22 @@ function renderMountPoint(mp: MountPoint): CfnTaskDefinition.MountPointProperty 
 }
 
 /**
+ * State of the container version consistency feature.
+ *
+ * @see https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-ecs-taskdefinition-containerdefinition.html#cfn-ecs-taskdefinition-containerdefinition-versionconsistency
+ */
+export enum VersionConsistency {
+  /**
+   * The version consistency feature is enabled for this container.
+   */
+  ENABLED = 'enabled',
+  /**
+   * The version consistency feature is disabled for this container.
+   */
+  DISABLED = 'disabled',
+}
+
+/**
  * The details on a data volume from another container in the same task definition.
  */
 export interface VolumeFrom {
@@ -1494,4 +1623,24 @@ function renderSystemControls(systemControls: SystemControl[]): CfnTaskDefinitio
     namespace: sc.namespace,
     value: sc.value,
   }));
+}
+
+function renderRestartPolicy(
+  enableRestartPolicy?: boolean,
+  restartIgnoredExitCodes?: number[],
+  restartAttemptPeriod?: cdk.Duration,
+): CfnTaskDefinition.RestartPolicyProperty | undefined {
+  if (enableRestartPolicy === undefined && restartIgnoredExitCodes === undefined && restartAttemptPeriod === undefined) {
+    return;
+  }
+
+  return {
+    // If `enableRestartPolicy` is undefined, we know that `restartIgnoredExitCodes` or restartAttemptPeriod is specified
+    // according to the above branch, so we treat `enableRestartPolicy` as true.
+    // The `validateRestartPolicy` function also ensures that `enableRestartPolicy` is not false if `restartIgnoredExitCodes`
+    // or `restartAttemptPeriod` is specified, so there is no conflict.
+    enabled: enableRestartPolicy ?? true,
+    ignoredExitCodes: restartIgnoredExitCodes, // always undefined if `enabled` is false
+    restartAttemptPeriod: restartAttemptPeriod?.toSeconds(), // always undefined if `enabled` is false
+  };
 }

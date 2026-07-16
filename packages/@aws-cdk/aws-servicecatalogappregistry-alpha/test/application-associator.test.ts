@@ -1,8 +1,8 @@
+import * as cdk from 'aws-cdk-lib';
 import { Annotations, Template } from 'aws-cdk-lib/assertions';
 import * as codecommit from 'aws-cdk-lib/aws-codecommit';
-import * as cdk from 'aws-cdk-lib';
 import * as codepipeline from 'aws-cdk-lib/pipelines';
-import { Construct } from 'constructs';
+import type { Construct } from 'constructs';
 import * as appreg from '../lib';
 
 describe('Scope based Associations with Application within Same Account', () => {
@@ -75,7 +75,6 @@ describe('Associate attribute group with Application', () => {
   });
 
   test('Associate Attribute Group with application created by ApplicationAssociator', () => {
-
     const customAttributeGroup = new CustomAppRegistryAttributeGroup(app, 'AppRegistryAttributeGroup');
 
     const appAssociator = new appreg.ApplicationAssociator(app, 'TestApplication', {
@@ -91,7 +90,6 @@ describe('Associate attribute group with Application', () => {
       Application: 'TestAssociatedApplication',
       AttributeGroup: { 'Fn::GetAtt': ['MyFirstAttributeGroupDBC21379', 'Id'] },
     });
-
   });
 });
 

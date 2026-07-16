@@ -1,7 +1,7 @@
 import * as path from 'path';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
-import * as s3 from 'aws-cdk-lib/aws-s3';
+import type * as s3 from 'aws-cdk-lib/aws-s3';
 import { CustomResource, Stack } from 'aws-cdk-lib';
 import { Construct, Node } from 'constructs';
 import * as api from './s3-file-handler/api';
@@ -60,7 +60,6 @@ export class S3File extends Construct {
 }
 
 class S3FileProvider extends Construct {
-
   /**
    * Returns the singleton provider.
    */

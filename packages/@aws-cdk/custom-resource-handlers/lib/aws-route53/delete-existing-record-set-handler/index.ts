@@ -1,9 +1,10 @@
+import type { RRType } from '@aws-sdk/client-route-53';
 import { Route53, waitUntilResourceRecordSetsChanged } from '@aws-sdk/client-route-53'; // eslint-disable-line import/no-extraneous-dependencies
 
 interface ResourceProperties {
   HostedZoneId: string;
   RecordName: string;
-  RecordType: string;
+  RecordType: RRType;
 }
 
 export async function handler(event: AWSLambda.CloudFormationCustomResourceEvent) {

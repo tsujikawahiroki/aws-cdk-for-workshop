@@ -1,13 +1,13 @@
-import { StackOutputReference } from '../blueprint';
+import type { StackOutputReference } from '../blueprint';
 import { PipelineQueries } from '../helpers-internal/pipeline-queries';
-import { PipelineBase } from '../main';
+import type { PipelineBase } from '../main';
 import { stackVariableNamespace } from '../private/identifiers';
 
 /**
- * Translate stack outputs to Codepipline variable references
+ * Translate stack outputs to CodePipeline variable references
  */
 export class StackOutputsMap {
-  private queries: PipelineQueries
+  private queries: PipelineQueries;
 
   constructor(pipeline: PipelineBase) {
     this.queries = new PipelineQueries(pipeline);

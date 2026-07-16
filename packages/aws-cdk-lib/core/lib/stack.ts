@@ -1,30 +1,37 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { IConstruct, Construct, Node } from 'constructs';
+import type { IConstruct, IMixin } from 'constructs';
+import { Construct, Node } from 'constructs';
 import { Annotations } from './annotations';
 import { App } from './app';
-import { Arn, ArnComponents, ArnFormat } from './arn';
+import type { ArnComponents, ArnFormat } from './arn';
+import { Arn } from './arn';
 import { Aspects } from './aspect';
-import { DockerImageAssetLocation, DockerImageAssetSource, FileAssetLocation, FileAssetSource } from './assets';
+import type { DockerImageAssetLocation, DockerImageAssetSource, FileAssetLocation, FileAssetSource } from './assets';
 import { CfnElement } from './cfn-element';
 import { Fn } from './cfn-fn';
 import { Aws, ScopedAws } from './cfn-pseudo';
 import { CfnResource, TagType } from './cfn-resource';
 import { ContextProvider } from './context-provider';
-import { Environment } from './environment';
+import type { Environment, ResourceEnvironment } from './environment';
 import { FeatureFlags } from './feature-flags';
-import { PermissionsBoundary, PERMISSIONS_BOUNDARY_CONTEXT_KEY } from './permissions-boundary';
+import { withMixins } from './mixins/private/mixin-metadata';
+import type { PermissionsBoundary } from './permissions-boundary';
+import { PERMISSIONS_BOUNDARY_CONTEXT_KEY } from './permissions-boundary';
 import { CLOUDFORMATION_TOKEN_RESOLVER, CloudFormationLang } from './private/cloudformation-lang';
 import { LogicalIDs } from './private/logical-id';
 import { resolve } from './private/resolve';
 import { makeUniqueId } from './private/uniqueid';
+import type { IPropertyInjector } from './prop-injectors';
+import { PropertyInjectors } from './prop-injectors';
 import * as cxschema from '../../cloud-assembly-schema';
 import { INCLUDE_PREFIX_IN_UNIQUE_NAME_GENERATION } from '../../cx-api';
 import * as cxapi from '../../cx-api';
+import { profileFn } from './private/perf';
 
 // Must be a 'require' to not run afoul of ESM module import rules
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const minimatch = require('minimatch');
+const { minimatch } = require('minimatch');
 
 const STACK_SYMBOL = Symbol.for('@aws-cdk/core.Stack');
 const MY_STACK_CACHE = Symbol.for('@aws-cdk/core.Stack.myStack');
@@ -38,7 +45,6 @@ const VALID_STACK_NAME_REGEX = /^[A-Za-z][A-Za-z0-9-]*$/;
 
 const MAX_RESOURCES = 500;
 
-const STRING_LIST_REFERENCE_DELIMITER = '||';
 export interface StackProps {
   /**
    * A description of the stack.
@@ -121,11 +127,26 @@ export interface StackProps {
   readonly stackName?: string;
 
   /**
-   * Stack tags that will be applied to all the taggable resources and the stack itself.
+   * Tags that will be applied to the Stack
+   *
+   * These tags are applied to the CloudFormation Stack itself. They will not
+   * appear in the CloudFormation template.
+   *
+   * However, at deployment time, CloudFormation will apply these tags to all
+   * resources in the stack that support tagging. You will not be able to exempt
+   * resources from tagging (using the `excludeResourceTypes` property of
+   * `Tags.of(...).add()`) for tags applied in this way.
    *
    * @default {}
    */
   readonly tags?: { [key: string]: string };
+
+  /**
+   * SNS Topic ARNs that will receive stack events.
+   *
+   * @default - no notification arns.
+   */
+  readonly notificationArns?: string[];
 
   /**
    * Synthesis method to use while deploying this stack
@@ -188,8 +209,14 @@ export interface StackProps {
    * default value `false` will be used.
    *
    * @default - the value of `@aws-cdk/core:suppressTemplateIndentation`, or `false` if that is not set.
-  */
+   */
   readonly suppressTemplateIndentation?: boolean;
+
+  /**
+   * A list of IPropertyInjector attached to this Stack.
+   * @default - no PropertyInjectors
+   */
+  readonly propertyInjectors?: IPropertyInjector[];
 }
 
 /**
@@ -201,12 +228,15 @@ export class Stack extends Construct implements ITaggable {
    *
    * We do attribute detection since we can't reliably use 'instanceof'.
    */
-  public static isStack(x: any): x is Stack {
-    return x !== null && typeof(x) === 'object' && STACK_SYMBOL in x;
+  public static isStack(this: void, x: any): x is Stack {
+    return x !== null && typeof (x) === 'object' && STACK_SYMBOL in x;
   }
 
   /**
    * Looks up the first stack scope in which `construct` is defined. Fails if there is no stack up the tree.
+   *
+   * Will return the closest containing `Stack` or `NestedStack`.
+   *
    * @param construct The construct to start the search from.
    */
   public static of(construct: IConstruct): Stack {
@@ -233,13 +263,56 @@ export class Stack extends Construct implements ITaggable {
         return c;
       }
 
-      const _scope = Node.of(c).scope;
+      const _scope = c.node.scope;
       if (Stage.isStage(c) || !_scope) {
-        throw new Error(`${construct.constructor?.name ?? 'Construct'} at '${Node.of(construct).path}' should be created in the scope of a Stack, but no Stack found`);
+        throw new ValidationError(lit`ShouldBeCreatedInStackScope`, `${construct.constructor?.name ?? 'Construct'} at '${Node.of(construct).path}' should be created in the scope of a Stack, but no Stack found`, c);
       }
 
       return _lookup(_scope);
     }
+  }
+
+  /**
+   * Override the reference strength for a specific cross-stack reference value.
+   *
+   * Use this to weaken (or strengthen) an individual reference without
+   * affecting other references to the same resource. For example:
+   *
+   * ```ts
+   * // producerStack defines an SNS topic
+   * declare const topic: sns.Topic;
+   *
+   * // consumerStack subscribes to it with a weak reference,
+   * // so the producer can be torn down without blocking on this consumer
+   * const consumerStack = new Stack(app, 'Consumer', {
+   *   env: { account: '123456789012', region: 'us-east-1' },
+   * });
+   * new sns.Subscription(consumerStack, 'Subscription', {
+   *   topic: sns.Topic.fromTopicArn(consumerStack, 'Topic', Stack.consumeReference(topic.topicArn)),
+   *   endpoint: 'https://example.com/webhook',
+   *   protocol: sns.SubscriptionProtocol.HTTPS,
+   * });
+   * ```
+   *
+   * @param value A tokenized string reference (e.g. `bucket.bucketArn`).
+   * @param strength The reference strength to use. Defaults to `BOTH`.
+   * @returns A token that resolves to the same value but uses the overridden strength.
+   */
+  public static consumeReference(value: string, strength: ReferenceStrength = ReferenceStrength.BOTH): string {
+    return Token.asString(makeCustomCoupledReference(value, strength));
+  }
+
+  /**
+   * Override the reference strength for a specific cross-stack string list reference.
+   *
+   * This is the string list equivalent of `consumeReference`.
+   *
+   * @param value A tokenized string list reference.
+   * @param strength The reference strength to use. Defaults to `BOTH`.
+   * @returns A token that resolves to the same value but uses the overridden strength.
+   */
+  public static consumeListReference(value: string[], strength: ReferenceStrength = ReferenceStrength.BOTH): string[] {
+    return Token.asList(makeCustomCoupledReference(value, strength));
   }
 
   /**
@@ -290,9 +363,9 @@ export class Stack extends Construct implements ITaggable {
    * check that it is a concrete value an not an unresolved token. If this
    * value is an unresolved token (`Token.isUnresolved(stack.account)` returns
    * `true`), this implies that the user wishes that this stack will synthesize
-   * into a **account-agnostic template**. In this case, your code should either
+   * into an **account-agnostic template**. In this case, your code should either
    * fail (throw an error, emit a synth error using `Annotations.of(construct).addError()`) or
-   * implement some other region-agnostic behavior.
+   * implement some other account-agnostic behavior.
    */
   public readonly account: string;
 
@@ -365,6 +438,13 @@ export class Stack extends Construct implements ITaggable {
   public readonly _crossRegionReferences: boolean;
 
   /**
+   * SNS Notification ARNs to receive stack events.
+   *
+   * @internal
+   */
+  public readonly _notificationArns?: string[];
+
+  /**
    * Logical ID generation strategy
    */
   private readonly _logicalIds: LogicalIDs;
@@ -411,7 +491,6 @@ export class Stack extends Construct implements ITaggable {
     // as the parent because apps implement much of the synthesis logic.
     scope = scope ?? new App({
       autoSynth: false,
-      outdir: FileSystem.mkdtemp('cdk-test-app-'),
     });
 
     // "Default" is a "hidden id" from a `node.uniqueId` perspective
@@ -419,13 +498,22 @@ export class Stack extends Construct implements ITaggable {
 
     super(scope, id);
 
+    if (props.propertyInjectors) {
+      const injectors = PropertyInjectors.of(this);
+      injectors.add(...props.propertyInjectors);
+    }
+
     this._missingContext = new Array<cxschema.MissingContext>();
-    this._stackDependencies = { };
-    this.templateOptions = { };
+    this._stackDependencies = {};
+    this.templateOptions = {};
     this._crossRegionReferences = !!props.crossRegionReferences;
     this._suppressTemplateIndentation = props.suppressTemplateIndentation ?? this.node.tryGetContext(SUPPRESS_TEMPLATE_INDENTATION_CONTEXT) ?? false;
 
     Object.defineProperty(this, STACK_SYMBOL, { value: true });
+
+    if (!this.node.tryGetContext(cxapi.DISABLE_CREATION_STACK_TRACES) || debugModeEnabled()) {
+      this.node.addMetadata(cxschema.ArtifactMetadataEntryType.CREATION_STACK, captureStackTrace(new.target));
+    }
 
     this._logicalIds = new LogicalIDs();
 
@@ -440,19 +528,27 @@ export class Stack extends Construct implements ITaggable {
       // Max length 1024 bytes
       // Typically 2 bytes per character, may be more for more exotic characters
       if (props.description.length > 512) {
-        throw new Error(`Stack description must be <= 1024 bytes. Received description: '${props.description}'`);
+        throw new ValidationError(lit`StackDescriptionTooLong`, `Stack description must be <= 1024 bytes. Received description: '${props.description}'`, this);
       }
       this.templateOptions.description = props.description;
     }
 
     this._stackName = props.stackName ?? this.generateStackName();
     if (this._stackName.length > 128) {
-      throw new Error(`Stack name must be <= 128 characters. Stack name: '${this._stackName}'`);
+      throw new ValidationError(lit`StackNameTooLong`, `Stack name must be <= 128 characters. Stack name: '${this._stackName}'`, this);
     }
     this.tags = new TagManager(TagType.KEY_VALUE, 'aws:cdk:stack', props.tags);
 
+    for (const notificationArn of props.notificationArns ?? []) {
+      if (Token.isUnresolved(notificationArn)) {
+        throw new ValidationError(lit`StackNotificationArnsContainTokens`, `Stack '${id}' includes one or more tokens in its notification ARNs: ${props.notificationArns}`, this);
+      }
+    }
+
+    this._notificationArns = props.notificationArns;
+
     if (!VALID_STACK_NAME_REGEX.test(this.stackName)) {
-      throw new Error(`Stack name must match the regular expression: ${VALID_STACK_NAME_REGEX.toString()}, got '${this.stackName}'`);
+      throw new ValidationError(lit`StackNameInvalidFormat`, `Stack name must match the regular expression: ${VALID_STACK_NAME_REGEX.toString()}, got '${this.stackName}'`, this);
     }
 
     // the preferred behavior is to generate a unique id for this stack and use
@@ -466,9 +562,11 @@ export class Stack extends Construct implements ITaggable {
     const featureFlags = FeatureFlags.of(this);
     const stackNameDupeContext = featureFlags.isEnabled(cxapi.ENABLE_STACK_NAME_DUPLICATES_CONTEXT);
     const newStyleSynthesisContext = featureFlags.isEnabled(cxapi.NEW_STYLE_STACK_SYNTHESIS_CONTEXT);
-    this.artifactId = (stackNameDupeContext || newStyleSynthesisContext)
+    const artifactId = (stackNameDupeContext || newStyleSynthesisContext)
       ? this.generateStackArtifactId()
       : this.stackName;
+    // Sanitize artifact id, since it is used as part of a file name
+    this.artifactId = artifactId.replace(/[^A-Za-z0-9_\-\.]/g, '_');
 
     this.templateFile = `${this.artifactId}.template.json`;
 
@@ -536,11 +634,11 @@ export class Stack extends Construct implements ITaggable {
     }
     if (arn &&
       (arn.includes('${Qualifier}')
-      || arn.includes('${AWS::AccountId}')
-      || arn.includes('${AWS::Region}')
-      || arn.includes('${AWS::Partition}'))) {
-      throw new Error(`The permissions boundary ${arn} includes a pseudo parameter, ` +
-      'which is not supported for environment agnostic stacks');
+        || arn.includes('${AWS::AccountId}')
+        || arn.includes('${AWS::Region}')
+        || arn.includes('${AWS::Partition}'))) {
+      throw new ValidationError(lit`PermissionsBoundaryContainsPseudoParameter`, `The permissions boundary ${arn} includes a pseudo parameter, ` +
+        'which is not supported for environment agnostic stacks', this);
     }
     return arn;
   }
@@ -556,19 +654,25 @@ export class Stack extends Construct implements ITaggable {
         visit(node: IConstruct) {
           if (
             CfnResource.isCfnResource(node) &&
-              (node.cfnResourceType == 'AWS::IAM::Role' || node.cfnResourceType == 'AWS::IAM::User')
+            (node.cfnResourceType == 'AWS::IAM::Role' || node.cfnResourceType == 'AWS::IAM::User')
           ) {
             node.addPropertyOverride('PermissionsBoundary', permissionsBoundaryArn);
           }
         },
+      }, {
+        priority: mutatingAspectPrio32333(this),
       });
-
     }
+  }
+
+  public with(...mixins: IMixin[]): IConstruct {
+    return withMixins(this, ...mixins);
   }
 
   /**
    * Resolve a tokenized value in the context of the current stack.
    */
+  @profileFn('Stack.resolve', { telemetry: true })
   public resolve(obj: any): any {
     return resolve(obj, {
       scope: this,
@@ -581,7 +685,7 @@ export class Stack extends Construct implements ITaggable {
   /**
    * Convert an object, potentially containing tokens, to a JSON string
    */
-  public toJsonString(obj: any, space?: number): string {
+  public toJsonString(this: void, obj: any, space?: number): string {
     return CloudFormationLang.toJSON(obj, space).toString();
   }
 
@@ -598,7 +702,7 @@ export class Stack extends Construct implements ITaggable {
    */
   public reportMissingContext(report: cxapi.MissingContext) {
     if (!Object.values(cxschema.ContextProvider).includes(report.provider as cxschema.ContextProvider)) {
-      throw new Error(`Unknown context provider requested in: ${JSON.stringify(report)}`);
+      throw new ValidationError(lit`UnknownContextProvider`, `Unknown context provider requested in: ${JSON.stringify(report)}`, this);
     }
     this.reportMissingContextKey(report as cxschema.MissingContext);
   }
@@ -720,7 +824,7 @@ export class Stack extends Construct implements ITaggable {
   }
 
   /**
-   * Indicates if this is a nested stack, in which case `parentStack` will include a reference to it's parent.
+   * Indicates if this is a nested stack, in which case `parentStack` will include a reference to its parent.
    */
   public get nested(): boolean {
     return this.nestedStackResource !== undefined;
@@ -838,7 +942,7 @@ export class Stack extends Construct implements ITaggable {
     }).value;
 
     if (!Array.isArray(value)) {
-      throw new Error(`Provider ${cxschema.ContextProvider.AVAILABILITY_ZONE_PROVIDER} expects a list`);
+      throw new ValidationError(lit`ProviderExpectedList`, `Provider ${cxschema.ContextProvider.AVAILABILITY_ZONE_PROVIDER} expects a list`, this);
     }
 
     return value;
@@ -865,7 +969,7 @@ export class Stack extends Construct implements ITaggable {
   }
 
   /**
-   * If this is a nested stack, returns it's parent stack.
+   * If this is a nested stack, returns its parent stack.
    */
   public get nestedStackParent() {
     return this.nestedStackResource && Stack.of(this.nestedStackResource);
@@ -902,7 +1006,7 @@ export class Stack extends Construct implements ITaggable {
   }
 
   /**
-   * Adds an arbitary key-value pair, with information you want to record about the stack.
+   * Adds an arbitrary key-value pair, with information you want to record about the stack.
    * These get translated to the Metadata section of the generated template.
    *
    * @see https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/metadata-section-structure.html
@@ -926,7 +1030,7 @@ export class Stack extends Construct implements ITaggable {
   public _addAssemblyDependency(target: Stack, reason: StackDependencyReason = {}) {
     // defensive: we should never get here for nested stacks
     if (this.nested || target.nested) {
-      throw new Error('Cannot add assembly-level dependencies for nested stacks');
+      throw new ValidationError(lit`CannotAddAssemblyLevelDependencies`, 'Cannot add assembly-level dependencies for nested stacks', this);
     }
     // Fill in reason details if not provided
     if (!reason.source) {
@@ -944,8 +1048,8 @@ export class Stack extends Construct implements ITaggable {
       const cycleDescription = cycle.map((cycleReason) => {
         return cycleReason.description;
       }).join(', ');
-      // eslint-disable-next-line max-len
-      throw new Error(`'${target.node.path}' depends on '${this.node.path}' (${cycleDescription}). Adding this dependency (${reason.description}) would create a cyclic reference.`);
+
+      throw new ValidationError(lit`DependencyCycle`, `'${target.node.path}' depends on '${this.node.path}' (${cycleDescription}). Adding this dependency (${reason.description}) would create a cyclic reference.`, this);
     }
 
     let dep = this._stackDependencies[Names.uniqueId(target)];
@@ -981,7 +1085,7 @@ export class Stack extends Construct implements ITaggable {
    */
   public _obtainAssemblyDependencies(reasonFilter: StackDependencyReason): Element[] {
     if (!reasonFilter.source) {
-      throw new Error('reasonFilter.source must be defined!');
+      throw new ValidationError(lit`ReasonFilterSourceRequired`, 'reasonFilter.source must be defined!', this);
     }
     // Assume reasonFilter has only source defined
     let dependencies: Set<Element> = new Set();
@@ -989,7 +1093,7 @@ export class Stack extends Construct implements ITaggable {
       dep.reasons.forEach((reason) => {
         if (reasonFilter.source == reason.source) {
           if (!reason.target) {
-            throw new Error(`Encountered an invalid dependency target from source '${reasonFilter.source!.node.path}'`);
+            throw new ValidationError(lit`InvalidDependencyTarget`, `Encountered an invalid dependency target from source '${reasonFilter.source!.node.path}'`, this);
           }
           dependencies.add(reason.target);
         }
@@ -1007,10 +1111,10 @@ export class Stack extends Construct implements ITaggable {
    *
    * @internal
    */
-  public _removeAssemblyDependency(target: Stack, reasonFilter: StackDependencyReason={}) {
+  public _removeAssemblyDependency(target: Stack, reasonFilter: StackDependencyReason = {}) {
     // defensive: we should never get here for nested stacks
     if (this.nested || target.nested) {
-      throw new Error('There cannot be assembly-level dependencies for nested stacks');
+      throw new ValidationError(lit`CannotRemoveAssemblyLevelDependencies`, 'There cannot be assembly-level dependencies for nested stacks', this);
     }
     // No need to check for a dependency cycle when removing one
 
@@ -1036,7 +1140,7 @@ export class Stack extends Construct implements ITaggable {
       }
     });
     if (matchedReasons.size > 1) {
-      throw new Error(`There cannot be more than one reason for dependency removal, found: ${matchedReasons}`);
+      throw new ValidationError(lit`TooManyDependencyReasons`, `There cannot be more than one reason for dependency removal, found: ${matchedReasons}`, this);
     }
     if (matchedReasons.size == 0) {
       // Reason is already not there - return now
@@ -1061,7 +1165,10 @@ export class Stack extends Construct implements ITaggable {
    * Synthesizes the cloudformation template into a cloud assembly.
    * @internal
    */
-  public _synthesizeTemplate(session: ISynthesisSession, lookupRoleArn?: string): void {
+  public _synthesizeTemplate(session: ISynthesisSession,
+    lookupRoleArn?: string,
+    lookupRoleExternalId?: string,
+    lookupRoleAdditionalOptions?: { [key: string]: any }): void {
     // In principle, stack synthesis is delegated to the
     // StackSynthesis object.
     //
@@ -1081,7 +1188,7 @@ export class Stack extends Construct implements ITaggable {
 
       if (numberOfResources > this.maxResources) {
         const counts = Object.entries(count(Object.values(resources).map((r: any) => `${r?.Type}`))).map(([type, c]) => `${type} (${c})`).join(', ');
-        throw new Error(`Number of resources in stack '${this.node.path}': ${numberOfResources} is greater than allowed maximum of ${this.maxResources}: ${counts}`);
+        throw new ValidationError(lit`TooManyResourcesInStack`, `Number of resources in stack '${this.node.path}': ${numberOfResources} is greater than allowed maximum of ${this.maxResources}: ${counts}`, this);
       } else if (numberOfResources >= (this.maxResources * 0.8)) {
         Annotations.of(this).addInfo(`Number of resources: ${numberOfResources} is approaching allowed maximum of ${this.maxResources}`);
       }
@@ -1104,11 +1211,16 @@ export class Stack extends Construct implements ITaggable {
     fs.writeFileSync(outPath, templateData);
 
     for (const ctx of this._missingContext) {
-      if (lookupRoleArn != null) {
-        builder.addMissing({ ...ctx, props: { ...ctx.props, lookupRoleArn } });
-      } else {
-        builder.addMissing(ctx);
-      }
+      // 'account' and 'region' are added to the schema at tree instantiation time.
+      // these options however are only known at synthesis, so are added here.
+      // see https://github.com/aws/aws-cdk/blob/v2.158.0/packages/aws-cdk-lib/core/lib/context-provider.ts#L71
+      const queryLookupOptions: Omit<cxschema.ContextLookupRoleOptions, 'account' | 'region'> = {
+        lookupRoleArn,
+        lookupRoleExternalId,
+        assumeRoleAdditionalOptions: lookupRoleAdditionalOptions,
+      };
+
+      builder.addMissing({ ...ctx, props: { ...ctx.props, ...queryLookupOptions } });
     }
   }
 
@@ -1135,14 +1247,14 @@ export class Stack extends Construct implements ITaggable {
     if (!Token.isUnresolved(this.region)) {
       const ret = Fact.find(this.region, factName) ?? defaultValue;
       if (ret === undefined) {
-        throw new Error(`region-info: don't know ${factName} for region ${this.region}. Use 'Fact.register' to provide this value.`);
+        throw new ValidationError(lit`RegionFactNotFound`, `region-info: don't know ${factName} for region ${this.region}. Use 'Fact.register' to provide this value.`, this);
       }
       return ret;
     }
 
     const partitions = Node.of(this).tryGetContext(cxapi.TARGET_PARTITIONS);
     if (partitions !== undefined && partitions !== 'undefined' && !Array.isArray(partitions)) {
-      throw new Error(`Context value '${cxapi.TARGET_PARTITIONS}' should be a list of strings, got: ${JSON.stringify(partitions)}`);
+      throw new ValidationError(lit`TargetPartitionsContextValueInvalid`, `Context value '${cxapi.TARGET_PARTITIONS}' should be a list of strings, got: ${JSON.stringify(partitions)}`, this);
     }
 
     const lookupMap =
@@ -1171,8 +1283,6 @@ export class Stack extends Construct implements ITaggable {
    * remove the reference from the consuming stack. After that, you can remove
    * the resource and the manual export.
    *
-   * ## Example
-   *
    * Here is how the process works. Let's say there are two stacks,
    * `producerStack` and `consumerStack`, and `producerStack` has a bucket
    * called `bucket`, which is referenced by `consumerStack` (perhaps because
@@ -1183,7 +1293,7 @@ export class Stack extends Construct implements ITaggable {
    *
    * Instead, the process takes two deployments:
    *
-   * ### Deployment 1: break the relationship
+   * **Deployment 1: break the relationship**:
    *
    * - Make sure `consumerStack` no longer references `bucket.bucketName` (maybe the consumer
    *   stack now uses its own bucket, or it writes to an AWS DynamoDB table, or maybe you just
@@ -1193,7 +1303,7 @@ export class Stack extends Construct implements ITaggable {
    *   between the two stacks is being broken.
    * - Deploy (this will effectively only change the `consumerStack`, but it's safe to deploy both).
    *
-   * ### Deployment 2: remove the bucket resource
+   * **Deployment 2: remove the bucket resource**:
    *
    * - You are now free to remove the `bucket` resource from `producerStack`.
    * - Don't forget to remove the `exportValue()` call as well.
@@ -1223,7 +1333,7 @@ export class Stack extends Construct implements ITaggable {
     const importValue = Fn.importValue(exportName);
 
     if (Array.isArray(importValue)) {
-      throw new Error('Attempted to export a list value from `exportValue()`: use `exportStringListValue()` instead');
+      throw new ValidationError(lit`ExportedListValueFromExportValue`, 'Attempted to export a list value from `exportValue()`: use `exportStringListValue()` instead', this);
     }
 
     return importValue;
@@ -1279,7 +1389,7 @@ export class Stack extends Construct implements ITaggable {
     const importValue = Fn.split(STRING_LIST_REFERENCE_DELIMITER, Fn.importValue(exportName));
 
     if (!Array.isArray(importValue)) {
-      throw new Error('Attempted to export a string value from `exportStringListValue()`: use `exportValue()` instead');
+      throw new ValidationError(lit`ExportedStringValueFromExportStringListValue`, 'Attempted to export a string value from `exportStringListValue()`: use `exportValue()` instead', this);
     }
 
     return importValue;
@@ -1342,7 +1452,7 @@ export class Stack extends Construct implements ITaggable {
    */
   protected _validateId(name: string) {
     if (name && !VALID_STACK_NAME_REGEX.test(name)) {
-      throw new Error(`Stack name must match the regular expression: ${VALID_STACK_NAME_REGEX.toString()}, got '${name}'`);
+      throw new ValidationError(lit`InvalidStackNameFormat`, `Stack name must match the regular expression: ${VALID_STACK_NAME_REGEX.toString()}, got '${name}'`, this);
     }
   }
 
@@ -1356,7 +1466,6 @@ export class Stack extends Construct implements ITaggable {
     let transform: string | string[] | undefined;
 
     if (this.templateOptions.transform) {
-      // eslint-disable-next-line max-len
       Annotations.of(this).addWarningV2('@aws-cdk/core:stackDeprecatedTransform', 'This stack is using the deprecated `templateOptions.transform` property. Consider switching to `addTransform()`.');
       this.addTransform(this.templateOptions.transform);
     }
@@ -1417,12 +1526,12 @@ export class Stack extends Construct implements ITaggable {
     // between producer and consumer anyway, so we can just assume that they are).
     const containingAssembly = Stage.of(this);
 
-    if (env.account && typeof(env.account) !== 'string') {
-      throw new Error(`Account id of stack environment must be a 'string' but received '${typeof(env.account)}'`);
+    if (env.account && typeof (env.account) !== 'string') {
+      throw new ValidationError(lit`AccountIdMustBeString`, `Account id of stack environment must be a 'string' but received '${typeof (env.account)}'`, this);
     }
 
-    if (env.region && typeof(env.region) !== 'string') {
-      throw new Error(`Region of stack environment must be a 'string' but received '${typeof(env.region)}'`);
+    if (env.region && typeof (env.region) !== 'string') {
+      throw new ValidationError(lit`RegionMustBeString`, `Region of stack environment must be a 'string' but received '${typeof (env.region)}'`, this);
     }
 
     const account = env.account ?? containingAssembly?.account ?? Aws.ACCOUNT_ID;
@@ -1510,14 +1619,14 @@ export class Stack extends Construct implements ITaggable {
   /**
    * Generate an ID with respect to the given container construct.
    */
-  private generateStackId(container: IConstruct | undefined, prefix: string='') {
+  private generateStackId(container: IConstruct | undefined, prefix: string = '') {
     const rootPath = rootPathTo(this, container);
     const ids = rootPath.map(c => Node.of(c).id);
 
     // In unit tests our Stack (which is the only component) may not have an
     // id, so in that case just pretend it's "Stack".
     if (ids.length === 1 && !ids[0]) {
-      throw new Error('unexpected: stack id must always be defined');
+      throw new ValidationError(lit`StackIdMustBeDefined`, 'unexpected: stack id must always be defined', this);
     }
 
     return makeStackName(ids, prefix);
@@ -1526,7 +1635,7 @@ export class Stack extends Construct implements ITaggable {
   private resolveExportedValue(exportedValue: any): ResolvedExport {
     const resolvable = Tokenization.reverse(exportedValue);
     if (!resolvable || !Reference.isReference(resolvable)) {
-      throw new Error('exportValue: either supply \'name\' or make sure to export a resource attribute (like \'bucket.bucketName\')');
+      throw new ValidationError(lit`ExportValueRequiresNameOrResourceAttribute`, 'exportValue: either supply \'name\' or make sure to export a resource attribute (like \'bucket.bucketName\')', this);
     }
 
     // "teleport" the value here, in case it comes from a nested stack. This will also
@@ -1545,7 +1654,7 @@ export class Stack extends Construct implements ITaggable {
     const exportName = generateExportName(exportsScope, id);
 
     if (Token.isUnresolved(exportName)) {
-      throw new Error(`unresolved token in generated export name: ${JSON.stringify(this.resolve(exportName))}`);
+      throw new ValidationError(lit`UnresolvedTokenInExportName`, `unresolved token in generated export name: ${JSON.stringify(this.resolve(exportName))}`, this);
     }
 
     return {
@@ -1566,6 +1675,34 @@ export class Stack extends Construct implements ITaggable {
       this.node.path, // use the same value for pattern matching as the aws-cdk CLI (displayName / hierarchicalId)
       pattern,
     ));
+  }
+
+  /**
+   * Configure a stack tag
+   *
+   * At deploy time, CloudFormation will automatically apply all stack tags to all resources in the stack.
+   */
+  public addStackTag(tagName: string, tagValue: string) {
+    this.tags.setTag(tagName, tagValue);
+  }
+
+  /**
+   * Remove a stack tag
+   *
+   * At deploy time, CloudFormation will automatically apply all stack tags to all resources in the stack.
+   */
+  public removeStackTag(tagName: string) {
+    this.tags.removeTag(tagName, 0);
+  }
+
+  /**
+   * The environment this Stack deploys to
+   */
+  public get env(): ResourceEnvironment {
+    return {
+      account: this.account,
+      region: this.region,
+    };
   }
 }
 
@@ -1589,7 +1726,7 @@ function mergeSection(section: string, val1: any, val2: any): any {
       return `${val1}\n${val2}`;
     case 'AWSTemplateFormatVersion':
       if (val1 != null && val2 != null && val1 !== val2) {
-        throw new Error(`Conflicting CloudFormation template versions provided: '${val1}' and '${val2}`);
+        throw new AssumptionError(lit`ConflictingCloudformationTemplateVersions`, `Conflicting CloudFormation template versions provided: '${val1}' and '${val2}`);
       }
       return val1 ?? val2;
     case 'Transform':
@@ -1612,16 +1749,16 @@ function mergeSets(val1: any, val2: any): any {
 
 function mergeObjectsWithoutDuplicates(section: string, dest: any, src: any): any {
   if (typeof dest !== 'object') {
-    throw new Error(`Expecting ${JSON.stringify(dest)} to be an object`);
+    throw new AssumptionError(lit`ExpectingObject`, `Expecting ${JSON.stringify(dest)} to be an object`);
   }
   if (typeof src !== 'object') {
-    throw new Error(`Expecting ${JSON.stringify(src)} to be an object`);
+    throw new AssumptionError(lit`ExpectingObject`, `Expecting ${JSON.stringify(src)} to be an object`);
   }
 
   // add all entities from source section to destination section
   for (const id of Object.keys(src)) {
     if (id in dest) {
-      throw new Error(`section '${section}' already contains '${id}'`);
+      throw new AssumptionError(lit`SectionAlreadyContains`, `section '${section}' already contains '${id}'`);
     }
     dest[id] = src[id];
   }
@@ -1706,7 +1843,7 @@ export function rootPathTo(construct: IConstruct, ancestor?: IConstruct): IConst
  * has only one component. Otherwise we fall back to the regular "makeUniqueId"
  * behavior.
  */
-function makeStackName(components: string[], prefix: string='') {
+function makeStackName(components: string[], prefix: string = '') {
   if (components.length === 1) {
     const stack_name = prefix + components[0];
     if (stack_name.length <= 128) {
@@ -1754,7 +1891,7 @@ interface StackDependency {
 }
 
 interface ResolvedExport {
-  exportable: Reference;
+  exportable: Intrinsic;
   exportsScope: Construct;
   id: string;
   exportName: string;
@@ -1794,18 +1931,40 @@ function count(xs: string[]): Record<string, number> {
 // These imports have to be at the end to prevent circular imports
 /* eslint-disable import/order */
 import { CfnOutput } from './cfn-output';
-import { addDependency, Element } from './deps';
-import { FileSystem } from './fs';
+import { ReferenceStrength } from './cross-stack-reference-strength';
+import type { Element } from './deps';
+import { addDependency } from './deps';
 import { Names } from './names';
 import { Reference } from './reference';
-import { IResolvable } from './resolvable';
-import { DefaultStackSynthesizer, IStackSynthesizer, ISynthesisSession, LegacyStackSynthesizer, BOOTSTRAP_QUALIFIER_CONTEXT, isReusableStackSynthesizer } from './stack-synthesizers';
+import type { IResolvable } from './resolvable';
+import type { IStackSynthesizer, ISynthesisSession } from './stack-synthesizers';
+import { DefaultStackSynthesizer, LegacyStackSynthesizer, BOOTSTRAP_QUALIFIER_CONTEXT, isReusableStackSynthesizer } from './stack-synthesizers';
 import { StringSpecializer } from './helpers-internal/string-specializer';
 import { Stage } from './stage';
-import { ITaggable, TagManager } from './tag-manager';
+import type { ITaggable } from './tag-manager';
+import { TagManager } from './tag-manager';
 import { Token, Tokenization } from './token';
-import { getExportable } from './private/refs';
+import { getExportable, CustomCoupledReference, STRING_LIST_REFERENCE_DELIMITER } from './private/refs';
+import { CfnReference } from './private/cfn-reference';
 import { Fact, RegionInfo } from '../../region-info';
 import { deployTimeLookup } from './private/region-lookup';
-import { makeUniqueResourceName } from './private/unique-resource-name';import { PRIVATE_CONTEXT_DEFAULT_STACK_SYNTHESIZER } from './private/private-context';
+import { makeUniqueResourceName } from './private/unique-resource-name';
+import { PRIVATE_CONTEXT_DEFAULT_STACK_SYNTHESIZER } from './private/private-context';
+import type { Intrinsic } from './private/intrinsic';
+import { mutatingAspectPrio32333 } from './private/aspect-prio';
+import { AssumptionError, UnscopedValidationError, ValidationError } from './errors';
+import { lit } from './private/literal-string';
+import { debugModeEnabled } from './debug';
+import { captureStackTrace } from './private/stack-trace';
 /* eslint-enable import/order */
+
+function makeCustomCoupledReference(value: any, strength: ReferenceStrength): CustomCoupledReference {
+  const resolvable = Tokenization.reverse(value);
+  if (!resolvable || !CfnReference.isCfnReference(resolvable)) {
+    throw new UnscopedValidationError(
+      lit`ConsumeReferenceRequiresResourceAttribute`,
+      'consumeReference: the value must be a resource attribute reference (like \'bucket.bucketArn\')',
+    );
+  }
+  return new CustomCoupledReference(resolvable, strength);
+}

@@ -1,11 +1,12 @@
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as eks from 'aws-cdk-lib/aws-eks';
-import { AwsAuthMapping } from 'aws-cdk-lib/aws-eks';
+import type { AwsAuthMapping } from 'aws-cdk-lib/aws-eks';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as sfn from 'aws-cdk-lib/aws-stepfunctions';
 import * as cdk from 'aws-cdk-lib';
 import { Aws } from 'aws-cdk-lib';
 import * as integ from '@aws-cdk/integ-tests-alpha';
+import { KubectlV31Layer } from '@aws-cdk/lambda-layer-kubectl-v31';
 import { EmrContainersStartJobRun, ReleaseLabel, VirtualClusterInput } from 'aws-cdk-lib/aws-stepfunctions-tasks';
 import { EC2_RESTRICT_DEFAULT_SECURITY_GROUP } from 'aws-cdk-lib/cx-api';
 
@@ -17,14 +18,20 @@ import { EC2_RESTRICT_DEFAULT_SECURITY_GROUP } from 'aws-cdk-lib/cx-api';
  * aws stepfunctions describe-execution --execution-arn <exection-arn generated before> : should return status as SUCCEEDED
  */
 
-const app = new cdk.App();
+const app = new cdk.App({
+  postCliContext: {
+    '@aws-cdk/aws-lambda:useCdkManagedLogGroup': false,
+    '@aws-cdk/aws-lambda:createNewPoliciesWithAddToRolePolicy': false,
+  },
+});
 const stack = new cdk.Stack(app, 'aws-stepfunctions-tasks-emr-containers-start-job-run');
 stack.node.setContext(EC2_RESTRICT_DEFAULT_SECURITY_GROUP, false);
 
 const eksCluster = new eks.Cluster(stack, 'integration-test-eks-cluster', {
-  version: eks.KubernetesVersion.V1_29,
+  version: eks.KubernetesVersion.V1_30,
   defaultCapacity: 3,
   defaultCapacityInstance: ec2.InstanceType.of(ec2.InstanceClass.M5, ec2.InstanceSize.XLARGE),
+  kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
 });
 
 const virtualCluster = new cdk.CfnResource(stack, 'Virtual Cluster', {
@@ -91,7 +98,7 @@ const startJobRunJob = new EmrContainersStartJobRun(stack, 'Start a Job Run', {
 const chain = sfn.Chain.start(startJobRunJob);
 
 const sm = new sfn.StateMachine(stack, 'StateMachine', {
-  definition: chain,
+  definitionBody: sfn.DefinitionBody.fromChainable(chain),
   timeout: cdk.Duration.seconds(1000),
 });
 

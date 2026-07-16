@@ -4,7 +4,6 @@ import { App, Stack } from '../../core';
 import { Function, FunctionCode, FunctionRuntime, KeyValueStore } from '../lib';
 
 describe('CloudFront Function', () => {
-
   test('minimal example', () => {
     const app = new App();
     const stack = new Stack(app, 'Stack', {
@@ -204,6 +203,29 @@ describe('CloudFront Function', () => {
     });
   });
 
+  test('long name truncates correctly every time', () => {
+    const app = new App();
+    const stack = new Stack(app, 'CdkTestWithALongNameStack');
+
+    new Function(stack, 'MyCloudFrontFunction', {
+      code: FunctionCode.fromInline(''),
+    });
+
+    Template.fromStack(stack).hasResourceProperties('AWS::CloudFront::Function', {
+      Name: {
+        'Fn::Join': [
+          '',
+          [
+            {
+              Ref: 'AWS::Region',
+            },
+            'CdkTestWithALongoudFrontFunction302260D0',
+          ],
+        ],
+      },
+    });
+  });
+
   describe('key value store association', () => {
     test('minimal example', () => {
       const stack = new Stack();
@@ -267,6 +289,64 @@ describe('CloudFront Function', () => {
       Template.fromStack(stack).hasResourceProperties('AWS::CloudFront::Function', {
         FunctionConfig: {
           KeyValueStoreAssociations: Match.absent(),
+        },
+      });
+    });
+
+    test('CloudFront FunctionRef uses GetAtt, not Ref', () => {
+      // Both GetAtt and Ref are valid ways to satisfy the contract, but only
+      // GetAtt is backwards compatible.
+      const stack = new Stack();
+
+      const fn = new Function(stack, 'TestFn', {
+        code: FunctionCode.fromInline('code'),
+        runtime: FunctionRuntime.JS_2_0,
+        keyValueStore: undefined,
+      });
+
+      expect(stack.resolve(fn.functionRef.functionArn)).toEqual({
+        'Fn::GetAtt': [
+          'TestFn04335C60',
+          'FunctionARN',
+        ],
+      });
+    });
+  });
+
+  describe('feature flag: CLOUDFRONT_FUNCTION_DEFAULT_RUNTIME_V2_0', () => {
+    test('defaults to JS_2_0 when flag is enabled', () => {
+      const app = new App({
+        context: {
+          '@aws-cdk/aws-cloudfront:defaultFunctionRuntimeV2_0': true,
+        },
+      });
+      const stack = new Stack(app, 'Stack');
+      new Function(stack, 'CF2', {
+        code: FunctionCode.fromInline('code'),
+      });
+
+      Template.fromStack(stack).hasResourceProperties('AWS::CloudFront::Function', {
+        FunctionConfig: {
+          Runtime: 'cloudfront-js-2.0',
+        },
+      });
+    });
+
+    test('explicit runtime overrides flag', () => {
+      const app = new App({
+        context: {
+          '@aws-cdk/aws-cloudfront:defaultFunctionRuntimeV2_0': true,
+        },
+      });
+      const stack = new Stack(app, 'Stack');
+      new Function(stack, 'CF2', {
+        code: FunctionCode.fromInline('code'),
+        runtime: FunctionRuntime.JS_1_0,
+      });
+
+      Template.fromStack(stack).hasResourceProperties('AWS::CloudFront::Function', {
+        FunctionConfig: {
+          Runtime: 'cloudfront-js-1.0',
         },
       });
     });

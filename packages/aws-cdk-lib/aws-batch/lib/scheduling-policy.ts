@@ -1,12 +1,21 @@
-import { Construct } from 'constructs';
+import type { Construct } from 'constructs';
 import { CfnSchedulingPolicy } from './batch.generated';
-import { ArnFormat, Duration, IResource, Lazy, Resource, Stack } from '../../core';
+import type { Duration, IResource } from '../../core';
+import { ArnFormat, Resource, Stack } from '../../core';
+import type { IArrayBox } from '../../core/lib/helpers-internal';
+import { Box, memoizedGetter } from '../../core/lib/helpers-internal';
+import { addConstructMetadata, MethodMetadata } from '../../core/lib/metadata-resource';
+import { propertyInjectable } from '../../core/lib/prop-injectable';
+import type {
+  ISchedulingPolicyRef,
+  SchedulingPolicyReference,
+} from '../../interfaces/generated/aws-batch-interfaces.generated';
 
 /**
  * Represents a Scheduling Policy. Scheduling Policies tell the Batch
  * Job Scheduler how to schedule incoming jobs.
  */
-export interface ISchedulingPolicy extends IResource {
+export interface ISchedulingPolicy extends IResource, ISchedulingPolicyRef {
   /**
    * The name of this scheduling policy
    *
@@ -40,6 +49,12 @@ interface SchedulingPolicyProps {
 export abstract class SchedulingPolicyBase extends Resource implements ISchedulingPolicy {
   public abstract readonly schedulingPolicyName: string;
   public abstract readonly schedulingPolicyArn: string;
+
+  public get schedulingPolicyRef(): SchedulingPolicyReference {
+    return {
+      schedulingPolicyArn: this.schedulingPolicyArn,
+    };
+  }
 
   constructor(scope: Construct, id: string, props?: SchedulingPolicyProps) {
     super(scope, id, {
@@ -188,9 +203,13 @@ export interface FairshareSchedulingPolicyProps extends SchedulingPolicyProps {
  *
  * @resource AWS::Batch::SchedulingPolicy
  */
+@propertyInjectable
 export class FairshareSchedulingPolicy extends SchedulingPolicyBase implements IFairshareSchedulingPolicy {
+  /** Uniquely identifies this class. */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-batch.FairshareSchedulingPolicy';
+
   /**
-   * Reference an exisiting Scheduling Policy by its ARN
+   * Reference an existing Scheduling Policy by its ARN
    */
   public static fromFairshareSchedulingPolicyArn(scope: Construct, id: string, fairshareSchedulingPolicyArn: string): IFairshareSchedulingPolicy {
     const stack = Stack.of(scope);
@@ -205,41 +224,53 @@ export class FairshareSchedulingPolicy extends SchedulingPolicyBase implements I
 
   public readonly computeReservation?: number;
   public readonly shareDecay?: Duration;
-  public readonly shares: Share[];
-  public readonly schedulingPolicyArn: string;
-  public readonly schedulingPolicyName: string;
+  private readonly _shares: IArrayBox<Share>;
 
-  constructor(scope: Construct, id: string, props?: FairshareSchedulingPolicyProps) {
-    super(scope, id, props);
-    this.computeReservation = props?.computeReservation;
-    this.shareDecay = props?.shareDecay;
-    this.shares = props?.shares ?? [];
-    const resource = new CfnSchedulingPolicy(this, 'Resource', {
-      fairsharePolicy: {
-        computeReservation: this.computeReservation,
-        shareDecaySeconds: this.shareDecay?.toSeconds(),
-        shareDistribution: Lazy.any({
-          produce: () => this.shares?.map((share) => ({
-            shareIdentifier: share.shareIdentifier,
-            weightFactor: share.weightFactor,
-          })),
-        }),
-      },
-      name: props?.schedulingPolicyName,
-    });
+  private readonly resource: CfnSchedulingPolicy;
 
-    this.schedulingPolicyArn = this.getResourceArnAttribute(resource.attrArn, {
+  @memoizedGetter
+  public get schedulingPolicyArn(): string {
+    return this.getResourceArnAttribute(this.resource.attrArn, {
       service: 'batch',
       resource: 'scheduling-policy',
       resourceName: this.physicalName,
     });
-    this.schedulingPolicyName = this.getResourceNameAttribute(resource.ref);
+  }
+
+  public get shares(): Share[] {
+    return this._shares.getMutable();
+  }
+
+  @memoizedGetter
+  public get schedulingPolicyName(): string {
+    return this.getResourceNameAttribute(this.resource.ref);
+  }
+
+  constructor(scope: Construct, id: string, props?: FairshareSchedulingPolicyProps) {
+    super(scope, id, props);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
+    this.computeReservation = props?.computeReservation;
+    this.shareDecay = props?.shareDecay;
+    this._shares = Box.fromArray(props?.shares ?? [], { omitEmpty: false });
+    this.resource = new CfnSchedulingPolicy(this, 'Resource', {
+      fairsharePolicy: {
+        computeReservation: this.computeReservation,
+        shareDecaySeconds: this.shareDecay?.toSeconds(),
+        shareDistribution: this._shares.map(share => ({
+          shareIdentifier: share.shareIdentifier,
+          weightFactor: share.weightFactor,
+        })),
+      },
+      name: props?.schedulingPolicyName,
+    });
   }
 
   /**
    * Add a share this to this Fairshare SchedulingPolicy
    */
+  @MethodMetadata()
   public addShare(share: Share) {
-    this.shares.push(share);
+    this._shares.push(share);
   }
 }

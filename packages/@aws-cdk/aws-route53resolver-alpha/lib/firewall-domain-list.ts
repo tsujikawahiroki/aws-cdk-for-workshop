@@ -1,9 +1,13 @@
 import * as path from 'path';
-import { IBucket } from 'aws-cdk-lib/aws-s3';
-import { Asset } from 'aws-cdk-lib/aws-s3-assets';
-import { IResource, Resource, Token } from 'aws-cdk-lib/core';
-import { Construct } from 'constructs';
 import { CfnFirewallDomainList } from 'aws-cdk-lib/aws-route53resolver';
+import type { IBucket } from 'aws-cdk-lib/aws-s3';
+import { Asset } from 'aws-cdk-lib/aws-s3-assets';
+import type { IResource } from 'aws-cdk-lib/core';
+import { Resource, Token, UnscopedValidationError } from 'aws-cdk-lib/core';
+import { lit } from 'aws-cdk-lib/core/lib/helpers-internal';
+import { addConstructMetadata } from 'aws-cdk-lib/core/lib/metadata-resource';
+import { propertyInjectable } from 'aws-cdk-lib/core/lib/prop-injectable';
+import type { Construct } from 'constructs';
 
 /**
  * A Firewall Domain List
@@ -46,7 +50,7 @@ export abstract class FirewallDomains {
   public static fromList(list: string[]): FirewallDomains {
     for (const domain of list) {
       if (!/^([\w-.]{1,255}|\*[\w-.]{1,254})$/.test(domain)) {
-        throw new Error(`Invalid domain: ${domain}. Domain can optionally start with *. Max length of 255. Valid characters: A-Z, a-z, 0-9, _, -, .`);
+        throw new UnscopedValidationError(lit`InvalidDomain`, `Invalid domain: ${domain}. Domain can optionally start with *. Max length of 255. Valid characters: A-Z, a-z, 0-9, _, -, .`);
       }
     }
 
@@ -66,7 +70,7 @@ export abstract class FirewallDomains {
    */
   public static fromS3Url(url: string): FirewallDomains {
     if (!Token.isUnresolved(url) && !url.startsWith('s3://')) {
-      throw new Error(`The S3 URL must start with s3://, got ${url}`);
+      throw new UnscopedValidationError(lit`InvalidS3Url`, `The S3 URL must start with s3://, got ${url}`);
     }
 
     return {
@@ -99,7 +103,7 @@ export abstract class FirewallDomains {
     // cdk-assets will correctly set the content type for the S3 object
     // if the file has the correct extension
     if (path.extname(assetPath) !== '.txt') {
-      throw new Error(`FirewallDomains.fromAsset() expects a file with the .txt extension, got ${assetPath}`);
+      throw new UnscopedValidationError(lit`InvalidAssetExtension`, `FirewallDomains.fromAsset() expects a file with the .txt extension, got ${assetPath}`);
     }
 
     return {
@@ -107,13 +111,12 @@ export abstract class FirewallDomains {
         const asset = new Asset(scope, 'Domains', { path: assetPath });
 
         if (!asset.isFile) {
-          throw new Error('FirewallDomains.fromAsset() expects a file');
+          throw new UnscopedValidationError(lit`AssetMustBeFile`, 'FirewallDomains.fromAsset() expects a file');
         }
 
         return { domainFileUrl: asset.s3ObjectUrl };
       },
     };
-
   }
 
   /** Binds the domains to a domain list */
@@ -144,7 +147,11 @@ export interface DomainsConfig {
 /**
  * A Firewall Domain List
  */
+@propertyInjectable
 export class FirewallDomainList extends Resource implements IFirewallDomainList {
+  /** Uniquely identifies this class. */
+  public static readonly PROPERTY_INJECTION_ID: string = '@aws-cdk.aws-route53resolver-alpha.FirewallDomainList';
+
   /**
    * Import an existing Firewall Rule Group
    */
@@ -164,54 +171,56 @@ export class FirewallDomainList extends Resource implements IFirewallDomainList 
   public readonly firewallDomainListArn: string;
 
   /**
-    * The date and time that the domain list was created
-    * @attribute
-    */
+   * The date and time that the domain list was created
+   * @attribute
+   */
   public readonly firewallDomainListCreationTime: string;
 
   /**
-    * The creator request ID
-    * @attribute
-    */
+   * The creator request ID
+   * @attribute
+   */
   public readonly firewallDomainListCreatorRequestId: string;
 
   /**
-    * The number of domains in the list
-    * @attribute
-    */
+   * The number of domains in the list
+   * @attribute
+   */
   public readonly firewallDomainListDomainCount: number;
 
   /**
-    * The owner of the list, used only for lists that are not managed by you.
-    * For example, the managed domain list `AWSManagedDomainsMalwareDomainList`
-    * has the managed owner name `Route 53 Resolver DNS Firewall`.
-    * @attribute
-    */
+   * The owner of the list, used only for lists that are not managed by you.
+   * For example, the managed domain list `AWSManagedDomainsMalwareDomainList`
+   * has the managed owner name `Route 53 Resolver DNS Firewall`.
+   * @attribute
+   */
   public readonly firewallDomainListManagedOwnerName: string;
 
   /**
-    * The date and time that the domain list was last modified
-    * @attribute
-    */
+   * The date and time that the domain list was last modified
+   * @attribute
+   */
   public readonly firewallDomainListModificationTime: string;
 
   /**
-    * The status of the domain list
-    * @attribute
-    */
+   * The status of the domain list
+   * @attribute
+   */
   public readonly firewallDomainListStatus: string;
 
   /**
-    * Additional information about the status of the rule group
-    * @attribute
-    */
+   * Additional information about the status of the rule group
+   * @attribute
+   */
   public readonly firewallDomainListStatusMessage: string;
 
   constructor(scope: Construct, id: string, props: FirewallDomainListProps) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     if (props.name && !Token.isUnresolved(props.name) && !/^[\w-.]{1,128}$/.test(props.name)) {
-      throw new Error(`Invalid domain list name: ${props.name}. The name must have 1-128 characters. Valid characters: A-Z, a-z, 0-9, _, -, .`);
+      throw new UnscopedValidationError(lit`InvalidDomainListName`, `Invalid domain list name: ${props.name}. The name must have 1-128 characters. Valid characters: A-Z, a-z, 0-9, _, -, .`);
     }
 
     const domainsConfig = props.domains.bind(this);

@@ -1,11 +1,14 @@
-import { Construct, IConstruct } from 'constructs';
-import { ICluster, Cluster } from './cluster';
+import type { IConstruct } from 'constructs';
+import { Construct } from 'constructs';
+import type { ICluster } from './cluster';
+import { Cluster } from './cluster';
 import * as iam from '../../aws-iam';
-import { Duration, Stack, NestedStack, Names, CfnCondition, Fn, Aws } from '../../core';
+import type { RemovalPolicy } from '../../core';
+import { Duration, Stack, NestedStack, Names, CfnCondition, Fn, Aws, ValidationError, RemovalPolicies } from '../../core';
+import { lit } from '../../core/lib/private/literal-string';
 import { KubectlFunction } from '../../custom-resource-handlers/dist/aws-eks/kubectl-provider.generated';
 import * as cr from '../../custom-resources';
 import { AwsCliLayer } from '../../lambda-layer-awscli';
-import { KubectlLayer } from '../../lambda-layer-kubectl';
 
 /**
  * Properties for a KubectlProvider
@@ -15,6 +18,20 @@ export interface KubectlProviderProps {
    * The cluster to control.
    */
   readonly cluster: ICluster;
+
+  /**
+   * The removal policy applied to the custom resource that provides kubectl.
+   *
+   * The removal policy controls what happens to the resource if it stops being managed by CloudFormation.
+   * This can happen in one of three situations:
+   *
+   * - The resource is removed from the template, so CloudFormation stops managing it
+   * - A change to the resource is made that requires it to be replaced, so CloudFormation stops managing it
+   * - The stack is deleted, so CloudFormation stops managing all resources in it
+   *
+   * @default RemovalPolicy.DESTROY
+   */
+  readonly removalPolicy?: RemovalPolicy;
 }
 
 /**
@@ -61,14 +78,13 @@ export interface IKubectlProvider extends IConstruct {
  * Implementation of Kubectl Lambda
  */
 export class KubectlProvider extends NestedStack implements IKubectlProvider {
-
   /**
    * Take existing provider or create new based on cluster
    *
    * @param scope Construct
    * @param cluster k8s cluster
    */
-  public static getOrCreate(scope: Construct, cluster: ICluster) {
+  public static getOrCreate(scope: Construct, cluster: ICluster): IKubectlProvider {
     // if this is an "owned" cluster, it has a provider associated with it
     if (cluster instanceof Cluster) {
       return cluster._attachKubectlResourceScope(scope);
@@ -123,11 +139,11 @@ export class KubectlProvider extends NestedStack implements IKubectlProvider {
     const cluster = props.cluster;
 
     if (!cluster.kubectlRole) {
-      throw new Error('"kubectlRole" is not defined, cannot issue kubectl commands against this cluster');
+      throw new ValidationError(lit`KubectlroleDefined`, '"kubectlRole" is not defined, cannot issue kubectl commands against this cluster', this);
     }
 
     if (cluster.kubectlPrivateSubnets && !cluster.kubectlSecurityGroup) {
-      throw new Error('"kubectlSecurityGroup" is required if "kubectlSubnets" is specified');
+      throw new ValidationError(lit`KubectlSecurityGroupRequiredKubectl`, '"kubectlSecurityGroup" is required if "kubectlSubnets" is specified', this);
     }
 
     const memorySize = cluster.kubectlMemory ? cluster.kubectlMemory.toMebibytes() : 1024;
@@ -136,7 +152,11 @@ export class KubectlProvider extends NestedStack implements IKubectlProvider {
       timeout: Duration.minutes(15),
       description: 'onEvent handler for EKS kubectl resource provider',
       memorySize,
-      environment: cluster.kubectlEnvironment,
+      environment: {
+        // required and recommended for boto3
+        AWS_STS_REGIONAL_ENDPOINTS: 'regional',
+        ...cluster.kubectlEnvironment,
+      },
       role: cluster.kubectlLambdaRole ? cluster.kubectlLambdaRole : undefined,
 
       // defined only when using private access
@@ -147,7 +167,9 @@ export class KubectlProvider extends NestedStack implements IKubectlProvider {
 
     // allow user to customize the layers with the tools we need
     handler.addLayers(props.cluster.awscliLayer ?? new AwsCliLayer(this, 'AwsCliLayer'));
-    handler.addLayers(props.cluster.kubectlLayer ?? new KubectlLayer(this, 'KubectlLayer'));
+    if (props.cluster.kubectlLayer) {
+      handler.addLayers(props.cluster.kubectlLayer);
+    }
 
     this.handlerRole = handler.role!;
 
@@ -164,7 +186,7 @@ export class KubectlProvider extends NestedStack implements IKubectlProvider {
 
     // For OCI helm chart authorization.
     this.handlerRole.addManagedPolicy(
-      iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonEC2ContainerRegistryReadOnly'),
+      iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonEC2ContainerRegistryPullOnly'),
     );
 
     /**
@@ -193,14 +215,16 @@ export class KubectlProvider extends NestedStack implements IKubectlProvider {
       securityGroups: cluster.kubectlPrivateSubnets && cluster.kubectlSecurityGroup ? [cluster.kubectlSecurityGroup] : undefined,
     });
 
+    if (props.removalPolicy) {
+      RemovalPolicies.of(this).apply(props.removalPolicy);
+    }
+
     this.serviceToken = provider.serviceToken;
     this.roleArn = cluster.kubectlRole.roleArn;
   }
-
 }
 
 class ImportedKubectlProvider extends Construct implements IKubectlProvider {
-
   /**
    * The custom resource provider's service token.
    */

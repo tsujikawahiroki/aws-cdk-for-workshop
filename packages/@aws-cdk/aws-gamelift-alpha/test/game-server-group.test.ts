@@ -1,8 +1,8 @@
 
+import * as cdk from 'aws-cdk-lib';
 import { Template, Match } from 'aws-cdk-lib/assertions';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as iam from 'aws-cdk-lib/aws-iam';
-import * as cdk from 'aws-cdk-lib';
 import * as gamelift from '../lib';
 
 describe('gameservergroup', () => {
@@ -18,7 +18,6 @@ describe('gameservergroup', () => {
     });
 
     test('default gameservergroup', () => {
-
       new gamelift.GameServerGroup(stack, 'MyGameServerGroup', {
         instanceDefinitions: [{
           instanceType: ec2.InstanceType.of(ec2.InstanceClass.C5, ec2.InstanceSize.LARGE),

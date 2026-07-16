@@ -1,4 +1,4 @@
-/* eslint-disable import/no-extraneous-dependencies */
+
 import * as cdkp from '../../../lib';
 import { PipelineQueries } from '../../../lib/helpers-internal/pipeline-queries';
 import { AppWithOutput, TestApp } from '../../testhelpers/test-app';
@@ -14,7 +14,6 @@ afterEach(() => {
 });
 
 describe('pipeline-queries', () => {
-
   describe('stackOutputsReferenced', () => {
     let blueprint: Blueprint;
     let stageDeployment: cdkp.StageDeployment;
@@ -80,14 +79,13 @@ describe('pipeline-queries', () => {
 
     cases.forEach(testCase => {
       test(testCase.description, () => {
-        //WHEN
+        // WHEN
         testCase.additionalSetup();
 
-        //THEN
+        // THEN
         expect(queries.stackOutputsReferenced(stackDeployment)).toEqual(testCase.expectedResultGetter());
       });
     });
-
   });
 });
 

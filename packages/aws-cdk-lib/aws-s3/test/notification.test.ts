@@ -1,6 +1,7 @@
-import { Match, Template } from '../../assertions';
+import { Match, Template, Annotations } from '../../assertions';
 import * as iam from '../../aws-iam';
 import * as cdk from '../../core';
+import * as cxapi from '../../cx-api';
 import * as s3 from '../lib';
 
 describe('notification', () => {
@@ -52,6 +53,206 @@ describe('notification', () => {
       Description: 'AWS CloudFormation handler for "Custom::S3BucketNotifications" resources (@aws-cdk/aws-s3)',
       Role: 'arn:aws:iam::111111111111:role/DevsNotAllowedToTouch',
     });
+  });
+
+  test('add service-role permission if no Roles are provided', () => {
+    // GIVEN
+    const stack = new cdk.Stack();
+    const bucket = s3.Bucket.fromBucketAttributes(stack, 'MyBucket', {
+      bucketName: 'foo-bar',
+    });
+
+    // WHEN
+    bucket.addEventNotification(s3.EventType.OBJECT_CREATED, {
+      bind: () => ({
+        arn: 'ARN',
+        type: s3.BucketNotificationDestinationType.TOPIC,
+      }),
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::IAM::Role', {
+      AssumeRolePolicyDocument: {
+        Statement: [{
+          Action: 'sts:AssumeRole',
+          Effect: 'Allow',
+          Principal: {
+            Service: 'lambda.amazonaws.com',
+          },
+        }],
+      },
+      ManagedPolicyArns: [
+        {
+          'Fn::Join': ['', ['arn:', { Ref: 'AWS::Partition' }, ':iam::aws:policy/service-role/AWSLambdaBasicExecutionRole']],
+        },
+      ],
+    });
+    Template.fromStack(stack).hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: {
+        Statement: [{
+          Action: 's3:PutBucketNotification',
+          Effect: 'Allow',
+          Resource: {
+            'Fn::Join': ['', ['arn:', { Ref: 'AWS::Partition' }, ':s3:::foo-bar']],
+          },
+        }, {
+          Action: 's3:GetBucketNotification',
+          Effect: 'Allow',
+          Resource: {
+            'Fn::Join': ['', ['arn:', { Ref: 'AWS::Partition' }, ':s3:::foo-bar']],
+          },
+        }],
+      },
+    });
+  });
+
+  test('no warnings are shown if no Roles are provided, as CDK will be adding required roles & policies', () => {
+    // GIVEN
+    const stack = new cdk.Stack();
+    const bucket = s3.Bucket.fromBucketAttributes(stack, 'MyBucket', {
+      bucketName: 'foo-bar',
+    });
+
+    // WHEN
+    bucket.addEventNotification(s3.EventType.OBJECT_CREATED, {
+      bind: () => ({
+        arn: 'ARN',
+        type: s3.BucketNotificationDestinationType.TOPIC,
+      }),
+    });
+
+    // THEN - Following is warning thrown as a part of fix in : https://github.com/aws/aws-cdk/pull/31212
+    const warningFromStack = Annotations.fromStack(stack).findWarning('*', {});
+    expect(warningFromStack[0]?.entry?.data).toEqual(undefined);
+  });
+
+  test('service-role permission are not added if `IRole` is provided', () => {
+    // GIVEN
+    const stack = new cdk.Stack();
+    const importedRole = iam.Role.fromRoleArn(stack, 'role', 'arn:aws:iam::111111111111:role/DevsNotAllowedToTouch');
+    const bucket = s3.Bucket.fromBucketAttributes(stack, 'MyBucket', {
+      bucketName: 'foo-bar',
+      notificationsHandlerRole: importedRole,
+    });
+
+    // WHEN
+    bucket.addEventNotification(s3.EventType.OBJECT_CREATED, {
+      bind: () => ({
+        arn: 'ARN',
+        type: s3.BucketNotificationDestinationType.TOPIC,
+      }),
+    });
+
+    // THEN
+    const serviceRole = Template.fromStack(stack).findResources('AWS::IAM::Role');
+    expect(serviceRole).toEqual({});
+  });
+
+  test('warning is thrown when `IRole` is provided and not policies are added', () => {
+    // GIVEN
+    const stack = new cdk.Stack();
+    const importedRole = iam.Role.fromRoleArn(stack, 'role', 'arn:aws:iam::111111111111:role/DevsNotAllowedToTouch');
+    const bucket = s3.Bucket.fromBucketAttributes(stack, 'MyBucket', {
+      bucketName: 'foo-bar',
+      notificationsHandlerRole: importedRole,
+    });
+
+    // WHEN
+    bucket.addEventNotification(s3.EventType.OBJECT_CREATED, {
+      bind: () => ({
+        arn: 'ARN',
+        type: s3.BucketNotificationDestinationType.TOPIC,
+      }),
+    });
+
+    // THEN - Following is warning thrown as a part of fix in : https://github.com/aws/aws-cdk/pull/31212
+    const warningMessage = /Can't combine imported IManagedPolicy: arn:\${Token\[AWS\.Partition\.\d+\]}:iam::aws:policy\/service-role\/AWSLambdaBasicExecutionRole to imported role IRole: DevsNotAllowedToTouch\. Use ManagedPolicy directly\. \[ack: @aws-cdk\/aws-iam:IRoleCantBeUsedWithIManagedPolicy\]/;
+    const warningFromStack = Annotations.fromStack(stack).findWarning('*',
+      Match.stringLikeRegexp(
+        '@aws-cdk/aws-iam:IRoleCantBeUsedWithIManagedPolicy',
+      ),
+    );
+    expect(warningFromStack[0].entry.data).toEqual(expect.stringMatching(warningMessage));
+  });
+
+  test('If `Role` is provided, PutBucketNotification, GetBucketNotification will be added along with `service-role/AWSLambdaBasicExecutionRole`', () => {
+    // GIVEN
+    const stack = new cdk.Stack();
+    const importedRole = new iam.Role(stack, 'Role', {
+      assumedBy: new iam.ServicePrincipal('someservice.amazonaws.com'),
+    });
+    const bucket = s3.Bucket.fromBucketAttributes(stack, 'MyBucket', {
+      bucketName: 'foo-bar',
+      notificationsHandlerRole: importedRole,
+    });
+
+    // WHEN
+    bucket.addEventNotification(s3.EventType.OBJECT_CREATED, {
+      bind: () => ({
+        arn: 'ARN',
+        type: s3.BucketNotificationDestinationType.TOPIC,
+      }),
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: {
+        Statement: [{
+          Action: 's3:PutBucketNotification',
+          Effect: 'Allow',
+          Resource: {
+            'Fn::Join': ['', ['arn:', { Ref: 'AWS::Partition' }, ':s3:::foo-bar']],
+          },
+        }, {
+          Action: 's3:GetBucketNotification',
+          Effect: 'Allow',
+          Resource: {
+            'Fn::Join': ['', ['arn:', { Ref: 'AWS::Partition' }, ':s3:::foo-bar']],
+          },
+        }],
+      },
+    });
+
+    Template.fromStack(stack).hasResourceProperties('AWS::IAM::Role', {
+      AssumeRolePolicyDocument: {
+        Statement: [{
+          Action: 'sts:AssumeRole',
+          Effect: 'Allow',
+          Principal: {
+            Service: 'someservice.amazonaws.com',
+          },
+        }],
+      },
+      ManagedPolicyArns: [
+        {
+          'Fn::Join': ['', ['arn:', { Ref: 'AWS::Partition' }, ':iam::aws:policy/service-role/AWSLambdaBasicExecutionRole']],
+        },
+      ],
+    });
+  });
+
+  test('If `Role` is provided, No warnings are thrown', () => {
+    // GIVEN
+    const stack = new cdk.Stack();
+    const importedRole = new iam.Role(stack, 'Role', {
+      assumedBy: new iam.ServicePrincipal('someservice.amazonaws.com'),
+    });
+    const bucket = s3.Bucket.fromBucketAttributes(stack, 'MyBucket', {
+      bucketName: 'foo-bar',
+      notificationsHandlerRole: importedRole,
+    });
+
+    // WHEN
+    bucket.addEventNotification(s3.EventType.OBJECT_CREATED, {
+      bind: () => ({
+        arn: 'ARN',
+        type: s3.BucketNotificationDestinationType.TOPIC,
+      }),
+    });
+
+    // THEN - Following is warning thrown as a part of fix in : https://github.com/aws/aws-cdk/pull/31212
+    const warningFromStack = Annotations.fromStack(stack).findWarning('*', {});
+    expect(warningFromStack[0]?.entry?.data).toEqual(undefined);
   });
 
   test('can specify prefix and suffix filter rules', () => {
@@ -116,8 +317,7 @@ describe('notification', () => {
           ],
         },
       },
-      DependsOn: ['BucketNotificationsHandler050a0587b7544547bf325f094a3db834RoleDefaultPolicy2CF63D36',
-        'BucketNotificationsHandler050a0587b7544547bf325f094a3db834RoleB6FB88EC'],
+      DependsOn: ['BucketNotificationsHandler050a0587b7544547bf325f094a3db834RoleB6FB88EC'],
     });
   });
 
@@ -135,7 +335,7 @@ describe('notification', () => {
 
     Template.fromStack(stack).hasResource('Custom::S3BucketNotifications', {
       Type: 'Custom::S3BucketNotifications',
-      DependsOn: Match.absent(),
+      DependsOn: ['MyBucketNotificationsHandlerPolicy983F24BD'],
     });
   });
 
@@ -155,7 +355,10 @@ describe('notification', () => {
 
     Template.fromStack(stack).hasResource('Custom::S3BucketNotifications', {
       Type: 'Custom::S3BucketNotifications',
-      DependsOn: ['MyBucketPolicyE7FBAC7B'],
+      DependsOn: Match.arrayWith([
+        'MyBucketNotificationsHandlerPolicy983F24BD',
+        'MyBucketPolicyE7FBAC7B',
+      ]),
     });
   });
 
@@ -179,7 +382,10 @@ describe('notification', () => {
 
     Template.fromStack(stack).hasResource('Custom::S3BucketNotifications', {
       Type: 'Custom::S3BucketNotifications',
-      DependsOn: ['MyBucketPolicyE7FBAC7B'],
+      DependsOn: Match.arrayWith([
+        'MyBucketNotificationsHandlerPolicy983F24BD',
+        'MyBucketPolicyE7FBAC7B',
+      ]),
     });
   });
 
@@ -226,6 +432,49 @@ describe('notification', () => {
       },
     });
   });
+
+  test('Notification custom resource uses always treat bucket as unmanaged', () => {
+    // GIVEN
+    const stack = new cdk.Stack();
+
+    stack.node.setContext(cxapi.S3_KEEP_NOTIFICATION_IN_IMPORTED_BUCKET, true);
+
+    // WHEN
+    new s3.Bucket(stack, 'MyBucket', {
+      eventBridgeEnabled: true,
+    });
+
+    // THEN
+    Template.fromStack(stack).resourceCountIs('AWS::S3::Bucket', 1);
+    Template.fromStack(stack).hasResourceProperties('Custom::S3BucketNotifications', {
+      NotificationConfiguration: {
+        EventBridgeConfiguration: {},
+      },
+      Managed: false,
+    });
+    Template.fromStack(stack).hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: {
+        Statement: [
+          {
+            Action: 's3:PutBucketNotification',
+            Effect: 'Allow',
+            Resource: {
+              'Fn::GetAtt': ['MyBucketF68F3FF0', 'Arn'],
+            },
+          },
+          {
+            Action: 's3:GetBucketNotification',
+            Effect: 'Allow',
+            Resource: {
+              'Fn::GetAtt': ['MyBucketF68F3FF0', 'Arn'],
+            },
+          },
+        ],
+        Version: '2012-10-17',
+      },
+    });
+  });
+
   test('check notifications handler runtime version', () => {
     const stack = new cdk.Stack();
 
@@ -244,7 +493,148 @@ describe('notification', () => {
     });
 
     Template.fromStack(stack).hasResourceProperties('AWS::Lambda::Function', {
-      Runtime: 'python3.11',
+      Runtime: 'python3.13',
     });
+  });
+
+  test('skip destination validation is set to false by default', () => {
+    // GIVEN
+    const stack = new cdk.Stack();
+
+    // WHEN
+    const bucket = new s3.Bucket(stack, 'MyBucket', {
+      bucketName: 'foo-bar',
+    });
+    bucket.addEventNotification(s3.EventType.OBJECT_CREATED, {
+      bind: () => ({
+        arn: 'ARN',
+        type: s3.BucketNotificationDestinationType.TOPIC,
+      }),
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('Custom::S3BucketNotifications', {
+      SkipDestinationValidation: false,
+    });
+  });
+
+  test('skip destination validation is set to true', () => {
+    // GIVEN
+    const stack = new cdk.Stack();
+
+    // WHEN
+    const bucket = new s3.Bucket(stack, 'MyBucket', {
+      bucketName: 'foo-bar',
+      notificationsSkipDestinationValidation: true,
+    });
+    bucket.addEventNotification(s3.EventType.OBJECT_CREATED, {
+      bind: () => ({
+        arn: 'ARN',
+        type: s3.BucketNotificationDestinationType.TOPIC,
+      }),
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('Custom::S3BucketNotifications', {
+      SkipDestinationValidation: true,
+    });
+  });
+
+  test('skip destination validation is set to false', () => {
+    // GIVEN
+    const stack = new cdk.Stack();
+
+    // WHEN
+    const bucket = new s3.Bucket(stack, 'MyBucket', {
+      bucketName: 'foo-bar',
+      notificationsSkipDestinationValidation: false,
+    });
+    bucket.addEventNotification(s3.EventType.OBJECT_CREATED, {
+      bind: () => ({
+        arn: 'ARN',
+        type: s3.BucketNotificationDestinationType.TOPIC,
+      }),
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('Custom::S3BucketNotifications', {
+      SkipDestinationValidation: false,
+    });
+  });
+
+  test('multiple buckets in same stack result in separate per-bucket policies', () => {
+    // GIVEN
+    const stack = new cdk.Stack();
+
+    // WHEN
+    const bucket1 = new s3.Bucket(stack, 'Bucket1');
+    const bucket2 = new s3.Bucket(stack, 'Bucket2');
+    const bucket3 = s3.Bucket.fromBucketAttributes(stack, 'ImportedBucket', {
+      bucketName: 'imported-bucket',
+    });
+
+    bucket1.addEventNotification(s3.EventType.OBJECT_CREATED, {
+      bind: () => ({
+        arn: 'ARN1',
+        type: s3.BucketNotificationDestinationType.TOPIC,
+      }),
+    });
+
+    bucket2.addEventNotification(s3.EventType.OBJECT_REMOVED, {
+      bind: () => ({
+        arn: 'ARN2',
+        type: s3.BucketNotificationDestinationType.QUEUE,
+      }),
+    });
+
+    bucket3.addEventNotification(s3.EventType.OBJECT_CREATED, {
+      bind: () => ({
+        arn: 'ARN3',
+        type: s3.BucketNotificationDestinationType.LAMBDA,
+      }),
+    });
+
+    // THEN - Each bucket should have its own dedicated IAM policy.
+    // This prevents CloudFormation race conditions when removing notifications.
+    // See https://github.com/aws/aws-cdk/issues/37667
+    const template = Template.fromStack(stack);
+
+    const allPolicies = template.findResources('AWS::IAM::Policy');
+    const handlerPolicies = Object.keys(allPolicies).filter(k => k.includes('HandlerPolicy'));
+    expect(handlerPolicies).toHaveLength(3);
+  });
+
+  test('custom resource depends on handler IAM policy to prevent race condition on removal', () => {
+    // Regression test for https://github.com/aws/aws-cdk/issues/37667
+    const stack = new cdk.Stack();
+
+    const bucket1 = new s3.Bucket(stack, 'Bucket1');
+    const bucket2 = new s3.Bucket(stack, 'Bucket2');
+    const dest = {
+      bind: () => ({
+        arn: 'ARN',
+        type: s3.BucketNotificationDestinationType.TOPIC,
+      }),
+    };
+
+    bucket1.addEventNotification(s3.EventType.OBJECT_CREATED, dest);
+    bucket2.addEventNotification(s3.EventType.OBJECT_CREATED, dest);
+
+    const template = Template.fromStack(stack);
+
+    // Each custom resource depends on its own dedicated HandlerPolicy
+    template.hasResource('Custom::S3BucketNotifications', {
+      DependsOn: Match.arrayWith(['Bucket1NotificationsHandlerPolicy2894F2A2']),
+      Properties: { BucketName: { Ref: 'Bucket12520700A' } },
+    });
+    template.hasResource('Custom::S3BucketNotifications', {
+      DependsOn: Match.arrayWith(['Bucket2NotificationsHandlerPolicy2BDDB4E2']),
+      Properties: { BucketName: { Ref: 'Bucket25524B414' } },
+    });
+
+    // Verify separate policies exist (not a shared DefaultPolicy)
+    const policies = template.findResources('AWS::IAM::Policy');
+    const handlerPolicies = Object.keys(policies).filter(k => k.includes('HandlerPolicy'));
+    expect(handlerPolicies).toHaveLength(2);
   });
 });

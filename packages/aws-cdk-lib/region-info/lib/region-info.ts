@@ -10,7 +10,7 @@ export class RegionInfo {
    *          may not be an exaustive list of all available AWS regions.
    */
   public static get regions(): RegionInfo[] {
-    return Fact.regions.map(RegionInfo.get);
+    return Fact.regions.map(x => RegionInfo.get(x));
   }
 
   /**
@@ -124,9 +124,11 @@ export class RegionInfo {
   /**
    * The name of the service principal for a given service in this region.
    * @param service the service name (e.g: s3.amazonaws.com)
+   *
+   * @deprecated - Use `iam.ServicePrincipal.servicePrincipalName()` instead.
    */
   public servicePrincipal(service: string): string | undefined {
-    return Fact.find(this.name, FactName.servicePrincipal(service));
+    return `${service.replace(/\.amazonaws\.com(\.cn)?$/, '')}.amazonaws.com`;
   }
 
   /**
@@ -171,7 +173,7 @@ export class RegionInfo {
   }
 
   /**
-   * The CIDR block used by Kinesis Data Firehose servers.
+   * The CIDR block used by Amazon Data Firehose servers.
    */
   public get firehoseCidrBlock(): string | undefined {
     return Fact.find(this.name, FactName.FIREHOSE_CIDR_BLOCK);
@@ -204,5 +206,4 @@ export class RegionInfo {
   public get samlSignOnUrl(): string | undefined {
     return Fact.find(this.name, FactName.SAML_SIGN_ON_URL);
   }
-
 }

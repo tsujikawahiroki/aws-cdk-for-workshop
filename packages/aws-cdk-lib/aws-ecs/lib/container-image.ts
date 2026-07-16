@@ -1,9 +1,10 @@
-/* eslint-disable import/order */
-import { Construct } from 'constructs';
-import { ContainerDefinition } from './container-definition';
-import { CfnTaskDefinition } from './ecs.generated';
-import * as ecr from '../../aws-ecr';
-import { DockerImageAsset, TarballImageAsset } from '../../aws-ecr-assets';
+
+import type { Construct } from 'constructs';
+import type { ContainerDefinition } from './container-definition';
+import type { CfnTaskDefinition } from './ecs.generated';
+import type * as ecr from '../../aws-ecr';
+import type { DockerImageAsset } from '../../aws-ecr-assets';
+import { TarballImageAsset } from '../../aws-ecr-assets';
 
 /**
  * Constructs for types of container images
@@ -18,6 +19,8 @@ export abstract class ContainerImage {
 
   /**
    * Reference an image in an ECR repository
+   *
+   * @param tag If you don't specify this parameter, `latest` is used as default.
    */
   public static fromEcrRepository(repository: ecr.IRepository, tag: string = 'latest') {
     return new EcrImage(repository, tag);
@@ -43,6 +46,7 @@ export abstract class ContainerImage {
   public static fromDockerImageAsset(asset: DockerImageAsset): ContainerImage {
     return {
       bind(_scope: Construct, containerDefinition: ContainerDefinition): ContainerImageConfig {
+        containerDefinition._defaultDisableVersionConsistency?.();
         asset.repository.grantPull(containerDefinition.taskDefinition.obtainExecutionRole());
         return {
           imageName: asset.imageUri,
@@ -63,7 +67,6 @@ export abstract class ContainerImage {
   public static fromTarball(tarballFile: string): ContainerImage {
     return {
       bind(scope: Construct, containerDefinition: ContainerDefinition): ContainerImageConfig {
-
         const asset = new TarballImageAsset(scope, 'Tarball', { tarballFile });
         asset.repository.grantPull(containerDefinition.taskDefinition.obtainExecutionRole());
 
@@ -96,6 +99,8 @@ export interface ContainerImageConfig {
 }
 
 // These imports have to be at the end to prevent circular imports
-import { AssetImage, AssetImageProps } from './images/asset-image';
+import type { AssetImageProps } from './images/asset-image';
+import { AssetImage } from './images/asset-image';
 import { EcrImage } from './images/ecr';
-import { RepositoryImage, RepositoryImageProps } from './images/repository';
+import type { RepositoryImageProps } from './images/repository';
+import { RepositoryImage } from './images/repository';

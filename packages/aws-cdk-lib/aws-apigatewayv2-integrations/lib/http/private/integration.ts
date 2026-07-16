@@ -1,14 +1,18 @@
+import type {
+  HttpRouteIntegrationBindOptions,
+  HttpRouteIntegrationConfig,
+  IVpcLink,
+} from '../../../../aws-apigatewayv2';
 import {
   HttpConnectionType,
   HttpIntegrationType,
-  HttpRouteIntegrationBindOptions,
-  HttpRouteIntegrationConfig,
   HttpRouteIntegration,
   PayloadFormatVersion,
   HttpMethod,
-  IVpcLink,
 } from '../../../../aws-apigatewayv2';
-import * as ec2 from '../../../../aws-ec2';
+import type * as ec2 from '../../../../aws-ec2';
+import { ValidationError } from '../../../../core/lib/errors';
+import { lit } from '../../../../core/lib/private/literal-string';
 
 /**
  * Options required to use an existing vpcLink or configure a new one
@@ -40,7 +44,7 @@ export abstract class HttpPrivateIntegration extends HttpRouteIntegration {
   protected httpMethod = HttpMethod.ANY;
   protected payloadFormatVersion = PayloadFormatVersion.VERSION_1_0; // 1.0 is required and is the only supported format
   protected integrationType = HttpIntegrationType.HTTP_PROXY;
-  protected connectionType = HttpConnectionType.VPC_LINK
+  protected connectionType = HttpConnectionType.VPC_LINK;
 
   /**
    * Adds a vpcLink to the API if not passed in the options
@@ -51,7 +55,7 @@ export abstract class HttpPrivateIntegration extends HttpRouteIntegration {
     let vpcLink = configOptions.vpcLink;
     if (!vpcLink) {
       if (!configOptions.vpc) {
-        throw new Error('One of vpcLink or vpc should be provided for private integration');
+        throw new ValidationError(lit`OneVpcLinkVpcProvided`, 'One of vpcLink or vpc should be provided for private integration', bindOptions.scope);
       }
 
       vpcLink = bindOptions.route.httpApi.addVpcLink({ vpc: configOptions.vpc });

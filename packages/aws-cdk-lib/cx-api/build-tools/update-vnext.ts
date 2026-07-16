@@ -1,3 +1,4 @@
+
 /**
  * Load the `features.ts` source file, and replace the "V2NEXT" version markers with the actual current version
  */
@@ -8,7 +9,7 @@ import { MAGIC_V2NEXT } from '../lib/private/flag-modeling';
 async function main() {
   const featuresSourceFile = path.join(__dirname, '..', 'lib', 'features.ts');
 
-  // eslint-disable-next-line @aws-cdk/no-invalid-path
+  // eslint-disable-next-line @cdklabs/no-invalid-path
   let currentv2: string | undefined = JSON.parse(await fs.readFile(path.join(__dirname, '..', '..', '..', '..', 'version.v2.json'), { encoding: 'utf-8' })).version;
   currentv2 = currentv2?.match(/^[0-9\.]+/)?.[0]; // Make sure to only retain the actual version number, not any '-rc.X' suffix
 
@@ -23,7 +24,6 @@ async function main() {
 }
 
 main().catch(e => {
-  // eslint-disable-next-line no-console
   console.error(e);
   process.exitCode = 1;
 });

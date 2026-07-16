@@ -1,4 +1,4 @@
-/* eslint-disable no-console */
+
 // eslint-disable-next-line import/no-extraneous-dependencies
 import { ApiCall } from '@aws-cdk/aws-custom-resource-sdk-adapter';
 
@@ -6,7 +6,7 @@ interface AwsApiInput {
   readonly service: string;
   readonly action: string;
   readonly parameters?: {
-    [param: string]: any,
+    [param: string]: any;
   };
   readonly apiVersion?: string;
   readonly catchErrorPattern?: string;

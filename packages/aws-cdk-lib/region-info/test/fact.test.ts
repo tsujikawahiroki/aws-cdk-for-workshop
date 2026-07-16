@@ -1,3 +1,4 @@
+import { assertNoPrototypePollution } from '../../core/test/prototype-pollution';
 import { Fact, FactName } from '../lib';
 import { AWS_REGIONS } from '../lib/aws-entities';
 
@@ -13,11 +14,11 @@ describe('find', () => {
 
 describe('requireFact', () => {
   test('throws error for an unknown fact', () => {
-    expect(() => Fact.requireFact(AWS_REGIONS[0], 'not:a:known:fact')).toThrowError();
+    expect(() => Fact.requireFact(AWS_REGIONS[0], 'not:a:known:fact')).toThrow();
   });
 
   test('throws error for an unknown region', () => {
-    expect(() => Fact.requireFact('bermuda-triangle-42', FactName.PARTITION)).toThrowError();
+    expect(() => Fact.requireFact('bermuda-triangle-42', FactName.PARTITION)).toThrow();
   });
 });
 
@@ -30,7 +31,7 @@ describe('register', () => {
 
     // WHEN
     expect(Fact.find(region, name)).toBe(undefined);
-    expect(() => Fact.register({ region, name, value })).not.toThrowError();
+    expect(() => Fact.register({ region, name, value })).not.toThrow();
 
     // THEN
     expect(Fact.find(region, name)).toBe(value);
@@ -47,10 +48,10 @@ describe('register', () => {
 
     // WHEN
     expect(Fact.find(region, name)).toBe(undefined);
-    expect(() => Fact.register({ region, name, value })).not.toThrowError();
+    expect(() => Fact.register({ region, name, value })).not.toThrow();
 
     // THEN
-    expect(() => Fact.register({ region, name, value })).not.toThrowError();
+    expect(() => Fact.register({ region, name, value })).not.toThrow();
     expect(Fact.find(region, name)).toBe(value);
 
     // Cleanup
@@ -68,7 +69,7 @@ describe('register', () => {
 
     // THEN
     expect(() => Fact.register({ region, name, value }))
-      .toThrowError(/already has a fact/);
+      .toThrow(/already has a fact/);
   });
 
   test('allows overriding an arbitrary fact', () => {
@@ -79,11 +80,11 @@ describe('register', () => {
 
     // WHEN
     expect(Fact.find(region, name)).toBe(undefined);
-    expect(() => Fact.register({ region, name, value })).not.toThrowError();
+    expect(() => Fact.register({ region, name, value })).not.toThrow();
     expect(Fact.find(region, name)).toBe(value);
 
     // THEN
-    expect(() => Fact.register({ region, name, value: 'Foo' }, true)).not.toThrowError();
+    expect(() => Fact.register({ region, name, value: 'Foo' }, true)).not.toThrow();
     expect(Fact.find(region, name)).toBe('Foo');
 
     // Cleanup
@@ -98,7 +99,7 @@ describe('register', () => {
 
     // WHEN
     expect(Fact.find(region, name)).not.toBe(value);
-    expect(() => Fact.register({ region, name, value })).not.toThrowError();
+    expect(() => Fact.register({ region, name, value })).not.toThrow();
 
     // THEN
     expect(Fact.regions.includes('my-custom-region')).toBeTruthy();
@@ -107,5 +108,19 @@ describe('register', () => {
 
   test('regions does not return duplicate regions', () => {
     expect(new Set(Fact.regions).size == Fact.regions.length).toBeTruthy();
+  });
+
+  test('Fact.register() does not allow prototype pollution', () => {
+    assertNoPrototypePollution(() => {
+      // WHEN
+      Fact.register({ region: '__proto__', name: 'evil', value: 'evil' });
+    });
+  });
+
+  test('Fact.unregister() does not allow prototype pollution', () => {
+    assertNoPrototypePollution(() => {
+      // Not able to remove 'toString' from Object.prototype
+      Fact.unregister('__proto__', 'toString');
+    });
   });
 });

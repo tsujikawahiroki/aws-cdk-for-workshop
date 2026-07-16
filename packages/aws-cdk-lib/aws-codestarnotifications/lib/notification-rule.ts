@@ -1,8 +1,12 @@
-import * as constructs from 'constructs';
+import type * as constructs from 'constructs';
 import { CfnNotificationRule } from './codestarnotifications.generated';
-import { INotificationRuleSource } from './notification-rule-source';
-import { INotificationRuleTarget, NotificationRuleTargetConfig } from './notification-rule-target';
-import { IResource, Resource, Names } from '../../core';
+import type { INotificationRuleSource } from './notification-rule-source';
+import type { INotificationRuleTarget, NotificationRuleTargetConfig } from './notification-rule-target';
+import type { IResource } from '../../core';
+import { Resource, Names } from '../../core';
+import { addConstructMetadata, MethodMetadata } from '../../core/lib/metadata-resource';
+import { propertyInjectable } from '../../core/lib/prop-injectable';
+import type { INotificationRuleRef, NotificationRuleReference } from '../../interfaces/generated/aws-codestarnotifications-interfaces.generated';
 
 /**
  * The level of detail to include in the notifications for this resource.
@@ -47,6 +51,14 @@ export interface NotificationRuleOptions {
    * @default DetailType.FULL
    */
   readonly detailType?: DetailType;
+
+  /**
+   * The name or email alias of the person who created the notification rule.
+   * If not specified, it means that the creator's alias is not provided.
+   *
+   * @default - No alias provided
+   */
+  readonly createdBy?: string;
 }
 
 /**
@@ -78,7 +90,7 @@ export interface NotificationRuleProps extends NotificationRuleOptions {
 /**
  * Represents a notification rule
  */
-export interface INotificationRule extends IResource {
+export interface INotificationRule extends IResource, INotificationRuleRef {
 
   /**
    * The ARN of the notification rule (i.e. arn:aws:codestar-notifications:::notificationrule/01234abcde)
@@ -101,7 +113,11 @@ export interface INotificationRule extends IResource {
  *
  * @resource AWS::CodeStarNotifications::NotificationRule
  */
+@propertyInjectable
 export class NotificationRule extends Resource implements INotificationRule {
+  /** Uniquely identifies this class. */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-codestarnotifications.NotificationRule';
+
   /**
    * Import an existing notification rule provided an ARN
    * @param scope The parent creating construct
@@ -111,6 +127,12 @@ export class NotificationRule extends Resource implements INotificationRule {
   public static fromNotificationRuleArn(scope: constructs.Construct, id: string, notificationRuleArn: string): INotificationRule {
     class Import extends Resource implements INotificationRule {
       readonly notificationRuleArn = notificationRuleArn;
+
+      public get notificationRuleRef(): NotificationRuleReference {
+        return {
+          notificationRuleArn: this.notificationRuleArn,
+        };
+      }
 
       public addTarget(_target: INotificationRuleTarget): boolean {
         return false;
@@ -127,12 +149,20 @@ export class NotificationRule extends Resource implements INotificationRule {
    */
   public readonly notificationRuleArn: string;
 
+  public get notificationRuleRef(): NotificationRuleReference {
+    return {
+      notificationRuleArn: this.notificationRuleArn,
+    };
+  }
+
   private readonly targets: NotificationRuleTargetConfig[] = [];
 
   private readonly events: string[] = [];
 
   constructor(scope: constructs.Construct, id: string, props: NotificationRuleProps) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     const source = props.source.bindAsNotificationRuleSource(this);
 
@@ -148,6 +178,7 @@ export class NotificationRule extends Resource implements INotificationRule {
       status: props.enabled !== undefined
         ? (props.enabled ? 'ENABLED' : 'DISABLED')
         : undefined,
+      createdBy: props.createdBy,
     });
 
     this.notificationRuleArn = resource.ref;
@@ -161,6 +192,7 @@ export class NotificationRule extends Resource implements INotificationRule {
    * Adds target to notification rule
    * @param target The SNS topic or AWS Chatbot Slack target
    */
+  @MethodMetadata()
   public addTarget(target: INotificationRuleTarget): boolean {
     this.targets.push(target.bindAsNotificationRuleTarget(this));
     return true;

@@ -1,11 +1,22 @@
-import { Construct } from 'constructs';
-import { CfnResponseHeadersPolicy } from './cloudfront.generated';
-import { Duration, Names, Resource, Token } from '../../core';
+import type { Construct } from 'constructs';
+import type {
+  IResponseHeadersPolicyRef,
+  ResponseHeadersPolicyReference,
+} from './cloudfront.generated';
+import {
+  CfnResponseHeadersPolicy,
+} from './cloudfront.generated';
+import type { Duration } from '../../core';
+import { Names, Resource, Token, ValidationError, withResolved } from '../../core';
+import { addConstructMetadata } from '../../core/lib/metadata-resource';
+import { DetachedConstruct } from '../../core/lib/private/detached-construct';
+import { lit } from '../../core/lib/private/literal-string';
+import { propertyInjectable } from '../../core/lib/prop-injectable';
 
 /**
  * Represents a response headers policy.
  */
-export interface IResponseHeadersPolicy {
+export interface IResponseHeadersPolicy extends IResponseHeadersPolicyRef {
   /**
    * The ID of the response headers policy
    * @attribute
@@ -74,8 +85,10 @@ export interface ResponseHeadersPolicyProps {
  *
  * @resource AWS::CloudFront::ResponseHeadersPolicy
  */
+@propertyInjectable
 export class ResponseHeadersPolicy extends Resource implements IResponseHeadersPolicy {
-
+  /** Uniquely identifies this class. */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-cloudfront.ResponseHeadersPolicy';
   /** Use this managed policy to allow simple CORS requests from any origin. */
   public static readonly CORS_ALLOW_ALL_ORIGINS = ResponseHeadersPolicy.fromManagedResponseHeadersPolicy('60669652-455b-4ae9-85a4-c4c02393f86c');
   /** Use this managed policy to allow CORS requests from any origin, including preflight requests. */
@@ -93,22 +106,34 @@ export class ResponseHeadersPolicy extends Resource implements IResponseHeadersP
   public static fromResponseHeadersPolicyId(scope: Construct, id: string, responseHeadersPolicyId: string): IResponseHeadersPolicy {
     class Import extends Resource implements IResponseHeadersPolicy {
       public readonly responseHeadersPolicyId = responseHeadersPolicyId;
+      public readonly responseHeadersPolicyRef = {
+        responseHeadersPolicyId: responseHeadersPolicyId,
+      };
     }
     return new Import(scope, id);
   }
 
   private static fromManagedResponseHeadersPolicy(managedResponseHeadersPolicyId: string): IResponseHeadersPolicy {
-    return new class implements IResponseHeadersPolicy {
+    return new class extends DetachedConstruct implements IResponseHeadersPolicy {
       public readonly responseHeadersPolicyId = managedResponseHeadersPolicyId;
+      public readonly responseHeadersPolicyRef = {
+        responseHeadersPolicyId: managedResponseHeadersPolicyId,
+      };
+      constructor() {
+        super('The result of fromManagedResponseHeadersPolicy can not be used in this API');
+      }
     };
   }
 
   public readonly responseHeadersPolicyId: string;
+  public readonly responseHeadersPolicyRef: ResponseHeadersPolicyReference;
 
   constructor(scope: Construct, id: string, props: ResponseHeadersPolicyProps = {}) {
     super(scope, id, {
       physicalName: props.responseHeadersPolicyName,
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     const responseHeadersPolicyName = props.responseHeadersPolicyName ?? Names.uniqueResourceName(this, {
       maxLength: 128,
@@ -126,10 +151,25 @@ export class ResponseHeadersPolicy extends Resource implements IResponseHeadersP
       },
     });
 
+    this.responseHeadersPolicyRef = resource.responseHeadersPolicyRef;
     this.responseHeadersPolicyId = resource.ref;
   }
 
   private _renderCorsConfig(behavior: ResponseHeadersCorsBehavior): CfnResponseHeadersPolicy.CorsConfigProperty {
+    withResolved(behavior.accessControlAllowMethods, (methods) => {
+      const allowedMethods = ['GET', 'DELETE', 'HEAD', 'OPTIONS', 'PATCH', 'POST', 'PUT', 'ALL'];
+      if (methods.includes('ALL') && methods.length !== 1) {
+        throw new ValidationError(lit`AccessControlAllowMethodsAllCannotBeCombined`, "accessControlAllowMethods - 'ALL' cannot be combined with specific HTTP methods.", this);
+      } else if (!methods.every((method) => Token.isUnresolved(method) || allowedMethods.includes(method))) {
+        throw new ValidationError(lit`AccessControlAllowMethodsContainsUnexpectedMethod`, `accessControlAllowMethods contains unexpected method name; allowed values: ${allowedMethods.join(', ')}`, this);
+      }
+    });
+    withResolved(behavior.accessControlAllowHeaders, (headers) => {
+      if (behavior.accessControlAllowCredentials && headers.some(header => !Token.isUnresolved(header) && header.includes('*'))) {
+        throw new ValidationError(lit`AccessControlAllowHeadersCannotContainWildcard`, 'accessControlAllowHeaders cannot contain "*" or headers with "*" when accessControlAllowCredentials is true', this);
+      }
+    });
+
     return {
       accessControlAllowCredentials: behavior.accessControlAllowCredentials,
       accessControlAllowHeaders: { items: behavior.accessControlAllowHeaders },
@@ -167,7 +207,7 @@ export class ResponseHeadersPolicy extends Resource implements IResponseHeadersP
     return {
       items: headers.map(header => {
         if (!Token.isUnresolved(header) && readonlyHeaders.includes(header.toLowerCase())) {
-          throw new Error(`Cannot remove read-only header ${header}`);
+          throw new ValidationError(lit`CannotRemoveReadOnlyHeader`, `Cannot remove read-only header ${header}`, this);
         }
         return { header };
       }),
@@ -177,11 +217,11 @@ export class ResponseHeadersPolicy extends Resource implements IResponseHeadersP
   private _renderServerTimingHeadersConfig(samplingRate: number): CfnResponseHeadersPolicy.ServerTimingHeadersConfigProperty {
     if (!Token.isUnresolved(samplingRate)) {
       if ((samplingRate < 0 || samplingRate > 100)) {
-        throw new Error(`Sampling rate must be between 0 and 100 (inclusive), received ${samplingRate}`);
+        throw new ValidationError(lit`SamplingRateMustBeBetween0And100`, `Sampling rate must be between 0 and 100 (inclusive), received ${samplingRate}`, this);
       }
 
       if (!hasMaxDecimalPlaces(samplingRate, 4)) {
-        throw new Error(`Sampling rate can have up to four decimal places, received ${samplingRate}`);
+        throw new ValidationError(lit`SamplingRateCanHaveUpToFourDecimalPlaces`, `Sampling rate can have up to four decimal places, received ${samplingRate}`, this);
       }
     }
 
@@ -211,6 +251,9 @@ export interface ResponseHeadersCorsBehavior {
 
   /**
    * A list of HTTP methods that CloudFront includes as values for the Access-Control-Allow-Methods HTTP response header.
+   *
+   * Allowed methods: `'GET'`, `'DELETE'`, `'HEAD'`, `'OPTIONS'`, `'PATCH'`, `'POST'`, and `'PUT'`.
+   * You can specify `['ALL']` to allow all methods.
    */
   readonly accessControlAllowMethods: string[];
 

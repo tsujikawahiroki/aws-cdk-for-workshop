@@ -1,6 +1,6 @@
-import { Construct } from 'constructs';
-import { CfnVirtualNode } from './appmesh.generated';
-import * as cloudmap from '../../aws-servicediscovery';
+import type { Construct } from 'constructs';
+import type { CfnVirtualNode } from './appmesh.generated';
+import type * as cloudmap from '../../aws-servicediscovery';
 
 /**
  * Enum of supported IP preferences.
@@ -91,7 +91,6 @@ export abstract class ServiceDiscovery {
   /**
    * Returns DNS based service discovery
    *
-   * @param hostname
    * @param responseType Specifies the DNS response type for the virtual node.
    *  The default is `DnsResponseType.LOAD_BALANCER`.
    * @param ipPreference No IP preference is applied to the Virtual Node.

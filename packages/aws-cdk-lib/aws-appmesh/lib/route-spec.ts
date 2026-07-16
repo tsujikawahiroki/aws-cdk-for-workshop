@@ -1,13 +1,15 @@
-import { Construct } from 'constructs';
-import { CfnRoute } from './appmesh.generated';
-import { HeaderMatch } from './header-match';
-import { HttpRouteMethod } from './http-route-method';
+import type { Construct } from 'constructs';
+import type { CfnRoute } from './appmesh.generated';
+import type { HeaderMatch } from './header-match';
+import type { HttpRouteMethod } from './http-route-method';
 import { HttpRoutePathMatch } from './http-route-path-match';
 import { validateGrpcRouteMatch, validateGrpcMatchArrayLength, validateHttpMatchArrayLength } from './private/utils';
-import { QueryParameterMatch } from './query-parameter-match';
-import { GrpcTimeout, HttpTimeout, Protocol, TcpTimeout } from './shared-interfaces';
-import { IVirtualNode } from './virtual-node';
+import type { QueryParameterMatch } from './query-parameter-match';
+import type { GrpcTimeout, HttpTimeout, TcpTimeout } from './shared-interfaces';
+import { Protocol } from './shared-interfaces';
+import type { IVirtualNode } from './virtual-node';
 import * as cdk from '../../core';
+import { lit } from '../../core/lib/private/literal-string';
 
 /**
  * Properties for the Weighted Targets in the route
@@ -449,7 +451,7 @@ class HttpRouteSpec extends RouteSpec {
       const tcpRetryEvents = props.retryPolicy.tcpRetryEvents ?? [];
 
       if (httpRetryEvents.length + tcpRetryEvents.length === 0) {
-        throw new Error('You must specify one value for at least one of `httpRetryEvents` or `tcpRetryEvents`');
+        throw new cdk.UnscopedValidationError(lit`RetryEventsRequired`, 'You must specify one value for at least one of `httpRetryEvents` or `tcpRetryEvents`');
       }
 
       this.retryPolicy = {
@@ -467,7 +469,7 @@ class HttpRouteSpec extends RouteSpec {
     const headers = this.match?.headers;
     const queryParameters = this.match?.queryParameters;
 
-    validateHttpMatchArrayLength(headers, queryParameters);
+    validateHttpMatchArrayLength(scope, headers, queryParameters);
 
     const httpConfig: CfnRoute.HttpRouteProperty = {
       action: {
@@ -557,7 +559,7 @@ class GrpcRouteSpec extends RouteSpec {
       const tcpRetryEvents = props.retryPolicy.tcpRetryEvents ?? [];
 
       if (grpcRetryEvents.length + httpRetryEvents.length + tcpRetryEvents.length === 0) {
-        throw new Error('You must specify one value for at least one of `grpcRetryEvents`, `httpRetryEvents` or `tcpRetryEvents`');
+        throw new cdk.UnscopedValidationError(lit`GrpcRetryEventsRequired`, 'You must specify one value for at least one of `grpcRetryEvents`, `httpRetryEvents` or `tcpRetryEvents`');
       }
 
       this.retryPolicy = {
@@ -575,11 +577,11 @@ class GrpcRouteSpec extends RouteSpec {
     const metadata = this.match.metadata;
     const port = this.match.port;
 
-    validateGrpcRouteMatch(this.match);
-    validateGrpcMatchArrayLength(metadata);
+    validateGrpcRouteMatch(scope, this.match);
+    validateGrpcMatchArrayLength(scope, metadata);
 
     if (methodName && !serviceName) {
-      throw new Error('If you specify a method name, you must also specify a service name');
+      throw new cdk.ValidationError(lit`ServiceNameRequired`, 'If you specify a method name, you must also specify a service name', scope);
     }
 
     return {

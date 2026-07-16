@@ -1,12 +1,16 @@
-import { Construct } from 'constructs';
-import { CfnVpcLink } from '.././index';
+import type { Construct } from 'constructs';
 import * as ec2 from '../../../aws-ec2';
-import { IResource, Lazy, Names, Resource } from '../../../core';
+import type { IResource } from '../../../core';
+import { Lazy, Names, Resource } from '../../../core';
+import { addConstructMetadata, MethodMetadata } from '../../../core/lib/metadata-resource';
+import { propertyInjectable } from '../../../core/lib/prop-injectable';
+import type { IVpcLinkRef, VpcLinkReference } from '../index';
+import { CfnVpcLink } from '../index';
 
 /**
  * Represents an API Gateway VpcLink
  */
-export interface IVpcLink extends IResource {
+export interface IVpcLink extends IResource, IVpcLinkRef {
   /**
    * Physical ID of the VpcLink resource
    * @attribute
@@ -46,7 +50,7 @@ export interface VpcLinkProps {
    *
    * @default - no security groups. Use `addSecurityGroups` to add security groups
    */
-  readonly securityGroups?: ec2.ISecurityGroup[];
+  readonly securityGroups?: ec2.ISecurityGroupRef[];
 }
 
 /**
@@ -67,12 +71,17 @@ export interface VpcLinkAttributes {
  * Define a new VPC Link
  * Specifies an API Gateway VPC link for a HTTP API to access resources in an Amazon Virtual Private Cloud (VPC).
  */
+@propertyInjectable
 export class VpcLink extends Resource implements IVpcLink {
+  /** Uniquely identifies this class. */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-apigatewayv2.VpcLink';
+
   /**
    * Import a VPC Link by specifying its attributes.
    */
   public static fromVpcLinkAttributes(scope: Construct, id: string, attrs: VpcLinkAttributes): IVpcLink {
     class Import extends Resource implements IVpcLink {
+      public readonly vpcLinkRef = { vpcLinkId: attrs.vpcLinkId };
       public vpcLinkId = attrs.vpcLinkId;
       public vpc = attrs.vpc;
     }
@@ -83,11 +92,13 @@ export class VpcLink extends Resource implements IVpcLink {
   public readonly vpcLinkId: string;
   public readonly vpc: ec2.IVpc;
 
-  private readonly subnets = new Array<ec2.ISubnet>();
-  private readonly securityGroups = new Array<ec2.ISecurityGroup>();
+  private readonly subnets = new Array<ec2.ISubnetRef>();
+  private readonly securityGroups = new Array<ec2.ISecurityGroupRef>();
 
   constructor(scope: Construct, id: string, props: VpcLinkProps) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
     this.vpc = props.vpc;
 
     const cfnResource = new CfnVpcLink(this, 'Resource', {
@@ -108,27 +119,29 @@ export class VpcLink extends Resource implements IVpcLink {
 
   /**
    * Adds the provided subnets to the vpc link
-   *
-   * @param subnets
    */
-  public addSubnets(...subnets: ec2.ISubnet[]) {
+  @MethodMetadata()
+  public addSubnets(...subnets: ec2.ISubnetRef[]) {
     this.subnets.push(...subnets);
   }
 
   /**
    * Adds the provided security groups to the vpc link
-   *
-   * @param groups
    */
-  public addSecurityGroups(...groups: ec2.ISecurityGroup[]) {
+  @MethodMetadata()
+  public addSecurityGroups(...groups: ec2.ISecurityGroupRef[]) {
     this.securityGroups.push(...groups);
   }
 
+  public get vpcLinkRef(): VpcLinkReference {
+    return { vpcLinkId: this.vpcLinkId };
+  }
+
   private renderSubnets() {
-    return this.subnets.map(subnet => subnet.subnetId);
+    return this.subnets.map(subnet => subnet.subnetRef.subnetId);
   }
 
   private renderSecurityGroups() {
-    return this.securityGroups.map(sg => sg.securityGroupId);
+    return this.securityGroups.map(sg => sg.securityGroupRef.securityGroupId);
   }
 }

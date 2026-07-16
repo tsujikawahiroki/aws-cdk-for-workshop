@@ -1,5 +1,5 @@
-import { IHostedZone } from './hosted-zone-ref';
-import { IRecordSet } from './record-set';
+import type { IHostedZone } from './hosted-zone-ref';
+import type { IRecordSet } from './record-set';
 
 /**
  * Classes that are valid alias record targets, like CloudFront distributions and load
@@ -25,4 +25,11 @@ export interface AliasRecordTargetConfig {
    * DNS name of the target
    */
   readonly dnsName: string;
+
+  /**
+   * Evaluate the target health
+   *
+   * @default - no health check configuration
+   */
+  readonly evaluateTargetHealth?: boolean;
 }

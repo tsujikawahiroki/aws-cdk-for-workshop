@@ -9,7 +9,7 @@
        "Action": "sts:AssumeRole",
        "Effect": "Allow",
        "Principal": {
-        "Service": "glue"
+        "Service": "glue.amazonaws.com"
        }
       }
      ],
@@ -107,14 +107,14 @@
       ]
      }
     },
+    "GlueVersion": "1.0",
+    "Name": "My Glue Job",
     "Role": {
      "Fn::GetAtt": [
       "GlueJobRole1CD031E0",
       "Arn"
      ]
-    },
-    "GlueVersion": "1.0",
-    "Name": "My Glue Job"
+    }
    }
   },
   "StateMachineRole543B9670": {
@@ -182,22 +182,22 @@
   "StateMachine81935E76": {
    "Type": "AWS::StepFunctions::StateMachine",
    "Properties": {
-    "RoleArn": {
-     "Fn::GetAtt": [
-      "StateMachineRole543B9670",
-      "Arn"
-     ]
-    },
     "DefinitionString": {
      "Fn::Join": [
       "",
       [
-       "{\"StartAt\":\"Start Task\",\"States\":{\"Start Task\":{\"Type\":\"Pass\",\"Next\":\"Glue Job Task\"},\"Glue Job Task\":{\"Next\":\"End Task\",\"Parameters\":{\"JobName\":\"My Glue Job\",\"Arguments\":{\"--enable-metrics\":\"true\"}},\"Type\":\"Task\",\"Resource\":\"arn:",
+       "{\"StartAt\":\"Start Task\",\"States\":{\"Start Task\":{\"Type\":\"Pass\",\"Next\":\"Glue Job Task\"},\"Glue Job Task\":{\"Next\":\"End Task\",\"Type\":\"Task\",\"Resource\":\"arn:",
        {
         "Ref": "AWS::Partition"
        },
-       ":states:::glue:startJobRun.sync\"},\"End Task\":{\"Type\":\"Pass\",\"End\":true}}}"
+       ":states:::glue:startJobRun.sync\",\"Parameters\":{\"JobName\":\"My Glue Job\",\"Arguments\":{\"--enable-metrics\":\"true\"}}},\"End Task\":{\"Type\":\"Pass\",\"End\":true}}}"
       ]
+     ]
+    },
+    "RoleArn": {
+     "Fn::GetAtt": [
+      "StateMachineRole543B9670",
+      "Arn"
      ]
     }
    },

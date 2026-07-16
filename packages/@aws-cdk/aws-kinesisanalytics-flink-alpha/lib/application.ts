@@ -4,12 +4,15 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import { CfnApplicationCloudWatchLoggingOptionV2, CfnApplicationV2 } from 'aws-cdk-lib/aws-kinesisanalytics';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as core from 'aws-cdk-lib/core';
-import { Construct } from 'constructs';
-import { ApplicationCode } from './application-code';
+import { memoizedGetter } from 'aws-cdk-lib/core/lib/helpers-internal';
+import { addConstructMetadata } from 'aws-cdk-lib/core/lib/metadata-resource';
+import { propertyInjectable } from 'aws-cdk-lib/core/lib/prop-injectable';
+import type { Construct } from 'constructs';
+import type { ApplicationCode } from './application-code';
 import { environmentProperties } from './private/environment-properties';
 import { flinkApplicationConfiguration } from './private/flink-application-configuration';
 import { validateFlinkApplicationProps as validateApplicationProps } from './private/validation';
-import { LogLevel, MetricsLevel, Runtime } from './types';
+import type { LogLevel, MetricsLevel, Runtime } from './types';
 
 /**
  * An interface expressing the public properties on both an imported and
@@ -178,7 +181,7 @@ export interface IApplication extends core.IResource, ec2.IConnectable, iam.IGra
   metricOldGenerationGCCount(props?: cloudwatch.MetricOptions): cloudwatch.Metric;
 
   /**
-	 * The total number of live threads used by the application.
+   * The total number of live threads used by the application.
    *
    * Units: Count
    *
@@ -899,7 +902,10 @@ export interface ApplicationProps {
 /**
  * An imported Flink application.
  */
+@propertyInjectable
 class Import extends ApplicationBase {
+  /** Uniquely identifies this class. */
+  public static readonly PROPERTY_INJECTION_ID: string = '@aws-cdk.aws-kinesisanalytics-flink-alpha.Import';
   public readonly grantPrincipal: iam.IPrincipal;
   public readonly role?: iam.IRole;
   public readonly applicationName: string;
@@ -907,6 +913,8 @@ class Import extends ApplicationBase {
 
   constructor(scope: Construct, id: string, attrs: { applicationArn: string; securityGroups?: ec2.ISecurityGroup[] }) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, attrs);
 
     // Imported applications have no associated role or grantPrincipal
     this.grantPrincipal = new iam.UnknownPrincipal({ resource: this });
@@ -932,7 +940,11 @@ class Import extends ApplicationBase {
  * @resource AWS::KinesisAnalyticsV2::Application
  *
  */
+@propertyInjectable
 export class Application extends ApplicationBase {
+  /** Uniquely identifies this class. */
+  public static readonly PROPERTY_INJECTION_ID: string = '@aws-cdk.aws-kinesisanalytics-flink-alpha.Application';
+
   /**
    * Import an existing Flink application defined outside of CDK code by
    * applicationName.
@@ -961,16 +973,17 @@ export class Application extends ApplicationBase {
     });
   }
 
-  public readonly applicationArn: string;
-  public readonly applicationName: string;
-
   // Role must be optional for JSII compatibility
   public readonly role?: iam.IRole;
 
   public readonly grantPrincipal: iam.IPrincipal;
 
+  private resource: CfnApplicationV2;
+
   constructor(scope: Construct, id: string, props: ApplicationProps) {
     super(scope, id, { physicalName: props.applicationName });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
     validateApplicationProps(props);
 
     this.role = props.role ?? new iam.Role(this, 'Role', {
@@ -1028,6 +1041,7 @@ export class Application extends ApplicationBase {
       },
     });
     resource.node.addDependency(this.role);
+    this.resource = resource;
 
     const logGroup = props.logGroup ?? new logs.LogGroup(this, 'LogGroup');
     const logStream = new logs.LogStream(this, 'LogStream', { logGroup });
@@ -1058,7 +1072,7 @@ export class Application extends ApplicationBase {
     }));
 
     new CfnApplicationCloudWatchLoggingOptionV2(this, 'LoggingOption', {
-      applicationName: resource.ref,
+      applicationName: this.resource.ref,
       cloudWatchLoggingOption: {
         logStreamArn,
       },
@@ -1082,15 +1096,22 @@ export class Application extends ApplicationBase {
       }));
     }
 
-    this.applicationName = this.getResourceNameAttribute(resource.ref);
-    this.applicationArn = this.getResourceArnAttribute(
-      core.Stack.of(this).formatArn(applicationArnComponents(resource.ref)),
-      applicationArnComponents(this.physicalName),
-    );
-
-    resource.applyRemovalPolicy(props.removalPolicy, {
+    this.resource.applyRemovalPolicy(props.removalPolicy, {
       default: core.RemovalPolicy.DESTROY,
     });
+  }
+
+  @memoizedGetter
+  public get applicationName(): string {
+    return this.getResourceNameAttribute(this.resource.ref);
+  }
+
+  @memoizedGetter
+  public get applicationArn(): string {
+    return this.getResourceArnAttribute(
+      core.Stack.of(this).formatArn(applicationArnComponents(this.resource.ref)),
+      applicationArnComponents(this.physicalName),
+    );
   }
 }
 

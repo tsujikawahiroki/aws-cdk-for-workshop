@@ -1,4 +1,7 @@
-import { App, Stack, Duration } from '../../core';
+import { KubectlV31Layer } from '@aws-cdk/lambda-layer-kubectl-v31';
+import { Template } from '../../assertions/lib';
+import type { App } from '../../core';
+import { Stack, Duration, RemovalPolicy } from '../../core';
 import * as eks from '../lib';
 import { KubernetesObjectValue } from '../lib/k8s-object-value';
 
@@ -8,7 +11,10 @@ describe('k8s object value', () => {
   test('creates the correct custom resource with explicit values for all properties', () => {
     // GIVEN
     const stack = new Stack();
-    const cluster = new eks.Cluster(stack, 'MyCluster', { version: CLUSTER_VERSION });
+    const cluster = new eks.Cluster(stack, 'MyCluster', {
+      version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
+    });
 
     // WHEN
     const attribute = new KubernetesObjectValue(stack, 'MyAttribute', {
@@ -52,7 +58,10 @@ describe('k8s object value', () => {
   test('creates the correct custom resource with defaults', () => {
     // GIVEN
     const stack = new Stack();
-    const cluster = new eks.Cluster(stack, 'MyCluster', { version: CLUSTER_VERSION });
+    const cluster = new eks.Cluster(stack, 'MyCluster', {
+      version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
+    });
 
     // WHEN
     const attribute = new KubernetesObjectValue(stack, 'MyAttribute', {
@@ -88,5 +97,28 @@ describe('k8s object value', () => {
     });
 
     expect(stack.resolve(attribute.value)).toEqual({ 'Fn::GetAtt': [expectedCustomResourceId, 'Value'] });
+  });
+
+  test('supports custom removal policy', () => {
+    // GIVEN
+    const stack = new Stack();
+    const cluster = new eks.Cluster(stack, 'MyCluster', {
+      version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
+    });
+
+    // WHEN
+    new KubernetesObjectValue(stack, 'MyAttribute', {
+      cluster,
+      jsonPath: '.status',
+      objectName: 'mydeployment',
+      objectType: 'deployment',
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResource('Custom::AWSCDK-EKS-KubernetesObjectValue', {
+      DeletionPolicy: 'Retain',
+    });
   });
 });

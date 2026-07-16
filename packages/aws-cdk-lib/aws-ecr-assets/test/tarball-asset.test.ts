@@ -1,15 +1,24 @@
+import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import { Template } from '../../assertions';
 import * as iam from '../../aws-iam';
-import * as cxschema from '../../cloud-assembly-schema';
+import type * as cxschema from '../../cloud-assembly-schema';
 import { App, Stack, DefaultStackSynthesizer } from '../../core';
 import * as cxapi from '../../cx-api';
-import { TarballImageAsset } from '../lib';
+import { TarballImageAsset, DOCKER_LOAD_OUTPUT_REGEX } from '../lib';
 
-/* eslint-disable quote-props */
+/* eslint-disable @stylistic/quote-props */
 
 describe('image asset', () => {
+  const currentCdkDocker = process.env.CDK_DOCKER;
+  beforeAll(() => {
+    process.env.CDK_DOCKER = 'docker';
+  });
+  afterAll(() => {
+    process.env.CDK_DOCKER = currentCdkDocker;
+  });
+
   const tarballFile = path.join(__dirname, 'demo-tarball', 'empty.tar');
   test('test instantiating Asset Image', () => {
     // GIVEN
@@ -28,8 +37,7 @@ describe('image asset', () => {
 
     expect(Object.keys(manifest.files ?? {}).length).toBe(1);
     expect(Object.keys(manifest.dockerImages ?? {}).length).toBe(1);
-
-    expect(manifest.dockerImages?.[asset.assetHash]?.destinations?.['current_account-current_region']).toStrictEqual(
+    expect(manifest.dockerImages?.[asset.assetHash]?.destinations?.['current_account-current_region-bdbba1c5']).toStrictEqual(
       {
         assumeRoleArn: 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cdk-hnb659fds-image-publishing-role-${AWS::AccountId}-${AWS::Region}',
         imageTag: asset.assetHash,
@@ -42,7 +50,9 @@ describe('image asset', () => {
         executable: [
           'sh',
           '-c',
-          `docker load -i asset.${asset.assetHash}.tar | tail -n 1 | sed "s/Loaded image: //g"`,
+          `docker load -i "$1" | tail -n 1 | sed "${DOCKER_LOAD_OUTPUT_REGEX}"`,
+          'cdk-tarball-image-asset',
+          `asset.${asset.assetHash}.tar`,
         ],
       },
     );
@@ -134,7 +144,6 @@ describe('image asset', () => {
         tarballFile: `/does/not/exist/${Math.floor(Math.random() * 9999)}`,
       });
     }).toThrow(/Cannot find file at/);
-
   });
 
   describe('imageTag is correct for different stack synthesizers', () => {
@@ -161,7 +170,72 @@ describe('image asset', () => {
       expect(asset2.imageTag).toEqual('banana95c924c84f5d023be4edee540cb2cb401a49f115d01ed403b288f6cb412771df');
     });
   });
+  test('docker load output format handling', () => {
+    // Test that our sed expression can handle both old and new Docker output formats
+    const oldFormatOutput = 'Loaded image: sha256:4a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a';
+    const newFormatOutput = 'Loaded image ID: sha256:4a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a';
 
+    // Test old format (Loaded image: sha256:...)
+    const oldFormatResult = spawnSync('sh', [
+      '-c',
+      `echo "${oldFormatOutput}" | sed "${DOCKER_LOAD_OUTPUT_REGEX}"`,
+    ]);
+    expect(oldFormatResult.status).toBe(0);
+    expect(oldFormatResult.stdout.toString().trim()).toBe('sha256:4a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a');
+
+    // Test new format (Loaded image ID: sha256:...)
+    const newFormatResult = spawnSync('sh', [
+      '-c',
+      `echo "${newFormatOutput}" | sed "${DOCKER_LOAD_OUTPUT_REGEX}"`,
+    ]);
+    expect(newFormatResult.status).toBe(0);
+    expect(newFormatResult.stdout.toString().trim()).toBe('sha256:4a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a');
+
+    // Test that the old sed expression fails with the new format
+    const oldSedWithNewFormat = spawnSync('sh', [
+      '-c',
+      `echo "${newFormatOutput}" | sed "s/Loaded image: //g"`,
+    ]);
+    expect(oldSedWithNewFormat.status).toBe(0);
+    expect(oldSedWithNewFormat.stdout.toString().trim()).not.toBe('sha256:4a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a');
+    expect(oldSedWithNewFormat.stdout.toString().trim()).toBe('Loaded image ID: sha256:4a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a');
+  });
+
+  test('respects CDK_DOCKER environment variable', () => {
+    // GIVEN
+    const originalCdkDocker = process.env.CDK_DOCKER;
+    process.env.CDK_DOCKER = 'custom-docker';
+
+    try {
+      const app = new App();
+      const stack = new Stack(app);
+      const asset = new TarballImageAsset(stack, 'Image', {
+        tarballFile,
+      });
+
+      // WHEN
+      const asm = app.synth();
+
+      // THEN
+      const manifestArtifact = getAssetManifest(asm);
+      const manifest = readAssetManifest(manifestArtifact);
+
+      expect(manifest.dockerImages?.[asset.assetHash]?.source?.executable).toEqual([
+        'sh',
+        '-c',
+        `custom-docker load -i "$1" | tail -n 1 | sed "${DOCKER_LOAD_OUTPUT_REGEX}"`,
+        'cdk-tarball-image-asset',
+        `asset.${asset.assetHash}.tar`,
+      ]);
+    } finally {
+      // Cleanup
+      if (originalCdkDocker !== undefined) {
+        process.env.CDK_DOCKER = originalCdkDocker;
+      } else {
+        delete process.env.CDK_DOCKER;
+      }
+    }
+  });
 });
 
 function isAssetManifest(x: cxapi.CloudArtifact): x is cxapi.AssetManifestArtifact {

@@ -1,11 +1,15 @@
-import { Construct } from 'constructs';
-import { Grant } from './grant';
-import { IManagedPolicy } from './managed-policy';
-import { Policy } from './policy';
-import { PolicyStatement } from './policy-statement';
-import { AddToPrincipalPolicyResult, IPrincipal, PrincipalPolicyFragment } from './principals';
-import { IRole, Role, RoleProps } from './role';
+import type { Construct } from 'constructs';
+import type { Grant } from './grant';
+import type { RoleReference } from './iam.generated';
+import type { IManagedPolicy } from './managed-policy';
+import type { Policy } from './policy';
+import type { PolicyStatement } from './policy-statement';
+import type { AddToPrincipalPolicyResult, IPrincipal, PrincipalPolicyFragment } from './principals';
+import type { IRole, RoleProps } from './role';
+import { Role } from './role';
 import * as cdk from '../../core';
+import { addConstructMetadata, MethodMetadata } from '../../core/lib/metadata-resource';
+import { propertyInjectable } from '../../core/lib/prop-injectable';
 
 /**
  * Properties for defining a LazyRole
@@ -25,7 +29,10 @@ export interface LazyRoleProps extends RoleProps {
  *
  * @resource AWS::IAM::Role
  */
+@propertyInjectable
 export class LazyRole extends cdk.Resource implements IRole {
+  /** Uniquely identifies this class. */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-iam.LazyRole';
   public readonly grantPrincipal: IPrincipal = this;
   public readonly principalAccount: string | undefined = this.env.account;
   public readonly assumeRoleAction: string = 'sts:AssumeRole';
@@ -37,6 +44,8 @@ export class LazyRole extends cdk.Resource implements IRole {
 
   constructor(scope: Construct, id: string, private readonly props: LazyRoleProps) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
   }
 
   /**
@@ -44,6 +53,7 @@ export class LazyRole extends cdk.Resource implements IRole {
    * If there is no default policy attached to this role, it will be created.
    * @param statement The permission statement to add to the policy document
    */
+  @MethodMetadata()
   public addToPrincipalPolicy(statement: PolicyStatement): AddToPrincipalPolicyResult {
     if (this.role) {
       return this.role.addToPrincipalPolicy(statement);
@@ -53,6 +63,7 @@ export class LazyRole extends cdk.Resource implements IRole {
     }
   }
 
+  @MethodMetadata()
   public addToPolicy(statement: PolicyStatement): boolean {
     return this.addToPrincipalPolicy(statement).statementAdded;
   }
@@ -61,6 +72,7 @@ export class LazyRole extends cdk.Resource implements IRole {
    * Attaches a policy to this role.
    * @param policy The policy to attach
    */
+  @MethodMetadata()
   public attachInlinePolicy(policy: Policy): void {
     if (this.role) {
       this.role.attachInlinePolicy(policy);
@@ -73,6 +85,7 @@ export class LazyRole extends cdk.Resource implements IRole {
    * Attaches a managed policy to this role.
    * @param policy The managed policy to attach.
    */
+  @MethodMetadata()
   public addManagedPolicy(policy: IManagedPolicy): void {
     if (this.role) {
       this.role.addManagedPolicy(policy);
@@ -86,6 +99,10 @@ export class LazyRole extends cdk.Resource implements IRole {
    */
   public get roleArn(): string {
     return this.instantiate().roleArn;
+  }
+
+  public get roleRef(): RoleReference {
+    return this.instantiate().roleRef;
   }
 
   /**
@@ -108,6 +125,7 @@ export class LazyRole extends cdk.Resource implements IRole {
   /**
    * Grant the actions defined in actions to the identity Principal on this resource.
    */
+  @MethodMetadata()
   public grant(identity: IPrincipal, ...actions: string[]): Grant {
     return this.instantiate().grant(identity, ...actions);
   }
@@ -115,6 +133,7 @@ export class LazyRole extends cdk.Resource implements IRole {
   /**
    * Grant permissions to the given principal to pass this role.
    */
+  @MethodMetadata()
   public grantPassRole(identity: IPrincipal): Grant {
     return this.instantiate().grantPassRole(identity);
   }
@@ -122,6 +141,7 @@ export class LazyRole extends cdk.Resource implements IRole {
   /**
    * Grant permissions to the given principal to assume this role.
    */
+  @MethodMetadata()
   public grantAssumeRole(identity: IPrincipal): Grant {
     return this.instantiate().grantAssumeRole(identity);
   }

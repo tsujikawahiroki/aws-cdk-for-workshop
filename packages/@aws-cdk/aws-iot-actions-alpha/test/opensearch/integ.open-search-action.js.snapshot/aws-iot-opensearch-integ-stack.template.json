@@ -43,7 +43,7 @@
     },
     "DomainEndpointOptions": {
      "EnforceHTTPS": true,
-     "TLSSecurityPolicy": "Policy-Min-TLS-1-0-2019-07"
+     "TLSSecurityPolicy": "Policy-Min-TLS-1-2-2019-07"
     },
     "EBSOptions": {
      "EBSEnabled": true,
@@ -90,7 +90,7 @@
        {
         "Ref": "Domain66AC69E0"
        },
-       "AccessPolicy\"},\"logApiResponseData\":true}"
+       "AccessPolicy\"}}"
       ]
      ]
     },
@@ -113,7 +113,7 @@
        {
         "Ref": "Domain66AC69E0"
        },
-       "AccessPolicy\"},\"logApiResponseData\":true}"
+       "AccessPolicy\"}}"
       ]
      ]
     },
@@ -189,7 +189,7 @@
      "S3Bucket": {
       "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
      },
-     "S3Key": "6c34b6e864223e202d50bb862e2bf066393d4cdf36229f8e1646425a5224a10b.zip"
+     "S3Key": "cacbae65717103d06f41c1e2d810143b3469d00294d9bbef4b39a6bce1660214.zip"
     },
     "Handler": "index.handler",
     "Role": {
@@ -198,7 +198,7 @@
       "Arn"
      ]
     },
-    "Runtime": "nodejs18.x",
+    "Runtime": "nodejs24.x",
     "Timeout": 120
    },
    "DependsOn": [

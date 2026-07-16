@@ -1,15 +1,18 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { addStackArtifactToAssembly, contentHash } from './_shared';
-import { IStackSynthesizer, ISynthesisSession } from './types';
-import * as cxschema from '../../../cloud-assembly-schema';
+import type { IStackSynthesizer, ISynthesisSession } from './types';
+import type * as cxschema from '../../../cloud-assembly-schema';
 import * as cxapi from '../../../cx-api';
-import { DockerImageAssetLocation, DockerImageAssetSource, FileAssetLocation, FileAssetSource, FileAssetPackaging } from '../assets';
+import type { DockerImageAssetLocation, DockerImageAssetSource, FileAssetLocation, FileAssetSource } from '../assets';
+import { FileAssetPackaging } from '../assets';
 import { Fn } from '../cfn-fn';
 import { CfnParameter } from '../cfn-parameter';
 import { CfnRule } from '../cfn-rule';
+import { UnscopedValidationError, ValidationError } from '../errors';
 import { resolvedOr } from '../helpers-internal/string-specializer';
-import { Stack } from '../stack';
+import { lit } from '../private/literal-string';
+import type { Stack } from '../stack';
 
 /**
  * Base class for implementing an IStackSynthesizer
@@ -20,7 +23,6 @@ import { Stack } from '../stack';
  * and could not be accessed by external implementors.
  */
 export abstract class StackSynthesizer implements IStackSynthesizer {
-
   /**
    * The qualifier used to bootstrap this stack
    */
@@ -35,6 +37,10 @@ export abstract class StackSynthesizer implements IStackSynthesizer {
     return undefined;
   }
 
+  public get cloudFormationExecutionRole(): string | undefined {
+    return undefined;
+  }
+
   private _boundStack?: Stack;
 
   /**
@@ -44,7 +50,7 @@ export abstract class StackSynthesizer implements IStackSynthesizer {
    */
   public bind(stack: Stack): void {
     if (this._boundStack !== undefined) {
-      throw new Error('A StackSynthesizer can only be used for one Stack: create a new instance to use with a different Stack');
+      throw new ValidationError(lit`StackSynthesizerOneStackCreate`, 'A StackSynthesizer can only be used for one Stack: create a new instance to use with a different Stack', stack);
     }
 
     this._boundStack = stack;
@@ -107,8 +113,11 @@ export abstract class StackSynthesizer implements IStackSynthesizer {
    * the credentials will be the same identity that is doing the `UpdateStack`
    * call, which may not have the right permissions to write to S3.
    */
-  protected synthesizeTemplate(session: ISynthesisSession, lookupRoleArn?: string): FileAssetSource {
-    this.boundStack._synthesizeTemplate(session, lookupRoleArn);
+  protected synthesizeTemplate(session: ISynthesisSession,
+    lookupRoleArn?: string,
+    lookupRoleExternalId?: string,
+    lookupRoleAdditionalOptions?: { [key: string]: any }): FileAssetSource {
+    this.boundStack._synthesizeTemplate(session, lookupRoleArn, lookupRoleExternalId, lookupRoleAdditionalOptions);
     return stackTemplateFileAsset(this.boundStack, session);
   }
 
@@ -151,7 +160,7 @@ export abstract class StackSynthesizer implements IStackSynthesizer {
    */
   protected get boundStack(): Stack {
     if (!this._boundStack) {
-      throw new Error('The StackSynthesizer must be bound to a Stack first before boundStack() can be called');
+      throw new UnscopedValidationError(lit`StackSynthesizerBoundStackFirst`, 'The StackSynthesizer must be bound to a Stack first before boundStack() can be called');
     }
     return this._boundStack;
   }
@@ -202,7 +211,6 @@ export abstract class StackSynthesizer implements IStackSynthesizer {
       imageTag: cfnify(dest.imageTag),
     };
   }
-
 }
 
 /**
@@ -239,6 +247,18 @@ export interface SynthesizeStackArtifactOptions {
    * @default - No externalID is used
    */
   readonly assumeRoleExternalId?: string;
+
+  /**
+   * Additional options to pass to STS when assuming the role for cloudformation deployments.
+   *
+   * - `RoleArn` should not be used. Use the dedicated `assumeRoleArn` property instead.
+   * - `ExternalId` should not be used. Use the dedicated `assumeRoleExternalId` instead.
+   * - `TransitiveTagKeys` defaults to use all keys (if any) specified in `Tags`. E.g, all tags are transitive by default.
+   *
+   * @see https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/STS.html#assumeRole-property
+   * @default - No additional options.
+   */
+  readonly assumeRoleAdditionalOptions?: { [key: string]: any };
 
   /**
    * The role that is passed to CloudFormation to execute the change set
@@ -288,7 +308,7 @@ function stackTemplateFileAsset(stack: Stack, session: ISynthesisSession): FileA
   const templatePath = path.join(session.assembly.outdir, stack.templateFile);
 
   if (!fs.existsSync(templatePath)) {
-    throw new Error(`Stack template ${stack.stackName} not written yet: ${templatePath}`);
+    throw new ValidationError(lit`StackTemplate`, `Stack template ${stack.stackName} not written yet: ${templatePath}`, stack);
   }
 
   const template = fs.readFileSync(templatePath, { encoding: 'utf-8' });
@@ -300,6 +320,7 @@ function stackTemplateFileAsset(stack: Stack, session: ISynthesisSession): FileA
     packaging: FileAssetPackaging.FILE,
     sourceHash,
     deployTime: true,
+    displayName: `${stack.stackName} Template`,
   };
 }
 

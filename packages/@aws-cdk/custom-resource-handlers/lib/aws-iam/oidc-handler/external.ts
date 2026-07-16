@@ -1,5 +1,5 @@
 /* istanbul ignore file */
-import { X509Certificate } from 'node:crypto';
+import type { X509Certificate } from 'node:crypto';
 import * as tls from 'tls';
 import * as url from 'url';
 // eslint-disable-next-line import/no-extraneous-dependencies
@@ -12,15 +12,13 @@ function iam(): sdk.IAM {
 }
 
 function defaultLogger(fmt: string, ...args: any[]) {
-  // eslint-disable-next-line no-console
   console.log(fmt, ...args);
 }
 
 /**
  * Downloads the CA thumbprint from the issuer URL
  */
-async function downloadThumbprint(issuerUrl: string) {
-
+async function downloadThumbprint(issuerUrl: string, rejectUnauthorized: boolean) {
   return new Promise<string>((ok, ko) => {
     const purl = url.parse(issuerUrl);
     const port = purl.port ? parseInt(purl.port, 10) : 443;
@@ -31,7 +29,7 @@ async function downloadThumbprint(issuerUrl: string) {
 
     external.log(`Fetching x509 certificate chain from issuer ${issuerUrl}`);
 
-    const socket = tls.connect(port, purl.host, { rejectUnauthorized: false, servername: purl.host });
+    const socket = tls.connect(port, purl.host, { rejectUnauthorized, servername: purl.host });
     socket.once('error', ko);
 
     socket.once('secureConnect', () => {
@@ -52,7 +50,6 @@ async function downloadThumbprint(issuerUrl: string) {
 
       // Warning user if certificate validity is expiring within 6 months
       if (certificateValidity < 180) {
-        /* eslint-disable-next-line no-console */
         console.warn(`The root certificate obtained would expire in ${certificateValidity} days!`);
       }
 

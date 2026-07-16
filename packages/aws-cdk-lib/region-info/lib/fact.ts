@@ -1,5 +1,19 @@
 import { AWS_REGIONS } from './aws-entities';
 
+const CONSTRUCT_ERROR_SYMBOL = Symbol.for('@aws-cdk/core.SynthesisError');
+
+/**
+ * An error thrown when a region fact operation fails.
+ */
+class RegionFactError extends Error {
+  constructor(msg: string) {
+    super(msg);
+    Object.setPrototypeOf(this, RegionFactError.prototype);
+    Object.defineProperty(this, CONSTRUCT_ERROR_SYMBOL, { value: true });
+    this.name = 'RegionFactError';
+  }
+}
+
 /**
  * A database of regional information.
  */
@@ -56,7 +70,7 @@ export class Fact {
     const foundFact = this.find(region, name);
 
     if (!foundFact) {
-      throw new Error(`No fact ${name} could be found for region: ${region} and name: ${name}.`);
+      throw new RegionFactError(`No fact ${name} could be found for region: ${region} and name: ${name}.`);
     }
 
     return foundFact;
@@ -69,9 +83,9 @@ export class Fact {
    * @param allowReplacing whether new facts can replace existing facts or not.
    */
   public static register(fact: IFact, allowReplacing = false): void {
-    const regionFacts = this.database[fact.region] || (this.database[fact.region] = {});
+    const regionFacts = this.database[fact.region] || (this.database[fact.region] = Object.create(null));
     if (fact.name in regionFacts && regionFacts[fact.name] !== fact.value && !allowReplacing) {
-      throw new Error(`Region ${fact.region} already has a fact ${fact.name}, with value ${regionFacts[fact.name]}`);
+      throw new RegionFactError(`Region ${fact.region} already has a fact ${fact.name}, with value ${regionFacts[fact.name]}`);
     }
     if (fact.value !== undefined) {
       regionFacts[fact.name] = fact.value;
@@ -86,16 +100,18 @@ export class Fact {
    *               current stored value).
    */
   public static unregister(region: string, name: string, value?: string): void {
-    const regionFacts = this.database[region] || {};
+    const regionFacts = this.database[region] || Object.create(null);
     if (name in regionFacts && value && regionFacts[name] !== value) {
-      throw new Error(`Attempted to remove ${name} from ${region} with value ${value}, but the fact's value is ${regionFacts[name]}`);
+      throw new RegionFactError(`Attempted to remove ${name} from ${region} with value ${value}, but the fact's value is ${regionFacts[name]}`);
     }
     delete regionFacts[name];
   }
 
-  private static readonly database: { [region: string]: { [name: string]: string } } = {};
+  private static readonly database: { [region: string]: { [name: string]: string } } = Object.create(null); // Prevent prototype pollution
 
   private constructor() {
+    // this should never happen, so throw a regular error here
+    /* eslint-disable-next-line @cdklabs/no-throw-default-error */
     throw new Error('Use the static methods of Fact instead!');
   }
 }
@@ -186,7 +202,7 @@ export class FactName {
   public static readonly APPMESH_ECR_ACCOUNT = 'appMeshRepositoryAccount';
 
   /**
-   * The CIDR block used by Kinesis Data Firehose servers.
+   * The CIDR block used by Amazon Data Firehose servers.
    */
   public static readonly FIREHOSE_CIDR_BLOCK = 'firehoseCidrBlock';
 
@@ -194,6 +210,11 @@ export class FactName {
    * The SAML Sign On URL for partition used by IAM SAML Principal
    */
   public static readonly SAML_SIGN_ON_URL = 'samlSignOnUrl';
+
+  /**
+   * The latest Lambda NodeJS runtime available in a given region.
+   */
+  public static readonly LATEST_NODE_RUNTIME = 'latestNodeRuntime';
 
   /**
    * The ARN of CloudWatch Lambda Insights for a version (e.g. 1.0.98.0)
@@ -221,9 +242,11 @@ export class FactName {
    * @param service the service name, either simple (e.g: `s3`, `codedeploy`) or qualified (e.g: `s3.amazonaws.com`).
    *                The `.amazonaws.com` and `.amazonaws.com.cn` domains are stripped from service names, so they are
    *                canonicalized in that respect.
+   *
+   * @deprecated - Use `iam.ServicePrincipal.servicePrincipalName()` instead.
    */
   public static servicePrincipal(service: string): string {
-    return `service-principal:${service.replace(/\.amazonaws\.com(\.cn)?$/, '')}`;
+    return `${service.replace(/\.amazonaws\.com(\.cn)?$/, '')}.amazonaws.com`;
   }
 
   /**

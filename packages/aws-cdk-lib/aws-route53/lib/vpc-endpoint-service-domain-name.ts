@@ -1,9 +1,12 @@
 import { Construct } from 'constructs';
-import { IVpcEndpointService } from '../../aws-ec2';
+import type { IVPCEndpointServiceRef } from '../../aws-ec2';
 import { Fn, Names, Stack } from '../../core';
+import { ValidationError } from '../../core/lib/errors';
 import { md5hash } from '../../core/lib/helpers-internal';
+import { lit } from '../../core/lib/private/literal-string';
 import { AwsCustomResource, AwsCustomResourcePolicy, PhysicalResourceId } from '../../custom-resources';
-import { IPublicHostedZone, TxtRecord } from '../lib';
+import type { IPublicHostedZone } from '../lib';
+import { TxtRecord } from '../lib';
 
 /**
  * Properties to configure a VPC Endpoint Service domain name
@@ -13,7 +16,7 @@ export interface VpcEndpointServiceDomainNameProps {
   /**
    * The VPC Endpoint Service to configure Private DNS for
    */
-  readonly endpointService: IVpcEndpointService;
+  readonly endpointService: IVPCEndpointServiceRef;
 
   /**
    * The domain name to use.
@@ -35,9 +38,8 @@ export interface VpcEndpointServiceDomainNameProps {
  * A Private DNS configuration for a VPC endpoint service.
  */
 export class VpcEndpointServiceDomainName extends Construct {
-
   // Track all domain names created, so someone doesn't accidentally associate two domains with a single service
-  private static readonly endpointServices: IVpcEndpointService[] = [];
+  private static readonly endpointServices: IVPCEndpointServiceRef[] = [];
 
   // Track all domain names created, so someone doesn't accidentally associate two domains with a single service
   private static readonly endpointServicesMap: { [endpointService: string]: string} = {};
@@ -58,7 +60,7 @@ export class VpcEndpointServiceDomainName extends Construct {
     super(scope, id);
 
     const serviceUniqueId = Names.nodeUniqueId(props.endpointService.node);
-    const serviceId = props.endpointService.vpcEndpointServiceId;
+    const serviceId = props.endpointService.vpcEndpointServiceRef.serviceId;
     this.domainName = props.domainName;
 
     // Make sure a user doesn't accidentally add multiple domains
@@ -81,8 +83,7 @@ export class VpcEndpointServiceDomainName extends Construct {
     const serviceUniqueId = Names.nodeUniqueId(props.endpointService.node);
     if (serviceUniqueId in VpcEndpointServiceDomainName.endpointServicesMap) {
       const endpoint = VpcEndpointServiceDomainName.endpointServicesMap[serviceUniqueId];
-      throw new Error(
-        `Cannot create a VpcEndpointServiceDomainName for service ${serviceUniqueId}, another VpcEndpointServiceDomainName (${endpoint}) is already associated with it`);
+      throw new ValidationError(lit`CannotCreateVpcEndpointService`, `Cannot create a VpcEndpointServiceDomainName for service ${serviceUniqueId}, another VpcEndpointServiceDomainName (${endpoint}) is already associated with it`, this);
     }
   }
 
@@ -91,7 +92,6 @@ export class VpcEndpointServiceDomainName extends Construct {
    * returning the values to use in a TxtRecord, which AWS uses to verify domain ownership.
    */
   private getPrivateDnsConfiguration(serviceUniqueId: string, serviceId: string, privateDnsName: string): PrivateDnsConfiguration {
-
     // The custom resource which tells AWS to enable Private DNS on the given service, using the given domain name
     // AWS will generate a name/value pair for use in a TxtRecord, which is used to verify domain ownership.
     const enablePrivateDnsAction = {
@@ -230,4 +230,4 @@ interface PrivateDnsConfiguration {
  */
 function hashcode(s: string): string {
   return md5hash(s);
-};
+}

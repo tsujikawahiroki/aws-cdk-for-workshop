@@ -6,9 +6,12 @@ import { Match, Template } from '../../assertions';
 import * as iam from '../../aws-iam';
 import * as s3 from '../../aws-s3';
 import { Asset } from '../../aws-s3-assets';
-import { AssetStaging, App, Aws, CfnResource, Stack, DefaultStackSynthesizer, IStackSynthesizer, FileAssetSource, FileAssetLocation } from '../../core';
+import type { IStackSynthesizer, FileAssetSource, FileAssetLocation } from '../../core';
+import { AssetStaging, App, Aws, CfnResource, Stack, DefaultStackSynthesizer } from '../../core';
+import { assertNoPrototypePollution } from '../../core/test/prototype-pollution';
 import * as cxapi from '../../cx-api';
 import * as ec2 from '../lib';
+import type { InitBindOptions, InitElementConfig } from '../lib/private/cfn-init-internal';
 
 let app: App;
 let stack: Stack;
@@ -41,7 +44,7 @@ function resetStateWithSynthesizer(customSynthesizer?: IStackSynthesizer) {
     type: 'CDK::Test::Resource',
   });
   linuxUserData = ec2.UserData.forLinux();
-};
+}
 
 beforeEach(resetState);
 
@@ -134,6 +137,68 @@ test('empty configs are not rendered', () => {
       },
     },
   });
+});
+
+test('duplicate config arguments not deduplicated', () => {
+  // GIVEN
+  const config = new ec2.InitConfig([
+    ec2.InitCommand.argvCommand([
+      'useradd', '-u', '1001', '-g', '1001', 'eguser',
+    ]),
+    ec2.InitCommand.argvCommand([
+      'useradd', '-a', '-u', '1001', '-g', '1001', 'eguser',
+    ]),
+  ]);
+
+  // WHEN
+  const init = ec2.CloudFormationInit.fromConfigSets({
+    configSets: { default: ['config'] },
+    configs: { config },
+  });
+  init.attach(resource, linuxOptions());
+
+  // THEN
+  expectMetadataLike({
+    'AWS::CloudFormation::Init': {
+      configSets: {
+        default: ['config'],
+      },
+      config: {
+        commands: {
+          '000': {
+            command: ['useradd', '-u', '1001', '-g', '1001', 'eguser'],
+          },
+          '001': {
+            command: ['useradd', '-a', '-u', '1001', '-g', '1001', 'eguser'],
+          },
+        },
+      },
+    },
+  });
+});
+
+test('deepMerge properly deduplicates non-command arguments', () => {
+  // WHEN
+  const config = new ec2.InitConfig([
+    ec2.InitSource.fromUrl('/tmp/blinky', 'https://amazon.com/blinky.zip'),
+    ec2.InitSource.fromUrl('/tmp/blinky', 'https://amazon.com/blinky.zip'),
+    ec2.InitSource.fromUrl('/tmp/pinky', 'https://amazon.com/pinky.zip'),
+    ec2.InitSource.fromUrl('/tmp/pinky', 'https://amazon.com/pinky.zip'),
+    ec2.InitSource.fromUrl('/tmp/inky', 'https://amazon.com/inky.zip'),
+    ec2.InitSource.fromUrl('/tmp/clyde', 'https://amazon.com/blinky.zip'),
+    ec2.InitSource.fromUrl('/tmp/clyde', 'https://amazon.com/blinky.zip'),
+    ec2.InitSource.fromUrl('/tmp/clyde', 'https://amazon.com/blinky.zip'),
+  ]);
+
+  // THEN
+  expect(config._bind(stack, linuxOptions()).config).toEqual(expect.objectContaining({
+    sources: {
+      '/tmp/blinky': 'https://amazon.com/blinky.zip',
+      '/tmp/pinky': 'https://amazon.com/pinky.zip',
+      '/tmp/inky': 'https://amazon.com/inky.zip',
+      '/tmp/clyde': 'https://amazon.com/blinky.zip',
+    },
+  }));
 });
 
 describe('userdata', () => {
@@ -326,7 +391,6 @@ const ASSET_STATEMENT = {
 };
 
 describe('assets n buckets', () => {
-
   test.each([
     ['Existing'],
     [''],
@@ -625,6 +689,36 @@ describe('assets n buckets', () => {
     const fingerprintTwo = calculateFingerprint(assetFilePath);
 
     expect(fingerprintTwo).not.toEqual(fingerprintOne);
+  });
+});
+
+test('no prototype pollution', () => {
+  assertNoPrototypePollution(() => {
+    class EvilClass extends ec2.InitElement {
+      constructor(public readonly elementType: string) {
+        super();
+      }
+
+      public _bind(_options: InitBindOptions): InitElementConfig {
+        return {
+          config: {},
+          authentication: {
+            __proto__: {
+              evil: true,
+            },
+          },
+        };
+      }
+    }
+    const init = ec2.CloudFormationInit.fromConfigSets({
+      configs: {
+        c1: new ec2.InitConfig([new EvilClass('FILE'), new EvilClass('SOURCE')]),
+      },
+      configSets: {
+        all: ['c1'],
+      },
+    });
+    init.attach(resource, linuxOptions());
   });
 });
 

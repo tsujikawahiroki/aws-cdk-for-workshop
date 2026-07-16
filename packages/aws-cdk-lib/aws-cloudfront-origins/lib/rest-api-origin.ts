@@ -1,5 +1,5 @@
 import { validateSecondsInRangeOrUndefined } from './private/utils';
-import * as apigateway from '../../aws-apigateway';
+import type * as apigateway from '../../aws-apigateway';
 import * as cloudfront from '../../aws-cloudfront';
 import * as cdk from '../../core';
 
@@ -34,7 +34,6 @@ export interface RestApiOriginProps extends cloudfront.OriginProps {
  * An Origin for an API Gateway REST API.
  */
 export class RestApiOrigin extends cloudfront.OriginBase {
-
   constructor(restApi: apigateway.RestApiBase, private readonly props: RestApiOriginProps = {}) {
     // urlForPath() is of the form 'https://<rest-api-id>.execute-api.<region>.amazonaws.com/<stage>'
     // Splitting on '/' gives: ['https', '', '<rest-api-id>.execute-api.<region>.amazonaws.com', '<stage>']
@@ -46,6 +45,7 @@ export class RestApiOrigin extends cloudfront.OriginBase {
 
     validateSecondsInRangeOrUndefined('readTimeout', 1, 180, props.readTimeout);
     validateSecondsInRangeOrUndefined('keepaliveTimeout', 1, 180, props.keepaliveTimeout);
+    this.validateResponseCompletionTimeoutWithReadTimeout(props.responseCompletionTimeout, props.readTimeout);
   }
 
   protected renderCustomOriginConfig(): cloudfront.CfnDistribution.CustomOriginConfigProperty | undefined {

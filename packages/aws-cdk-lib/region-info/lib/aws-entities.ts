@@ -52,16 +52,27 @@ export const AWS_REGIONS_AND_RULES: readonly (string | symbol)[] = [
   RULE_CLASSIC_PARTITION_BECOMES_OPT_IN,
   'ap-east-1', // Asia Pacific (Hong Kong)
   'me-south-1', // Middle East (Bahrain)
-  'eu-south-1', // Europe (Milan)
   'af-south-1', // Africa (Cape Town)
+  'eu-south-1', // Europe (Milan)
   'us-iso-west-1', // US ISO West
-  'eu-south-2', // Europe (Spain)
   'ap-southeast-3', // Asia Pacific (Jakarta)
   'me-central-1', // Middle East (UAE)
-  'ap-south-2', // Asia Pacific (Hyderabad)
   'eu-central-2', // Europe (Zurich)
-  'il-central-1', // Israel (Tel Aviv)
+  'eu-south-2', // Europe (Spain)
+  'ap-south-2', // Asia Pacific (Hyderabad)
   'ap-southeast-4', // Asia Pacific (Melbourne)
+  'il-central-1', // Israel (Tel Aviv)
+  'ca-west-1', // Canada West (Calgary)
+  'ap-southeast-5', // Asia Pacific (Malaysia)
+  'ap-southeast-7', // Asia Pacific (Thailand)
+  'mx-central-1', // Mexico (Central)
+  'eu-isoe-west-1', // EU ISO-E West
+  'us-isob-west-1', // US ISOB West
+  'ap-east-2', // Asia Pacific (Taipei)
+  'eusc-de-east-1', // EU (Germany)
+  'ap-southeast-6', // Asia Pacific (New Zealand)
+  'us-isof-south-1', // US ISOF SOUTH
+  'us-isof-east-1', // US ISOF EAST
 ];
 
 /**
@@ -73,53 +84,6 @@ export const AWS_REGIONS = AWS_REGIONS_AND_RULES
   .filter((x) => typeof x === 'string')
   .sort() as readonly string[];
 
-/**
- * Possibly non-exhaustive list of all service names, used to locate service principals.
- *
- * Not in the list ==> default service principal mappings.
- */
-export const AWS_SERVICES: readonly string[] = [
-  'application-autoscaling',
-  'autoscaling',
-  'codedeploy',
-  'ec2',
-  'events',
-  'lambda',
-  'logs',
-  's3',
-  'ssm',
-  'sns',
-  'sqs',
-  'states',
-].sort();
-
-/**
- * Whether or not a region predates a given rule (or region).
- *
- * Unknown region => we have to assume no.
- */
-export function before(region: string, ruleOrRegion: string | symbol) {
-  const ruleIx = AWS_REGIONS_AND_RULES.indexOf(ruleOrRegion);
-  if (ruleIx === -1) {
-    throw new Error(`Unknown rule: ${String(ruleOrRegion)}`);
-  }
-  const regionIx = AWS_REGIONS_AND_RULES.indexOf(region);
-  return regionIx === -1 ? false : regionIx < ruleIx;
-}
-
-/**
- * Return all regions before a given rule was introduced (or region)
- */
-export function regionsBefore(ruleOrRegion: string | symbol): string[] {
-  const ruleIx = AWS_REGIONS_AND_RULES.indexOf(ruleOrRegion);
-  if (ruleIx === -1) {
-    throw new Error(`Unknown rule: ${String(ruleOrRegion)}`);
-  }
-  return AWS_REGIONS_AND_RULES.slice(0, ruleIx)
-    .filter((entry) => typeof entry === 'string')
-    .sort() as string[];
-}
-
 export interface Region { readonly partition: string; readonly domainSuffix: string }
 
 const PARTITION_MAP: {readonly [region: string]: Region } = {
@@ -128,6 +92,9 @@ const PARTITION_MAP: {readonly [region: string]: Region } = {
   'us-gov-': { partition: 'aws-us-gov', domainSuffix: 'amazonaws.com' },
   'us-iso-': { partition: 'aws-iso', domainSuffix: 'c2s.ic.gov' },
   'us-isob-': { partition: 'aws-iso-b', domainSuffix: 'sc2s.sgov.gov' },
+  'us-isof-': { partition: 'aws-iso-f', domainSuffix: 'csp.hci.ic.gov' },
+  'eu-isoe-': { partition: 'aws-iso-e', domainSuffix: 'cloud.adc-e.uk' },
+  'eusc-de-': { partition: 'aws-eusc', domainSuffix: 'amazonaws.eu' },
 };
 
 export function partitionInformation(region: string): Region {

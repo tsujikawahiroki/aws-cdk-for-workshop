@@ -1,36 +1,54 @@
-import { Construct, IConstruct } from 'constructs';
-import { AdotInstrumentationConfig, AdotLambdaExecWrapper } from './adot-layers';
-import { AliasOptions, Alias } from './alias';
+import type { Construct, IConstruct } from 'constructs';
+import type { AdotInstrumentationConfig } from './adot-layers';
+import { AdotLambdaExecWrapper } from './adot-layers';
+import type { AliasOptions, Alias } from './alias';
 import { Architecture } from './architecture';
-import { Code, CodeConfig } from './code';
-import { ICodeSigningConfig } from './code-signing-config';
-import { EventInvokeConfigOptions } from './event-invoke-config';
-import { IEventSource } from './event-source';
-import { FileSystem } from './filesystem';
-import { FunctionAttributes, FunctionBase, IFunction } from './function-base';
+import type { Code, CodeConfig } from './code';
+import type { DurableConfig } from './durable-config';
+import type { EventInvokeConfigOptions } from './event-invoke-config';
+import type { IEventSource } from './event-source';
+import type { FileSystem } from './filesystem';
+import type { FunctionAttributes, IFunction } from './function-base';
+import { FunctionBase } from './function-base';
 import { calculateFunctionHash, trimFromStart } from './function-hash';
 import { Handler } from './handler';
-import { LambdaInsightsVersion } from './lambda-insights';
-import { Version, VersionOptions } from './lambda-version';
+import type { LambdaInsightsVersion } from './lambda-insights';
+import type { VersionOptions } from './lambda-version';
+import { Version } from './lambda-version';
+import type { ICodeSigningConfigRef } from './lambda.generated';
 import { CfnFunction } from './lambda.generated';
-import { LayerVersion, ILayerVersion } from './layers';
-import { LogRetentionRetryOptions } from './log-retention';
-import { ParamsAndSecretsLayerVersion } from './params-and-secrets-layers';
-import { Runtime, RuntimeFamily } from './runtime';
-import { RuntimeManagementMode } from './runtime-management';
-import { SnapStartConf } from './snapstart-config';
+import type { ILayerVersion } from './layers';
+import { LayerVersion } from './layers';
+import type { LogRetentionRetryOptions } from './log-retention';
+import type { ParamsAndSecretsLayerVersion } from './params-and-secrets-layers';
+import { determineLatestNodeRuntime, Runtime, RuntimeFamily } from './runtime';
+import type { RuntimeManagementMode } from './runtime-management';
+import type { SnapStartConf } from './snapstart-config';
+import type { TenancyConfig } from './tenancy-config';
 import { addAlias } from './util';
 import * as cloudwatch from '../../aws-cloudwatch';
-import { IProfilingGroup, ProfilingGroup, ComputePlatform } from '../../aws-codeguruprofiler';
+import type { IProfilingGroup } from '../../aws-codeguruprofiler';
+import { ProfilingGroup, ComputePlatform } from '../../aws-codeguruprofiler';
 import * as ec2 from '../../aws-ec2';
 import * as efs from '../../aws-efs';
 import * as iam from '../../aws-iam';
-import * as kms from '../../aws-kms';
+import type * as kms from '../../aws-kms';
 import * as logs from '../../aws-logs';
-import * as sns from '../../aws-sns';
+import { toILogGroup } from '../../aws-logs/lib/private/ref-utils';
+import type * as sns from '../../aws-sns';
 import * as sqs from '../../aws-sqs';
-import { Annotations, ArnFormat, CfnResource, Duration, FeatureFlags, Fn, IAspect, Lazy, Names, Size, Stack, Token } from '../../core';
-import { LAMBDA_RECOGNIZE_LAYER_VERSION } from '../../cx-api';
+import type { IAspect, RemovalPolicy, Size } from '../../core';
+import {
+  Annotations, ArnFormat, CfnResource, Duration, FeatureFlags, Fn,
+  Names, Stack, Token,
+} from '../../core';
+import { UnscopedValidationError, ValidationError } from '../../core/lib/errors';
+import type { IArrayBox, IMapBox } from '../../core/lib/helpers-internal';
+import { Box, memoizedGetter } from '../../core/lib/helpers-internal';
+import { addConstructMetadata, MethodMetadata } from '../../core/lib/metadata-resource';
+import { lit } from '../../core/lib/private/literal-string';
+import { propertyInjectable } from '../../core/lib/prop-injectable';
+import { LAMBDA_RECOGNIZE_LAYER_VERSION, USE_CDK_MANAGED_LAMBDA_LOGGROUP } from '../../cx-api';
 
 /**
  * X-Ray Tracing Modes (https://docs.aws.amazon.com/lambda/latest/dg/API_TracingConfig.html)
@@ -108,7 +126,7 @@ export enum ApplicationLogLevel {
  * This field takes in 2 values either Text or JSON. By setting this value to Text,
  * will result in the current structure of logs format, whereas, by setting this value to JSON,
  * Lambda will print the logs as Structured JSON Logs, with the corresponding timestamp and log level
- * of each event. Selecting ‘JSON’ format will only allow customer’s to have different log level
+ * of each event. Selecting ‘JSON’ format will only allow customers to have different log level
  * Application log level and the System log level.
  */
 export enum LogFormat {
@@ -126,7 +144,7 @@ export enum LogFormat {
  * This field takes in 2 values either Text or JSON. By setting this value to Text,
  * will result in the current structure of logs format, whereas, by setting this value to JSON,
  * Lambda will print the logs as Structured JSON Logs, with the corresponding timestamp and log level
- * of each event. Selecting ‘JSON’ format will only allow customer’s to have different log level
+ * of each event. Selecting ‘JSON’ format will only allow customers to have different log level
  * Application log level and the System log level.
  */
 export enum LoggingFormat {
@@ -138,6 +156,17 @@ export enum LoggingFormat {
    * Lambda structured logging in Json format.
    */
   JSON = 'JSON',
+}
+
+export enum RecursiveLoop {
+  /**
+   * Allows the recursive loop to happen and does not terminate it.
+   */
+  ALLOW = 'Allow',
+  /**
+   * Terminates the recursive loop.
+   */
+  TERMINATE = 'Terminate',
 }
 
 /**
@@ -283,7 +312,7 @@ export interface FunctionOptions extends EventInvokeConfigOptions {
   readonly securityGroups?: ec2.ISecurityGroup[];
 
   /**
-   * Whether to allow the Lambda to send all network traffic
+   * Whether to allow the Lambda to send all network traffic (except ipv6)
    *
    * If set to false, you must individually add traffic rules to allow the
    * Lambda to connect to network targets.
@@ -294,6 +323,20 @@ export interface FunctionOptions extends EventInvokeConfigOptions {
    * @default true
    */
   readonly allowAllOutbound?: boolean;
+
+  /**
+   * Whether to allow the Lambda to send all ipv6 network traffic
+   *
+   * If set to true, there will only be a single egress rule which allows all
+   * outbound ipv6 traffic. If set to false, you must individually add traffic rules to allow the
+   * Lambda to connect to network targets using ipv6.
+   *
+   * Do not specify this property if the `securityGroups` or `securityGroup` property is set.
+   * Instead, configure `allowAllIpv6Outbound` directly on the security group.
+   *
+   * @default false
+   */
+  readonly allowAllIpv6Outbound?: boolean;
 
   /**
    * Enabled DLQ. If `deadLetterQueue` is undefined,
@@ -328,11 +371,11 @@ export interface FunctionOptions extends EventInvokeConfigOptions {
   readonly tracing?: Tracing;
 
   /**
-  * Enable SnapStart for Lambda Function.
-  * SnapStart is currently supported only for Java 11, 17 runtime
-  *
-  * @default - No snapstart
-  */
+   * Enable SnapStart for Lambda Function.
+   * SnapStart is currently supported for Java 11, Java 17, Python 3.12, Python 3.13, and .NET 8 runtime
+   *
+   * @default - No snapstart
+   */
   readonly snapStart?: SnapStartConf;
 
   /**
@@ -425,9 +468,23 @@ export interface FunctionOptions extends EventInvokeConfigOptions {
    * myLogGroup.logGroupName;
    * ```
    *
+   * @deprecated use `logGroup` instead
    * @default logs.RetentionDays.INFINITE
    */
   readonly logRetention?: logs.RetentionDays;
+
+  /**
+   * Determine the removal policy of the log group that is auto-created by this construct.
+   *
+   * Normally you want to retain the log group so you can diagnose issues
+   * from logs even after a deployment that no longer includes the log group.
+   * In that case, use the normal date-based retention policy to age out your
+   * logs.
+   *
+   * @deprecated use `logGroup` instead
+   * @default RemovalPolicy.Retain
+   */
+  readonly logRemovalPolicy?: RemovalPolicy;
 
   /**
    * The IAM role for the Lambda function associated with the custom resource
@@ -479,14 +536,14 @@ export interface FunctionOptions extends EventInvokeConfigOptions {
    *
    * @default - AWS Lambda creates and uses an AWS managed customer master key (CMK).
    */
-  readonly environmentEncryption?: kms.IKey;
+  readonly environmentEncryption?: kms.IKeyRef;
 
   /**
    * Code signing config associated with this function
    *
    * @default - Not Sign the Code
    */
-  readonly codeSigningConfig?: ICodeSigningConfig;
+  readonly codeSigningConfig?: ICodeSigningConfigRef;
 
   /**
    * DEPRECATED
@@ -508,6 +565,23 @@ export interface FunctionOptions extends EventInvokeConfigOptions {
   readonly runtimeManagementMode?: RuntimeManagementMode;
 
   /**
+   * The tenancy configuration for the function.
+   *
+   * @default - Tenant isolation is not enabled
+   */
+  readonly tenancyConfig?: TenancyConfig;
+
+  /**
+   * The durable configuration for the function.
+   *
+   * If durability is added to an existing function, a resource replacement will be triggered.
+   * See the 'durableConfig' section in the module README for more details.
+   *
+   * @default - No durable configuration
+   */
+  readonly durableConfig?: DurableConfig;
+
+  /**
    * The log group the function sends logs to.
    *
    * By default, Lambda functions send logs to an automatically created default log group named /aws/lambda/\<function name\>.
@@ -520,7 +594,7 @@ export interface FunctionOptions extends EventInvokeConfigOptions {
    *
    * @default `/aws/lambda/${this.functionName}` - default log group created by Lambda
    */
-  readonly logGroup?: logs.ILogGroup;
+  readonly logGroup?: logs.ILogGroupRef;
 
   /**
    * Sets the logFormat for the function.
@@ -534,6 +608,14 @@ export interface FunctionOptions extends EventInvokeConfigOptions {
    * @default LoggingFormat.TEXT
    */
   readonly loggingFormat?: LoggingFormat;
+
+  /**
+   * Sets the Recursive Loop Protection for Lambda Function.
+   * It lets Lambda detect and terminate unintended recursive loops.
+   *
+   * @default RecursiveLoop.Terminate
+   */
+  readonly recursiveLoop?: RecursiveLoop;
 
   /**
    * Sets the application log level for the function.
@@ -601,11 +683,18 @@ export interface FunctionProps extends FunctionOptions {
  * CloudFormation template.
  *
  * The construct includes an associated role with the lambda.
- *
+ */
+
+/**
  * This construct does not yet reproduce all features from the underlying resource
  * library.
  */
+@propertyInjectable
 export class Function extends FunctionBase {
+  /**
+   * Uniquely identifies this class.
+   */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-lambda.Function';
 
   /**
    * Returns a `lambda.Version` which represents the current version of this
@@ -622,7 +711,7 @@ export class Function extends FunctionBase {
 
     if (this._warnIfCurrentVersionCalled) {
       this.warnInvokeFunctionPermissions(this);
-    };
+    }
 
     this._currentVersion = new Version(this, 'CurrentVersion', {
       lambda: this,
@@ -635,13 +724,11 @@ export class Function extends FunctionBase {
     const cfn = this._currentVersion.node.defaultChild as CfnResource;
     const originalLogicalId = this.stack.resolve(cfn.logicalId) as string;
 
-    cfn.overrideLogicalId(Lazy.uncachedString({
-      produce: () => {
-        const hash = calculateFunctionHash(this, this.hashMixins.join(''));
-        const logicalId = trimFromStart(originalLogicalId, 255 - 32);
-        return `${logicalId}${hash}`;
-      },
-    }));
+    cfn.overrideLogicalId(Token.asString(this.hashMixins.derive((mixins) => {
+      const hash = calculateFunctionHash(this, mixins.join(''));
+      const logicalId = trimFromStart(originalLogicalId, 255 - 32);
+      return `${logicalId}${hash}`;
+    })));
 
     return this._currentVersion;
   }
@@ -706,6 +793,7 @@ export class Function extends FunctionBase {
     const role = attrs.role;
 
     class Import extends FunctionBase {
+      public readonly tenancyConfig = attrs.tenancyConfig;
       public readonly functionName = functionName;
       public readonly functionArn = functionArn;
       public readonly grantPrincipal: iam.IPrincipal;
@@ -809,15 +897,7 @@ export class Function extends FunctionBase {
     return this.metricAll('UnreservedConcurrentExecutions', { statistic: 'max', ...props });
   }
 
-  /**
-   * Name of this function
-   */
-  public readonly functionName: string;
-
-  /**
-   * ARN of this function
-   */
-  public readonly functionArn: string;
+  private readonly resource: CfnFunction;
 
   /**
    * Execution role associated with this function
@@ -859,45 +939,80 @@ export class Function extends FunctionBase {
   protected readonly canCreatePermissions = true;
 
   /** @internal */
-  public readonly _layers: ILayerVersion[] = [];
+  public readonly _layers: IArrayBox<ILayerVersion> = Box.fromArray();
+
+  /** @internal */
+  public _logRetention?: logs.LogRetention;
 
   private _logGroup?: logs.ILogGroup;
 
   /**
+   * Name of this function
+   */
+  @memoizedGetter
+  public get functionName(): string {
+    return this.getResourceNameAttribute(this.resource.ref);
+  }
+
+  /**
+   * ARN of this function
+   */
+  @memoizedGetter
+  public get functionArn(): string {
+    return this.getResourceArnAttribute(this.resource.attrArn, {
+      service: 'lambda',
+      resource: 'function',
+      resourceName: this.physicalName,
+      arnFormat: ArnFormat.COLON_RESOURCE_NAME,
+    });
+  }
+
+  /**
    * Environment variables for this function
    */
-  private environment: { [key: string]: EnvironmentConfig } = {};
+  private readonly environment: IMapBox<string, EnvironmentConfig> = Box.fromMap();
 
   private readonly currentVersionOptions?: VersionOptions;
   private _currentVersion?: Version;
 
   private _architecture?: Architecture;
-  private hashMixins = new Array<string>();
+  private hashMixins = Box.fromArray<string>([], { omitEmpty: false });
+
+  /**
+   * The tenancy configuration for this function.
+   */
+  public readonly tenancyConfig?: TenancyConfig;
 
   constructor(scope: Construct, id: string, props: FunctionProps) {
     super(scope, id, {
       physicalName: props.functionName,
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     if (props.functionName && !Token.isUnresolved(props.functionName)) {
       if (props.functionName.length > 64) {
-        throw new Error(`Function name can not be longer than 64 characters but has ${props.functionName.length} characters.`);
+        throw new ValidationError(lit`FunctionNameTooLong`, `Function name can not be longer than 64 characters but has ${props.functionName.length} characters.`, this);
       }
       if (!/^[a-zA-Z0-9-_]+$/.test(props.functionName)) {
-        throw new Error(`Function name ${props.functionName} can contain only letters, numbers, hyphens, or underscores with no spaces.`);
+        throw new ValidationError(lit`InvalidFunctionNameFormat`, `Function name ${props.functionName} can contain only letters, numbers, hyphens, or underscores with no spaces.`, this);
       }
     }
 
     if (props.description && !Token.isUnresolved(props.description)) {
       if (props.description.length > 256) {
-        throw new Error(`Function description can not be longer than 256 characters but has ${props.description.length} characters.`);
+        throw new ValidationError(lit`DescriptionTooLong`, `Function description can not be longer than 256 characters but has ${props.description.length} characters.`, this);
       }
     }
 
     const managedPolicies = new Array<iam.IManagedPolicy>();
 
     // the arn is in the form of - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-    managedPolicies.push(iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'));
+    if (props.durableConfig) {
+      managedPolicies.push(iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicDurableExecutionRolePolicy'));
+    } else {
+      managedPolicies.push(iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'));
+    }
 
     if (props.vpc) {
       // Policy that will have ENI creation permissions
@@ -909,10 +1024,19 @@ export class Function extends FunctionBase {
       managedPolicies,
     });
     this.grantPrincipal = this.role;
+    this.tenancyConfig = props.tenancyConfig;
 
     // add additional managed policies when necessary
     if (props.filesystem) {
       const config = props.filesystem.config;
+      if (!Token.isUnresolved(config.localMountPath)) {
+        if (!/^\/mnt\/[a-zA-Z0-9-_.]+$/.test(config.localMountPath)) {
+          throw new ValidationError(lit`InvalidMountPathFormat`, `Local mount path should match with ^/mnt/[a-zA-Z0-9-_.]+$ but given ${config.localMountPath}.`, this);
+        }
+        if (config.localMountPath.length > 160) {
+          throw new ValidationError(lit`MountPathTooLong`, `Local mount path can not be longer than 160 characters but has ${config.localMountPath.length} characters.`, this);
+        }
+      }
       if (config.policies) {
         config.policies.forEach(p => {
           this.role?.addToPrincipalPolicy(p);
@@ -975,19 +1099,21 @@ export class Function extends FunctionBase {
     }
 
     if (props.architecture && props.architectures !== undefined) {
-      throw new Error('Either architecture or architectures must be specified but not both.');
+      throw new ValidationError(lit`ConflictingArchitectureOptions`, 'Either architecture or architectures must be specified but not both.', this);
     }
     if (props.architectures && props.architectures.length > 1) {
-      throw new Error('Only one architecture must be specified.');
+      throw new ValidationError(lit`MultipleArchitecturesSpecified`, 'Only one architecture must be specified.', this);
     }
     this._architecture = props.architecture ?? (props.architectures && props.architectures[0]);
 
     if (props.ephemeralStorageSize && !props.ephemeralStorageSize.isUnresolved()
       && (props.ephemeralStorageSize.toMebibytes() < 512 || props.ephemeralStorageSize.toMebibytes() > 10240)) {
-      throw new Error(`Ephemeral storage size must be between 512 and 10240 MB, received ${props.ephemeralStorageSize}.`);
+      throw new ValidationError(lit`EphemeralStorageOutOfRange`, `Ephemeral storage size must be between 512 and 10240 MB, received ${props.ephemeralStorageSize}.`, this);
     }
 
-    const resource: CfnFunction = new CfnFunction(this, 'Resource', {
+    const effectiveRuntime = props.runtime === Runtime.NODEJS_LATEST ? determineLatestNodeRuntime(this) : props.runtime;
+
+    this.resource = new CfnFunction(this, 'Resource', {
       functionName: this.physicalName,
       description: props.description,
       code: {
@@ -996,16 +1122,15 @@ export class Function extends FunctionBase {
         s3ObjectVersion: code.s3Location && code.s3Location.objectVersion,
         zipFile: code.inlineCode,
         imageUri: code.image?.imageUri,
+        sourceKmsKeyArn: code.sourceKMSKeyArn,
       },
-      layers: Lazy.list({ produce: () => this.renderLayers() }), // Evaluated on synthesis
+      layers: Token.asList(this._layers.derive(l => this.renderLayers(l))),
       handler: props.handler === Handler.FROM_IMAGE ? undefined : props.handler,
       timeout: props.timeout && props.timeout.toSeconds(),
       packageType: props.runtime === Runtime.FROM_IMAGE ? 'Image' : undefined,
-      runtime: props.runtime === Runtime.FROM_IMAGE ? undefined : props.runtime.name,
+      runtime: props.runtime === Runtime.FROM_IMAGE ? undefined : effectiveRuntime.name,
       role: this.role.roleArn,
-      // Uncached because calling '_checkEdgeCompatibility', which gets called in the resolve of another
-      // Token, actually *modifies* the 'environment' map.
-      environment: Lazy.uncachedAny({ produce: () => this.renderEnvironment() }),
+      environment: this.environment.derive(e => this.renderEnvironment(e)),
       memorySize: props.memorySize,
       ephemeralStorage: props.ephemeralStorageSize ? {
         size: props.ephemeralStorageSize.toMebibytes(),
@@ -1018,39 +1143,34 @@ export class Function extends FunctionBase {
         entryPoint: code.image?.entrypoint,
         workingDirectory: code.image?.workingDirectory,
       }),
-      kmsKeyArn: props.environmentEncryption?.keyArn,
+      kmsKeyArn: props.environmentEncryption?.keyRef.keyArn,
       fileSystemConfigs,
-      codeSigningConfigArn: props.codeSigningConfig?.codeSigningConfigArn,
+      codeSigningConfigArn: props.codeSigningConfig?.codeSigningConfigRef.codeSigningConfigArn,
       architectures: this._architecture ? [this._architecture.name] : undefined,
       runtimeManagementConfig: props.runtimeManagementMode?.runtimeManagementConfig,
+      tenancyConfig: props.tenancyConfig?.tenancyConfigProperty,
+      durableConfig: props.durableConfig ? this.renderDurableConfig(props.durableConfig) : undefined,
       snapStart: this.configureSnapStart(props),
       loggingConfig: this.getLoggingConfig(props),
+      recursiveLoop: props.recursiveLoop,
     });
 
     if ((props.tracing !== undefined) || (props.adotInstrumentation !== undefined)) {
-      resource.tracingConfig = this.buildTracingConfig(props.tracing ?? Tracing.ACTIVE);
+      this.resource.tracingConfig = this.buildTracingConfig(props.tracing ?? Tracing.ACTIVE);
     }
 
-    this._logGroup = props.logGroup;
+    this._logGroup = props.logGroup ? toILogGroup(props.logGroup) : undefined;
 
-    resource.node.addDependency(this.role);
+    this.resource.node.addDependency(this.role);
 
-    this.functionName = this.getResourceNameAttribute(resource.ref);
-    this.functionArn = this.getResourceArnAttribute(resource.attrArn, {
-      service: 'lambda',
-      resource: 'function',
-      resourceName: this.physicalName,
-      arnFormat: ArnFormat.COLON_RESOURCE_NAME,
-    });
-
-    this.runtime = props.runtime;
+    this.runtime = effectiveRuntime;
     this.timeout = props.timeout;
 
     this.architecture = props.architecture ?? Architecture.X86_64;
 
     if (props.layers) {
       if (props.runtime === Runtime.FROM_IMAGE) {
-        throw new Error('Layers are not supported for container image functions');
+        throw new ValidationError(lit`LayersNotSupportedForContainerImage`, 'Layers are not supported for container image functions', this);
       }
 
       this.addLayers(...props.layers);
@@ -1061,20 +1181,34 @@ export class Function extends FunctionBase {
     }
 
     // Log retention
+    if (props.logRemovalPolicy) {
+      if (props.logGroup) {
+        throw new ValidationError(lit`ConflictingLogPolicyOptions`, 'Cannot use `logRemovalPolicy` and `logGroup` together. Please set the removal policy on the logGroup directly', this);
+      } else if (FeatureFlags.of(this).isEnabled(USE_CDK_MANAGED_LAMBDA_LOGGROUP)) {
+        throw new ValidationError(lit`LogRemovalPolicyFeatureFlagConflict`, 'Cannot use `logRemovalPolicy` and `@aws-cdk/aws-lambda:useCdkManagedLogGroup` flag together. Please set the removal policy on the automatically created log group directly', this);
+      }
+    }
+
     if (props.logRetention) {
       if (props.logGroup) {
-        throw new Error('CDK does not support setting logRetention and logGroup');
+        throw new ValidationError(lit`LogRetentionLogGroupConflict`, 'CDK does not support setting logRetention and logGroup', this);
       }
       const logRetention = new logs.LogRetention(this, 'LogRetention', {
         logGroupName: `/aws/lambda/${this.functionName}`,
         retention: props.logRetention,
         role: props.logRetentionRole,
         logRetentionRetryOptions: props.logRetentionRetryOptions as logs.LogRetentionRetryOptions,
+        removalPolicy: props.logRemovalPolicy,
       });
       this._logGroup = logs.LogGroup.fromLogGroupArn(this, 'LogGroup', logRetention.logGroupArn);
+      this._logRetention = logRetention;
+    } else if (!props.logGroup && (FeatureFlags.of(this).isEnabled(USE_CDK_MANAGED_LAMBDA_LOGGROUP))) { // logRetention:f/undef, logGroup:f/undef, FF.isEnabled()
+      this._logGroup = new logs.LogGroup(this, 'LogGroup', {
+        logGroupName: `/aws/lambda/${this.functionName}`,
+      });
     }
 
-    props.code.bindToResource(resource);
+    props.code.bindToResource(this.resource);
 
     // Event Invoke Config
     if (props.onFailure || props.onSuccess || props.maxEventAge || props.retryAttempts !== undefined) {
@@ -1090,7 +1224,7 @@ export class Function extends FunctionBase {
 
     if (props.filesystem) {
       if (!props.vpc) {
-        throw new Error('Cannot configure \'filesystem\' without configuring a VPC.');
+        throw new ValidationError(lit`FilesystemRequiresVpc`, 'Cannot configure \'filesystem\' without configuring a VPC.', this);
       }
       const config = props.filesystem.config;
       if (config.dependency) {
@@ -1102,14 +1236,14 @@ export class Function extends FunctionBase {
       this.connections.securityGroups.forEach(sg => {
         sg.node.findAll().forEach(child => {
           if (child instanceof CfnResource && child.cfnResourceType === 'AWS::EC2::SecurityGroupEgress') {
-            resource.node.addDependency(child);
+            this.resource.node.addDependency(child);
           }
         });
       });
       config.connections?.securityGroups.forEach(sg => {
         sg.node.findAll().forEach(child => {
           if (child instanceof CfnResource && child.cfnResourceType === 'AWS::EC2::SecurityGroupIngress') {
-            resource.node.addDependency(child);
+            this.resource.node.addDependency(child);
           }
         });
       });
@@ -1130,6 +1264,7 @@ export class Function extends FunctionBase {
    * @param value The environment variable's value.
    * @param options Environment variable options.
    */
+  @MethodMetadata()
   public addEnvironment(key: string, value: string, options?: EnvironmentOptions): this {
     // Reserved environment variables will fail during cloudformation deploy if they're set.
     // This check is just to allow CDK to fail faster when these are specified.
@@ -1154,37 +1289,37 @@ export class Function extends FunctionBase {
       'LAMBDA_RUNTIME_DIR',
     ];
     if (reservedEnvironmentVariables.includes(key)) {
-      throw new Error(`${key} environment variable is reserved by the lambda runtime and can not be set manually. See https://docs.aws.amazon.com/lambda/latest/dg/configuration-envvars.html`);
+      throw new ValidationError(lit`ReservedEnvironmentVariable`, `${key} environment variable is reserved by the lambda runtime and can not be set manually. See https://docs.aws.amazon.com/lambda/latest/dg/configuration-envvars.html`, this);
     }
-    this.environment[key] = { value, ...options };
+    this.environment.put(key, { value, ...options });
     return this;
   }
 
   /**
-   * Get Logging Config propety for the function.
+   * Get Logging Config property for the function.
    * This method returns the function LoggingConfig Property if the property is set on the
    * function and undefined if not.
    */
   private getLoggingConfig(props: FunctionProps): CfnFunction.LoggingConfigProperty | undefined {
     if (props.logFormat && props.loggingFormat) {
-      throw new Error('Only define LogFormat or LoggingFormat, not both.');
+      throw new ValidationError(lit`LogFormatConflict`, 'Only define LogFormat or LoggingFormat, not both.', this);
     }
 
     if (props.applicationLogLevel && props.applicationLogLevelV2) {
-      throw new Error('Only define applicationLogLevel or applicationLogLevelV2, not both.');
+      throw new ValidationError(lit`ApplicationLogLevelConflict`, 'Only define applicationLogLevel or applicationLogLevelV2, not both.', this);
     }
 
     if (props.systemLogLevel && props.systemLogLevelV2) {
-      throw new Error('Only define systemLogLevel or systemLogLevelV2, not both.');
+      throw new ValidationError(lit`SystemLogLevelConflict`, 'Only define systemLogLevel or systemLogLevelV2, not both.', this);
     }
 
     if (props.applicationLogLevel || props.applicationLogLevelV2 || props.systemLogLevel || props.systemLogLevelV2) {
-      if (props.logFormat !== LoggingFormat.JSON && props.loggingFormat === undefined) {
-        throw new Error(`To use ApplicationLogLevel and/or SystemLogLevel you must set LogFormat to '${LogFormat.JSON}', got '${props.logFormat}'.`);
+      if (props.logFormat !== LogFormat.JSON && props.loggingFormat === undefined) {
+        throw new ValidationError(lit`JsonLogFormatRequired`, `To use ApplicationLogLevel and/or SystemLogLevel you must set LogFormat to '${LogFormat.JSON}', got '${props.logFormat}'.`, this);
       }
 
       if (props.loggingFormat !== LoggingFormat.JSON && props.logFormat === undefined) {
-        throw new Error(`To use ApplicationLogLevel and/or SystemLogLevel you must set LoggingFormat to '${LoggingFormat.JSON}', got '${props.loggingFormat}'.`);
+        throw new ValidationError(lit`JsonLoggingFormatRequired`, `To use ApplicationLogLevel and/or SystemLogLevel you must set LoggingFormat to '${LoggingFormat.JSON}', got '${props.loggingFormat}'.`, this);
       }
     }
 
@@ -1194,12 +1329,12 @@ export class Function extends FunctionBase {
         logFormat: props.logFormat || props.loggingFormat,
         systemLogLevel: props.systemLogLevel || props.systemLogLevelV2,
         applicationLogLevel: props.applicationLogLevel || props.applicationLogLevelV2,
-        logGroup: props.logGroup?.logGroupName,
+        logGroup: props.logGroup?.logGroupRef.logGroupName,
       };
       return loggingConfig;
     }
     return undefined;
-  };
+  }
 
   /**
    * Mix additional information into the hash of the Version object
@@ -1219,9 +1354,10 @@ export class Function extends FunctionBase {
    *
    * This method may be called more than once.
    */
+  @MethodMetadata()
   public invalidateVersionBasedOn(x: string) {
     if (Token.isUnresolved(x)) {
-      throw new Error('invalidateVersionOn: input may not contain unresolved tokens');
+      throw new ValidationError(lit`InvalidateVersionUnresolvedToken`, 'invalidateVersionOn: input may not contain unresolved tokens', this);
     }
     this.hashMixins.push(x);
   }
@@ -1233,14 +1369,15 @@ export class Function extends FunctionBase {
    *
    * @throws if there are already 5 layers on this function, or the layer is incompatible with this function's runtime.
    */
+  @MethodMetadata()
   public addLayers(...layers: ILayerVersion[]): void {
     for (const layer of layers) {
       if (this._layers.length === 5) {
-        throw new Error('Unable to add layer: this lambda function already uses 5 layers.');
+        throw new ValidationError(lit`MaxLayersExceeded`, 'Unable to add layer: this lambda function already uses 5 layers.', this);
       }
       if (layer.compatibleRuntimes && !layer.compatibleRuntimes.find(runtime => runtime.runtimeEquals(this.runtime))) {
         const runtimes = layer.compatibleRuntimes.map(runtime => runtime.name).join(', ');
-        throw new Error(`This lambda function uses a runtime that is incompatible with this layer (${this.runtime.name} is not in [${runtimes}])`);
+        throw new ValidationError(lit`IncompatibleLayerRuntime`, `This lambda function uses a runtime that is incompatible with this layer (${this.runtime.name} is not in [${runtimes}])`, this);
       }
 
       // Currently no validations for compatible architectures since Lambda service
@@ -1276,13 +1413,13 @@ export class Function extends FunctionBase {
    * `this.currentVersion` to obtain a reference to a version resource that gets
    * automatically recreated when the function configuration (or code) changes.
    */
+  @MethodMetadata()
   public addVersion(
     name: string,
     codeSha256?: string,
     description?: string,
     provisionedExecutions?: number,
     asyncInvokeConfig: EventInvokeConfigOptions = {}): Version {
-
     return new Version(this, 'Version' + name, {
       lambda: this,
       codeSha256,
@@ -1314,6 +1451,7 @@ export class Function extends FunctionBase {
    * @param aliasName The name of the alias
    * @param options Alias options
    */
+  @MethodMetadata()
   public addAlias(aliasName: string, options?: AliasOptions): Alias {
     return addAlias(this, this.currentVersion, aliasName, options);
   }
@@ -1342,24 +1480,24 @@ export class Function extends FunctionBase {
   /** @internal */
   public _checkEdgeCompatibility(): void {
     // Check env vars
-    const envEntries = Object.entries(this.environment);
+    const envEntries = [...this.environment.entries()];
     for (const [key, config] of envEntries) {
       if (config.removeInEdge) {
-        delete this.environment[key];
+        this.environment.delete(key);
         Annotations.of(this).addInfo(`Removed ${key} environment variable for Lambda@Edge compatibility`);
       }
     }
-    const envKeys = Object.keys(this.environment);
+    const envKeys = [...this.environment.keys()];
     if (envKeys.length !== 0) {
-      throw new Error(`The function ${this.node.path} contains environment variables [${envKeys}] and is not compatible with Lambda@Edge. \
-Environment variables can be marked for removal when used in Lambda@Edge by setting the \'removeInEdge\' property in the \'addEnvironment()\' API.`);
+      throw new ValidationError(lit`LambdaEdgeEnvironmentVariablesNotAllowed`, `The function ${this.node.path} contains environment variables [${envKeys}] and is not compatible with Lambda@Edge. \
+Environment variables can be marked for removal when used in Lambda@Edge by setting the \'removeInEdge\' property in the \'addEnvironment()\' API.`, this);
     }
 
     return;
   }
 
   /**
-   * Configured lambda insights on the function if specified. This is acheived by adding an imported layer which is added to the
+   * Configured lambda insights on the function if specified. This is achieved by adding an imported layer which is added to the
    * list of lambda layers on synthesis.
    *
    * https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/Lambda-Insights-extension-versions.html
@@ -1382,25 +1520,24 @@ Environment variables can be marked for removal when used in Lambda@Edge by sett
    * @param props properties for the ADOT instrumentation
    */
   private configureAdotInstrumentation(props: FunctionProps): void {
-
     if (props.adotInstrumentation === undefined) {
       return;
     }
 
     if (props.runtime === Runtime.FROM_IMAGE) {
-      throw new Error("ADOT Lambda layer can't be configured with container image package type");
+      throw new ValidationError(lit`AdotLayerContainerImageIncompatible`, "ADOT Lambda layer can't be configured with container image package type", this);
     }
 
     // This is not the complete list of incompatible runtimes and layer types. We are only
     // checking for common mistakes on a best-effort basis.
     if (this.runtime === Runtime.GO_1_X) {
-      throw new Error('Runtime go1.x is not supported by the ADOT Lambda Go SDK');
+      throw new ValidationError(lit`AdotGoRuntimeNotSupported`, 'Runtime go1.x is not supported by the ADOT Lambda Go SDK', this);
     }
 
     // The Runtime is Python and Adot is set it requires a different EXEC_WRAPPER than the other code bases.
     if (this.runtime.family === RuntimeFamily.PYTHON &&
       props.adotInstrumentation.execWrapper.valueOf() !== AdotLambdaExecWrapper.INSTRUMENT_HANDLER) {
-      throw new Error('Python Adot Lambda layer requires AdotLambdaExecWrapper.INSTRUMENT_HANDLER');
+      throw new ValidationError(lit`AdotPythonHandlerWrapperRequired`, 'Python Adot Lambda layer requires AdotLambdaExecWrapper.INSTRUMENT_HANDLER', this);
     }
 
     this.addLayers(LayerVersion.fromLayerVersionArn(this, 'AdotLayer', props.adotInstrumentation.layerVersion._bind(this).arn));
@@ -1420,24 +1557,18 @@ Environment variables can be marked for removal when used in Lambda@Edge by sett
     Object.entries(layerVersion.environmentVars).forEach(([key, value]) => this.addEnvironment(key, value.toString()));
   }
 
-  private renderLayers() {
-    if (!this._layers || this._layers.length === 0) {
-      return undefined;
-    }
-
+  private renderLayers(layers: ReadonlyArray<ILayerVersion>): string[] | undefined {
+    if (layers.length === 0) return undefined;
+    const sorted = [...layers];
     if (FeatureFlags.of(this).isEnabled(LAMBDA_RECOGNIZE_LAYER_VERSION)) {
-      this._layers.sort();
+      sorted.sort();
     }
-
-    return this._layers.map(layer => layer.layerVersionArn);
+    return sorted.map(layer => layer.layerVersionArn);
   }
 
-  private renderEnvironment() {
-    if (!this.environment || Object.keys(this.environment).length === 0) {
-      return undefined;
-    }
-
-    const variables: { [key: string]: string } = {};
+  private renderEnvironment(env: ReadonlyMap<string, EnvironmentConfig>): { variables: Record<string, string> } | undefined {
+    if (env.size === 0) return undefined;
+    const variables: Record<string, string> = {};
     // Sort environment so the hash of the function used to create
     // `currentVersion` is not affected by key order (this is how lambda does
     // it). For backwards compatibility we do not sort environment variables in case
@@ -1445,13 +1576,11 @@ Environment variables can be marked for removal when used in Lambda@Edge by sett
     // the template, and for example, may cause unneeded updates for nested
     // stacks.
     const keys = this._currentVersion
-      ? Object.keys(this.environment).sort()
-      : Object.keys(this.environment);
-
+      ? [...env.keys()].sort()
+      : [...env.keys()];
     for (const key of keys) {
-      variables[key] = this.environment[key].value;
+      variables[key] = env.get(key)!.value;
     }
-
     return { variables };
   }
 
@@ -1463,35 +1592,47 @@ Environment variables can be marked for removal when used in Lambda@Edge by sett
    */
   private configureVpc(props: FunctionProps): CfnFunction.VpcConfigProperty | undefined {
     if (props.securityGroup && props.securityGroups) {
-      throw new Error('Only one of the function props, securityGroup or securityGroups, is allowed');
+      throw new ValidationError(lit`ConflictingSecurityGroupProps`, 'Only one of the function props, securityGroup or securityGroups, is allowed', this);
     }
 
     const hasSecurityGroups = props.securityGroups && props.securityGroups.length > 0;
     if (!props.vpc) {
       if (props.allowAllOutbound !== undefined) {
-        throw new Error('Cannot configure \'allowAllOutbound\' without configuring a VPC');
+        throw new ValidationError(lit`AllowAllOutboundRequiresVpc`, 'Cannot configure \'allowAllOutbound\' without configuring a VPC', this);
       }
       if (props.securityGroup) {
-        throw new Error('Cannot configure \'securityGroup\' without configuring a VPC');
+        throw new ValidationError(lit`SecurityGroupRequiresVpc`, 'Cannot configure \'securityGroup\' without configuring a VPC', this);
       }
       if (hasSecurityGroups) {
-        throw new Error('Cannot configure \'securityGroups\' without configuring a VPC');
+        throw new ValidationError(lit`SecurityGroupsRequireVpc`, 'Cannot configure \'securityGroups\' without configuring a VPC', this);
       }
       if (props.vpcSubnets) {
-        throw new Error('Cannot configure \'vpcSubnets\' without configuring a VPC');
+        throw new ValidationError(lit`VpcSubnetsRequiresVpc`, 'Cannot configure \'vpcSubnets\' without configuring a VPC', this);
       }
       if (props.ipv6AllowedForDualStack) {
-        throw new Error('Cannot configure \'ipv6AllowedForDualStack\' without configuring a VPC');
+        throw new ValidationError(lit`Ipv6DualStackRequiresVpc`, 'Cannot configure \'ipv6AllowedForDualStack\' without configuring a VPC', this);
+      }
+      if (props.allowAllIpv6Outbound !== undefined) {
+        throw new ValidationError(lit`AllowAllIpv6OutboundRequiresVpc`, 'Cannot configure \'allowAllIpv6Outbound\' without configuring a VPC', this);
       }
       return undefined;
     }
 
     if (props.allowAllOutbound !== undefined) {
       if (props.securityGroup) {
-        throw new Error('Configure \'allowAllOutbound\' directly on the supplied SecurityGroup.');
+        throw new ValidationError(lit`ConfigureAllowAllOutboundOnSecurityGroup`, 'Configure \'allowAllOutbound\' directly on the supplied SecurityGroup.', this);
       }
       if (hasSecurityGroups) {
-        throw new Error('Configure \'allowAllOutbound\' directly on the supplied SecurityGroups.');
+        throw new ValidationError(lit`ConfigureAllowAllOutboundOnSecurityGroups`, 'Configure \'allowAllOutbound\' directly on the supplied SecurityGroups.', this);
+      }
+    }
+
+    if (props.allowAllIpv6Outbound !== undefined) {
+      if (props.securityGroup) {
+        throw new ValidationError(lit`ConfigureAllowAllIpv6OutboundOnSecurityGroup`, 'Configure \'allowAllIpv6Outbound\' directly on the supplied SecurityGroup.', this);
+      }
+      if (hasSecurityGroups) {
+        throw new ValidationError(lit`ConfigureAllowAllIpv6OutboundOnSecurityGroups`, 'Configure \'allowAllIpv6Outbound\' directly on the supplied SecurityGroups.', this);
       }
     }
 
@@ -1504,6 +1645,7 @@ Environment variables can be marked for removal when used in Lambda@Edge by sett
         vpc: props.vpc,
         description: 'Automatic security group for Lambda Function ' + Names.uniqueId(this),
         allowAllOutbound: props.allowAllOutbound,
+        allowAllIpv6Outbound: props.allowAllIpv6Outbound,
       });
       securityGroups = [securityGroup];
     }
@@ -1525,8 +1667,8 @@ Environment variables can be marked for removal when used in Lambda@Edge by sett
     const publicSubnetIds = new Set(props.vpc.publicSubnets.map(s => s.subnetId));
     for (const subnetId of selectedSubnets.subnetIds) {
       if (publicSubnetIds.has(subnetId) && !allowPublicSubnet) {
-        throw new Error('Lambda Functions in a public subnet can NOT access the internet. ' +
-          'If you are aware of this limitation and would still like to place the function in a public subnet, set `allowPublicSubnet` to true');
+        throw new ValidationError(lit`LambdaFunctionsPublicSubnet`, 'Lambda Functions in a public subnet can NOT access the internet. '+
+          'If you are aware of this limitation and would still like to place the function in a public subnet, set `allowPublicSubnet` to true', this);
       }
     }
     this.node.addDependency(selectedSubnets.internetConnectivityEstablished);
@@ -1545,6 +1687,26 @@ Environment variables can be marked for removal when used in Lambda@Edge by sett
         subnetIds: selectedSubnets.subnetIds,
         securityGroupIds: securityGroups.map(sg => sg.securityGroupId),
       };
+    }
+  }
+
+  private renderDurableConfig(config: DurableConfig): CfnFunction.DurableConfigProperty {
+    Annotations.of(this).addInfoV2('aws-lambda:Function.DurableConfig', 'Modifying an existing lambda to use durability will trigger a resource replacement');
+    if (!config.executionTimeout.isUnresolved() && (config.executionTimeout.toSeconds() < 1 || config.executionTimeout.toSeconds() > 31622400)) {
+      throw new ValidationError(lit`ExecutionTimeoutSeconds`, `executionTimeout must be between 1 and 31622400 seconds, got ${config.executionTimeout.toSeconds()}`, this);
+    }
+
+    let retentionDays: number | undefined;
+    if (config.retentionPeriod) {
+      if (!config.retentionPeriod.isUnresolved() && (config.retentionPeriod.toDays() < 1 || config.retentionPeriod.toDays() > 90)) {
+        throw new ValidationError(lit`RetentionPeriodOutOfRange`, `retentionPeriodInDays must be between 1 and 90 days, got ${config.retentionPeriod.toDays()}`, this);
+      }
+      retentionDays = config.retentionPeriod.toDays();
+    }
+
+    return {
+      executionTimeout: config.executionTimeout.toSeconds(),
+      retentionPeriodInDays: retentionDays,
     };
   }
 
@@ -1554,27 +1716,27 @@ Environment variables can be marked for removal when used in Lambda@Edge by sett
       return undefined;
     }
 
-    // SnapStart does not support arm64 architecture, Amazon Elastic File System (Amazon EFS), or ephemeral storage greater than 512 MB.
+    // SnapStart does not support Amazon Elastic File System (Amazon EFS), or ephemeral storage greater than 512 MB.
     // SnapStart doesn't support provisioned concurrency either, but that's configured at the version level,
     // so it can't be checked at function set up time
     // SnapStart supports the Java 11 and Java 17 (java11 and java17) managed runtimes.
     // See https://docs.aws.amazon.com/lambda/latest/dg/snapstart.html
-    Annotations.of(this).addWarningV2('@aws-cdk/aws-lambda:snapStartRequirePublish', 'SnapStart only support published Lambda versions. Ignore if function already have published versions');
+    Annotations.of(this).addWarningV2('@aws-cdk/aws-lambda:snapStartRequirePublish', 'SnapStart only supports published Lambda versions. Ignore if function already has published versions.');
 
     if (!props.runtime.supportsSnapStart) {
-      throw new Error(`SnapStart currently not supported by runtime ${props.runtime.name}`);
+      throw new ValidationError(lit`SnapStartCurrentlySupportedRuntime`, `SnapStart currently not supported by runtime ${props.runtime.name}`, this);
     }
 
-    if (props.architecture == Architecture.ARM_64) {
-      throw new Error('SnapStart is currently not supported on Arm_64');
+    if (props.tenancyConfig?.tenancyConfigProperty?.tenantIsolationMode !== undefined) {
+      throw new ValidationError(lit`SnapStartSupportedFunctionsTenant`, 'SnapStart is not supported for functions with tenant isolation mode', this);
     }
 
     if (props.filesystem) {
-      throw new Error('SnapStart is currently not supported using EFS');
+      throw new ValidationError(lit`SnapStartCurrentlySupported`, 'SnapStart is currently not supported using EFS', this);
     }
 
     if (props.ephemeralStorageSize && props.ephemeralStorageSize?.toMebibytes() > 512) {
-      throw new Error('SnapStart is currently not supported using more than 512 MiB Ephemeral Storage');
+      throw new ValidationError(lit`SnapStartCurrentlySupportedMi`, 'SnapStart is currently not supported using more than 512 MiB Ephemeral Storage', this);
     }
 
     return props.snapStart._render();
@@ -1592,7 +1754,7 @@ Environment variables can be marked for removal when used in Lambda@Edge by sett
       throw Error('deadLetterQueue defined but deadLetterQueueEnabled explicitly set to false');
     }
     if (props.deadLetterTopic && (props.deadLetterQueue || props.deadLetterQueueEnabled !== undefined)) {
-      throw new Error('deadLetterQueue and deadLetterTopic cannot be specified together at the same time');
+      throw new ValidationError(lit`DeadLetterQueueDeadLetter`, 'deadLetterQueue and deadLetterTopic cannot be specified together at the same time', this);
     }
 
     let deadLetterQueue: sqs.IQueue | sns.ITopic;
@@ -1642,7 +1804,7 @@ Environment variables can be marked for removal when used in Lambda@Edge by sett
 
   private validateProfiling(props: FunctionProps) {
     if (!props.runtime.supportsCodeGuruProfiling) {
-      throw new Error(`CodeGuru profiling is not supported by runtime ${props.runtime.name}`);
+      throw new ValidationError(lit`CodeGuruProfilingSupportedRuntime`, `CodeGuru profiling is not supported by runtime ${props.runtime.name}`, this);
     }
     if (props.environment && (props.environment.AWS_CODEGURU_PROFILER_GROUP_NAME
       || props.environment.AWS_CODEGURU_PROFILER_GROUP_ARN
@@ -1696,20 +1858,20 @@ export function verifyCodeConfig(code: CodeConfig, props: FunctionProps) {
   const codeType = [code.inlineCode, code.s3Location, code.image];
 
   if (codeType.filter(x => !!x).length !== 1) {
-    throw new Error('lambda.Code must specify exactly one of: "inlineCode", "s3Location", or "image"');
+    throw new UnscopedValidationError(lit`Lambda`, 'lambda.Code must specify exactly one of: "inlineCode", "s3Location", or "image"');
   }
 
   if (!!code.image === (props.handler !== Handler.FROM_IMAGE)) {
-    throw new Error('handler must be `Handler.FROM_IMAGE` when using image asset for Lambda function');
+    throw new UnscopedValidationError(lit`MustBeHandlerUsingImage`, 'handler must be `Handler.FROM_IMAGE` when using image asset for Lambda function');
   }
 
   if (!!code.image === (props.runtime !== Runtime.FROM_IMAGE)) {
-    throw new Error('runtime must be `Runtime.FROM_IMAGE` when using image asset for Lambda function');
+    throw new UnscopedValidationError(lit`MustBeRuntimeUsingImage`, 'runtime must be `Runtime.FROM_IMAGE` when using image asset for Lambda function');
   }
 
   // if this is inline code, check that the runtime supports
   if (code.inlineCode && !props.runtime.supportsInlineCode) {
-    throw new Error(`Inline source not allowed for ${props.runtime!.name}`);
+    throw new UnscopedValidationError(lit`InlineSourceAllowed`, `Inline source not allowed for ${props.runtime!.name}`);
   }
 }
 
@@ -1735,5 +1897,5 @@ export class FunctionVersionUpgrade implements IAspect {
       const desc = cfnFunction.description ? `${cfnFunction.description} ` : '';
       cfnFunction.addPropertyOverride('Description', `${desc}version-hash:${calculateFunctionHash(node)}`);
     }
-  };
+  }
 }

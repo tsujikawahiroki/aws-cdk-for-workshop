@@ -2,9 +2,72 @@ import { Match, Template } from '../../assertions';
 import * as iam from '../../aws-iam';
 import * as kms from '../../aws-kms';
 import { App, Duration, Stack, CfnParameter, RemovalPolicy, CfnDeletionPolicy } from '../../core';
-import { Stream, StreamEncryption, StreamMode } from '../lib';
+import { ShardLevelMetrics, Stream, StreamEncryption, StreamMode } from '../lib';
 
 describe('Kinesis data streams', () => {
+  describe('shard level metrics', () => {
+    test('configure all shard level metrics', () => {
+      const stack = new Stack();
+      new Stream(stack, 'MyStream', {
+        shardLevelMetrics: [ShardLevelMetrics.ALL],
+      });
+
+      Template.fromStack(stack).hasResourceProperties('AWS::Kinesis::Stream', {
+        DesiredShardLevelMetrics: [
+          'ALL',
+        ],
+      });
+    });
+
+    test('configure explicit shard level metrics', () => {
+      const stack = new Stack();
+      new Stream(stack, 'MyStream', {
+        shardLevelMetrics: [
+          ShardLevelMetrics.INCOMING_BYTES,
+          ShardLevelMetrics.INCOMING_RECORDS,
+          ShardLevelMetrics.ITERATOR_AGE_MILLISECONDS,
+          ShardLevelMetrics.OUTGOING_BYTES,
+          ShardLevelMetrics.OUTGOING_RECORDS,
+          ShardLevelMetrics.WRITE_PROVISIONED_THROUGHPUT_EXCEEDED,
+          ShardLevelMetrics.READ_PROVISIONED_THROUGHPUT_EXCEEDED,
+        ],
+      });
+
+      Template.fromStack(stack).hasResourceProperties('AWS::Kinesis::Stream', {
+        DesiredShardLevelMetrics: [
+          'IncomingBytes',
+          'IncomingRecords',
+          'IteratorAgeMilliseconds',
+          'OutgoingBytes',
+          'OutgoingRecords',
+          'WriteProvisionedThroughputExceeded',
+          'ReadProvisionedThroughputExceeded',
+        ],
+      });
+    });
+
+    test('throw error for configuring both ALL and explicit metrics', () => {
+      const stack = new Stack();
+      expect(() => {
+        new Stream(stack, 'MyStream', {
+          shardLevelMetrics: [ShardLevelMetrics.ALL, ShardLevelMetrics.INCOMING_BYTES],
+        });
+      }).toThrow('`shardLevelMetrics` cannot include `ShardLevelMetrics.ALL` together with individual metrics, use either `ShardLevelMetrics.ALL` alone or specify individual metrics.');
+    });
+
+    test('throw error for configuring duplicate metrics', () => {
+      const stack = new Stack();
+      expect(() => {
+        new Stream(stack, 'MyStream', {
+          shardLevelMetrics: [
+            ShardLevelMetrics.INCOMING_BYTES,
+            ShardLevelMetrics.INCOMING_BYTES,
+          ],
+        });
+      }).toThrow('shardLevelMetrics cannot contain duplicate items.');
+    });
+  });
+
   test('default stream', () => {
     const stack = new Stack();
     new Stream(stack, 'MyStream');
@@ -898,6 +961,52 @@ describe('Kinesis data streams', () => {
         },
       },
     });
+    Template.fromStack(stack).resourceCountIs('AWS::Kinesis::ResourcePolicy', 0);
+  }),
+  test('grant when stream/consumer and grantee are in different accounts', () => {
+    const stackA = new Stack(undefined, 'StackA', { env: { account: '123456789012' } });
+    const streamFromStackA = new Stream(stackA, 'Stream', {
+      streamName: 'MyStream',
+    });
+
+    const stackB = new Stack(undefined, 'StackB', { env: { account: '234567890123' } });
+    const roleFromStackB = new iam.Role(stackB, 'MyRole', {
+      assumedBy: new iam.AccountPrincipal('234567890123'),
+      roleName: 'MyRole',
+    });
+
+    streamFromStackA.grant(roleFromStackB, 'kinesis:GetRecords');
+
+    Template.fromStack(stackA).hasResourceProperties('AWS::Kinesis::ResourcePolicy', {
+      ResourceArn: stackA.resolve(streamFromStackA.streamArn),
+      ResourcePolicy: {
+        Version: '2012-10-17',
+        Statement: [
+          {
+            Action: 'kinesis:GetRecords',
+            Effect: 'Allow',
+            Principal: {
+              AWS: stackA.resolve(roleFromStackB.roleArn),
+            },
+            Resource: stackA.resolve(streamFromStackA.streamArn),
+          },
+        ],
+      },
+    });
+
+    Template.fromStack(stackB).hasResourceProperties('AWS::IAM::Policy', {
+      Roles: [stackB.resolve(roleFromStackB.roleName)],
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          // stream read permissions
+          {
+            Action: 'kinesis:GetRecords',
+            Effect: 'Allow',
+            Resource: stackB.resolve(streamFromStackA.streamArn),
+          },
+        ]),
+      },
+    });
   }),
 
   test('cross-stack permissions - no encryption', () => {
@@ -1287,6 +1396,35 @@ describe('Kinesis data streams', () => {
     // THEN
     Template.fromStack(stack).hasResource('AWS::Kinesis::Stream', {
       DeletionPolicy: CfnDeletionPolicy.DELETE,
+    });
+  });
+
+  test('addToResourcePolicy will automatically create a policy for this stream', () => {
+    // GIVEN
+    const stack = new Stack();
+    const stream = new Stream(stack, 'Stream', {});
+
+    // WHEN
+    stream.addToResourcePolicy(new iam.PolicyStatement({
+      actions: ['kinesis:GetRecords'],
+      principals: [new iam.AnyPrincipal()],
+      resources: [stream.streamArn],
+    }));
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::Kinesis::ResourcePolicy', {
+      ResourceArn: stack.resolve(stream.streamArn),
+      ResourcePolicy: {
+        Version: '2012-10-17',
+        Statement: [
+          {
+            Action: 'kinesis:GetRecords',
+            Effect: 'Allow',
+            Principal: { AWS: '*' },
+            Resource: stack.resolve(stream.streamArn),
+          },
+        ],
+      },
     });
   });
 });

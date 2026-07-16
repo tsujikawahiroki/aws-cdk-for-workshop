@@ -1,6 +1,6 @@
-import { Messages } from './message';
+import type { Messages } from './message';
 import { formatAllMatches, matchSection, formatSectionMatchFailure } from './section';
-import { SynthesisMessage } from '../../../cx-api';
+import type { SynthesisMessage } from '../../../cx-api';
 
 export function findMessage(messages: Messages, constructPath: string, props: any = {}): { [key: string]: { [key: string]: any } } {
   const section: { [key: string]: SynthesisMessage } = messages;
@@ -46,7 +46,7 @@ export function hasNoMessage(messages: Messages, constructPath: string, props: a
 function redactTraces(match: any, redact: boolean = true): void {
   if (redact && match.entry?.trace !== undefined) {
     match.entry.trace = 'redacted';
-  };
+  }
 }
 
 function filterPath(section: { [key: string]: SynthesisMessage }, path: string): { [key: string]: SynthesisMessage } {

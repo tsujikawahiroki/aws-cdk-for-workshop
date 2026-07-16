@@ -1,7 +1,7 @@
+import type * as iot from '@aws-cdk/aws-iot-alpha';
 import * as iam from 'aws-cdk-lib/aws-iam';
-import * as iot from '@aws-cdk/aws-iot-alpha';
-import * as kinesis from 'aws-cdk-lib/aws-kinesis';
-import { CommonActionProps } from './common-action-props';
+import type * as kinesis from 'aws-cdk-lib/aws-kinesis';
+import type { CommonActionProps } from './common-action-props';
 import { singletonActionRole } from './private/role';
 
 /**
@@ -14,7 +14,7 @@ export interface KinesisPutRecordActionProps extends CommonActionProps {
    *
    * @see https://docs.aws.amazon.com/iot/latest/developerguide/iot-substitution-templates.html
    *
-   * You can use the expression '${newuuid()}' if your payload does not have a high cardinarity property.
+   * You can use the expression '${newuuid()}' if your payload does not have a high cardinality property.
    * If you use empty string, this action use no partition key and all records will put same one shard.
    *
    * @see https://docs.aws.amazon.com/kinesis/latest/APIReference/API_PutRecord.html#API_PutRecord_RequestParameters

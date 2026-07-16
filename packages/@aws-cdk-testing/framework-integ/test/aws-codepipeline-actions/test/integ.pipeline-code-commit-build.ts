@@ -4,11 +4,12 @@ import * as codepipeline from 'aws-cdk-lib/aws-codepipeline';
 import * as cdk from 'aws-cdk-lib';
 import * as cpactions from 'aws-cdk-lib/aws-codepipeline-actions';
 
-/* eslint-disable quote-props */
+/* eslint-disable @stylistic/quote-props */
 
 const app = new cdk.App({
   postCliContext: {
     '@aws-cdk/aws-codepipeline:defaultPipelineTypeToV2': false,
+    '@aws-cdk/pipelines:reduceStageRoleTrustScope': false,
   },
 });
 

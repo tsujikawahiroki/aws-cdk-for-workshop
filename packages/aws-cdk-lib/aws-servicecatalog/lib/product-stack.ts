@@ -1,12 +1,17 @@
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
-import { Construct } from 'constructs';
+import type { Construct } from 'constructs';
 import { ProductStackSynthesizer } from './private/product-stack-synthesizer';
-import { ProductStackHistory } from './product-stack-history';
-import { IBucket } from '../../aws-s3';
-import { ServerSideEncryption } from '../../aws-s3-deployment';
+import type { ProductStackHistory } from './product-stack-history';
+import type { IBucket } from '../../aws-s3';
+import type { ServerSideEncryption } from '../../aws-s3-deployment';
 import * as cdk from '../../core';
+import { ValidationError } from '../../core';
+import type { IBox } from '../../core/lib/helpers-internal';
+import { Box } from '../../core/lib/helpers-internal';
+import { noBoxStackTraces } from '../../core/lib/no-box-stack-traces';
+import { lit } from '../../core/lib/private/literal-string';
 
 /**
  * Product stack props.
@@ -43,6 +48,21 @@ export interface ProductStackProps {
    * @default 128
    */
   readonly memoryLimit?: number;
+
+  /**
+   * A description of the stack.
+   *
+   * @default - No description.
+   */
+  readonly description?: string;
+
+  /**
+   * Include runtime versioning information in this Stack
+   *
+   * @default - `analyticsReporting` setting of containing `App`, or value of
+   * 'aws:cdk:version-reporting' context key
+   */
+  readonly analyticsReporting?: boolean;
 }
 
 /**
@@ -54,16 +74,19 @@ export interface ProductStackProps {
  * but rather only synthesized as a template and uploaded as an asset to S3.
  *
  */
+@noBoxStackTraces
 export class ProductStack extends cdk.Stack {
   public readonly templateFile: string;
   private _parentProductStackHistory?: ProductStackHistory;
-  private _templateUrl?: string;
+  private _templateUrl: IBox<string | undefined> = Box.fromValue<string | undefined>(undefined);
   private _parentStack: cdk.Stack;
   private assetBucket?: IBucket;
 
   constructor(scope: Construct, id: string, props: ProductStackProps = {}) {
     const parentStack = findParentStack(scope);
     super(scope, id, {
+      analyticsReporting: props.analyticsReporting,
+      description: props.description,
       synthesizer: new ProductStackSynthesizer({
         parentStack,
         assetBucket: props.assetBucket,
@@ -96,7 +119,7 @@ export class ProductStack extends cdk.Stack {
    * @internal
    */
   public _getTemplateUrl(): string {
-    return cdk.Lazy.uncachedString({ produce: () => this._templateUrl });
+    return cdk.Token.asString(this._templateUrl);
   }
 
   /**
@@ -129,11 +152,12 @@ export class ProductStack extends cdk.Stack {
     const cfn = JSON.stringify(this._toCloudFormation(), undefined, 2);
     const templateHash = crypto.createHash('sha256').update(cfn).digest('hex');
 
-    this._templateUrl = this._parentStack.synthesizer.addFileAsset({
+    this._templateUrl.set(this._parentStack.synthesizer.addFileAsset({
       packaging: cdk.FileAssetPackaging.FILE,
       sourceHash: templateHash,
       fileName: this.templateFile,
-    }).httpUrl;
+      displayName: `${this.node.path} Template`,
+    }).httpUrl);
 
     if (this._parentProductStackHistory) {
       this._parentProductStackHistory._writeTemplateToSnapshot(cfn);
@@ -151,6 +175,6 @@ function findParentStack(scope: Construct): cdk.Stack {
     const parentStack = cdk.Stack.of(scope);
     return parentStack as cdk.Stack;
   } catch {
-    throw new Error('Product stacks must be defined within scope of another non-product stack');
+    throw new ValidationError(lit`ProductStackMustBeDefinedWithinStack`, 'Product stacks must be defined within scope of another non-product stack', scope);
   }
 }

@@ -1,10 +1,11 @@
 import { EbsDeviceVolumeType } from 'aws-cdk-lib/aws-ec2';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as kms from 'aws-cdk-lib/aws-kms';
-import { App, RemovalPolicy, Stack, StackProps } from 'aws-cdk-lib';
-import { Construct } from 'constructs';
+import type { StackProps } from 'aws-cdk-lib';
+import { App, RemovalPolicy, Stack } from 'aws-cdk-lib';
+import type { Construct } from 'constructs';
 import * as es from 'aws-cdk-lib/aws-elasticsearch';
-import { ExpectedResult, IntegTest, Match } from '@aws-cdk/integ-tests-alpha';
+import { IntegTest } from '@aws-cdk/integ-tests-alpha';
 
 class TestStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
@@ -43,37 +44,15 @@ class TestStack extends Stack {
   }
 }
 
-const app = new App();
+const app = new App({
+  postCliContext: {
+    '@aws-cdk/aws-lambda:useCdkManagedLogGroup': false,
+  },
+});
 const stack = new TestStack(app, 'cdk-integ-elasticsearch-custom-kms-key');
 
-const integTest = new IntegTest(app, 'ElasticsearchCustomKmsInteg', {
+new IntegTest(app, 'ElasticsearchCustomKmsInteg', {
   testCases: [stack],
   diffAssets: true,
 });
-const resourcePolicies = integTest.assertions.awsApiCall('CloudWatchLogs', 'describeResourcePolicies');
-// asserting that LogGroupPolicy for elastic search correctly adds resource policy name and document
-resourcePolicies.expect(ExpectedResult.objectLike({
-  resourcePolicies: Match.arrayWith([
-    Match.objectLike({
-      policyName: 'ESLogPolicyc82ca7bfe2f2589b859ebab89e88da2efd284adfad',
-      policyDocument: Match.serializedJson(Match.objectLike({
-        Version: '2012-10-17',
-        Statement: [{
-          Effect: 'Allow',
-          Principal: {
-            Service: 'es.amazonaws.com',
-          },
-          Action: [
-            'logs:PutLogEvents',
-            'logs:CreateLogStream',
-          ],
-          Resource: [
-            Match.stringLikeRegexp('^arn:aws:logs:.*:.*:log-group:cdk-integ-elasticsearch-custom-kms-key-DomainSlowSearchLogs.*$'),
-            Match.stringLikeRegexp('^arn:aws:logs:.*:.*:log-group:cdk-integ-elasticsearch-custom-kms-key-DomainAppLogs.*$'),
-          ],
-        }],
-      })),
-    }),
-  ]),
-}));
 app.synth();

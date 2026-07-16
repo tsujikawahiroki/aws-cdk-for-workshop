@@ -28,7 +28,7 @@ Currently supported are:
 - Capture CloudWatch metrics
 - Change state for a CloudWatch alarm
 - Put records to Kinesis Data stream
-- Put records to Kinesis Data Firehose stream
+- Put records to Amazon Data Firehose stream
 - Send messages to SQS queues
 - Publish messages on SNS topics
 - Write messages into columns of DynamoDB
@@ -232,18 +232,17 @@ const topicRule = new iot.TopicRule(this, 'TopicRule', {
 });
 ```
 
-## Put records to Kinesis Data Firehose stream
+## Put records to Amazon Data Firehose stream
 
 The code snippet below creates an AWS IoT Rule that puts records to Put records
-to Kinesis Data Firehose stream when it is triggered.
+to Amazon Data Firehose stream when it is triggered.
 
 ```ts
-import * as firehose from '@aws-cdk/aws-kinesisfirehose-alpha';
-import * as destinations from '@aws-cdk/aws-kinesisfirehose-destinations-alpha';
+import * as firehose from 'aws-cdk-lib/aws-kinesisfirehose';
 
 const bucket = new s3.Bucket(this, 'MyBucket');
 const stream = new firehose.DeliveryStream(this, 'MyStream', {
-  destinations: [new destinations.S3Bucket(bucket)],
+  destination: new firehose.S3Bucket(bucket),
 });
 
 const topicRule = new iot.TopicRule(this, 'TopicRule', {
@@ -371,6 +370,26 @@ topicRule.addAction(
   }),
 );
 ```
+
+You can enable batching to reduce costs and improve efficiency:
+
+```ts
+import { Size } from 'aws-cdk-lib';
+
+declare const topicRule: iot.TopicRule;
+
+topicRule.addAction(
+  new actions.HttpsAction('https://example.com/endpoint', {
+    batchConfig: {
+      maxBatchOpenDuration: Duration.millis(100),
+      maxBatchSize: 5,
+      maxBatchSizeBytes: Size.kibibytes(1),
+    },
+  }),
+);
+```
+
+For more information about the batching configuration, see the [AWS IoT Core documentation](https://docs.aws.amazon.com/iot/latest/developerguide/http_batching.html).
 
 ## Write Data to Open Search Service
 

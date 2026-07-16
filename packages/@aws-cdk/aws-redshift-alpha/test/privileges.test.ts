@@ -1,6 +1,6 @@
+import * as cdk from 'aws-cdk-lib';
 import { Template } from 'aws-cdk-lib/assertions';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
-import * as cdk from 'aws-cdk-lib';
 import * as redshift from '../lib';
 
 describe('table privileges', () => {
@@ -74,7 +74,7 @@ describe('table privileges', () => {
           'username',
         ],
       },
-      tablePrivileges: [{ tableName: 'tableName', actions: ['SELECT', 'DELETE', 'INSERT'] }],
+      tablePrivileges: [{ tableName: 'tableName', actions: ['INSERT', 'DELETE', 'SELECT'] }],
     });
   });
 

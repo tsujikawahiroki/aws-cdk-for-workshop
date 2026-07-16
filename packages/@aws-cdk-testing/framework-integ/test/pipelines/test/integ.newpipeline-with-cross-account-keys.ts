@@ -1,7 +1,8 @@
 import * as sqs from 'aws-cdk-lib/aws-sqs';
-import { App, Stack, StackProps, Stage, StageProps } from 'aws-cdk-lib';
+import type { StackProps, StageProps } from 'aws-cdk-lib';
+import { App, Stack, Stage } from 'aws-cdk-lib';
 import * as integ from '@aws-cdk/integ-tests-alpha';
-import { Construct } from 'constructs';
+import type { Construct } from 'constructs';
 
 import * as pipelines from 'aws-cdk-lib/pipelines';
 
@@ -56,6 +57,7 @@ class AppStage extends Stage {
 const app = new App({
   postCliContext: {
     '@aws-cdk/aws-codepipeline:defaultPipelineTypeToV2': false,
+    '@aws-cdk/pipelines:reduceStageRoleTrustScope': true,
   },
 });
 const stack = new PipelineStack(app, 'PipelineStack');

@@ -1,5 +1,4 @@
-/* eslint-disable max-len */
-/* eslint-disable no-console */
+
 /* eslint-disable @typescript-eslint/no-require-imports */
 import mocks = require('./mocks');
 import cfnResponse = require('../../lib/provider-framework/runtime/cfn-response');
@@ -107,9 +106,7 @@ test('fails gracefully if "onEvent" throws an error', async () => {
 });
 
 describe('PhysicalResourceId', () => {
-
   describe('if not omitted from onEvent result', () => {
-
     it('defaults to RequestId for CREATE', async () => {
       // WHEN
       mocks.onEventImplMock = async () => undefined;
@@ -204,7 +201,6 @@ describe('PhysicalResourceId', () => {
     expectNoWaiter();
     expectCloudFormationFailed('DELETE: cannot change the physical resource ID from "CurrentPhysicalId" to "NewPhysicalId" during deletion');
   });
-
 });
 
 test('isComplete always returns "false" and then a timeout occurs', async () => {
@@ -318,7 +314,6 @@ test('fails if user handler returns a non-object response', async () => {
 });
 
 describe('if CREATE fails, the subsequent DELETE will be ignored', () => {
-
   it('FAILED response sets PhysicalResourceId to a special marker', async () => {
     // WHEN
     mocks.onEventImplMock = async () => { throw new Error('CREATE FAILED'); };
@@ -346,7 +341,6 @@ describe('if CREATE fails, the subsequent DELETE will be ignored', () => {
     // THEN
     expectCloudFormationSuccess();
   });
-
 });
 
 describe('ResponseURL is passed to user function', () => {
@@ -361,7 +355,7 @@ describe('ResponseURL is passed to user function', () => {
 
     // THEN
     expect(invokeFunctionSpy).toHaveBeenCalledTimes(1);
-    expect(invokeFunctionSpy).toBeCalledWith(expect.objectContaining({
+    expect(invokeFunctionSpy).toHaveBeenCalledWith(expect.objectContaining({
       Payload: expect.stringContaining(`"ResponseURL":"${mocks.MOCK_REQUEST.ResponseURL}"`),
     }));
   });
@@ -382,6 +376,25 @@ describe('ResponseURL is passed to user function', () => {
       Payload: expect.stringContaining(`"ResponseURL":"${mocks.MOCK_REQUEST.ResponseURL}"`),
     }));
   });
+});
+
+test('waiter state machine execution does not include name field (allows retries)', async () => {
+  // GIVEN
+  mocks.onEventImplMock = async () => ({ PhysicalResourceId: MOCK_PHYSICAL_ID });
+  mocks.isCompleteImplMock = async () => ({ IsComplete: true });
+
+  // WHEN
+  await simulateEvent({
+    RequestType: 'Create',
+  });
+
+  // THEN
+  expect(mocks.startStateMachineInput).toBeDefined();
+  expect(mocks.startStateMachineInput?.stateMachineArn).toEqual(mocks.MOCK_SFN_ARN);
+  expect(mocks.startStateMachineInput?.name).toBeUndefined();
+  expect(mocks.startStateMachineInput?.input).toBeDefined();
+
+  expectCloudFormationSuccess({ PhysicalResourceId: MOCK_PHYSICAL_ID });
 });
 
 // -----------------------------------------------------------------------------------------------------------------------

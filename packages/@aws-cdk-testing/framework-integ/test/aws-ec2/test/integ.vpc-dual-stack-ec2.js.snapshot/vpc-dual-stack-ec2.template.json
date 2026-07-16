@@ -464,14 +464,6 @@
     }
    }
   },
-  "Ip6VpcDualStackEIGW6491F95B8": {
-   "Type": "AWS::EC2::EgressOnlyInternetGateway",
-   "Properties": {
-    "VpcId": {
-     "Ref": "Ip6VpcDualStack350CEE6D"
-    }
-   }
-  },
   "Ip6VpcDualStackcloudwatchLogsIAMRoleC4808C35": {
    "Type": "AWS::IAM::Role",
    "Properties": {
@@ -510,16 +502,6 @@
        "Resource": {
         "Fn::GetAtt": [
          "Ip6VpcDualStackcloudwatchLogsLogGroup9D808486",
-         "Arn"
-        ]
-       }
-      },
-      {
-       "Action": "iam:PassRole",
-       "Effect": "Allow",
-       "Resource": {
-        "Fn::GetAtt": [
-         "Ip6VpcDualStackcloudwatchLogsIAMRoleC4808C35",
          "Arn"
         ]
        }
@@ -673,7 +655,7 @@
      "S3Bucket": {
       "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
      },
-     "S3Key": "4554b47be6f57b68c6c7a7391dcc73894866d2377fe174883351e7639097f292.zip"
+     "S3Key": "55549d0bfa9628b306c349544b7d95017221e259e17875f3d38f2a3d2da5043f.zip"
     },
     "Timeout": 900,
     "MemorySize": 128,
@@ -684,7 +666,7 @@
       "Arn"
      ]
     },
-    "Runtime": "nodejs18.x",
+    "Runtime": "nodejs24.x",
     "Description": "Lambda function for removing all inbound/outbound rules from the VPC default security group"
    },
    "DependsOn": [

@@ -1,10 +1,15 @@
-import { App, RemovalPolicy, Stack, StackProps } from 'aws-cdk-lib';
-import { Construct } from 'constructs';
+import type { StackProps } from 'aws-cdk-lib';
+import { App, RemovalPolicy, Stack } from 'aws-cdk-lib';
+import type { Construct } from 'constructs';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import { IntegTest } from '@aws-cdk/integ-tests-alpha';
 
-const app = new App();
+const app = new App({
+  postCliContext: {
+    '@aws-cdk/aws-dynamodb:resourcePolicyPerReplica': false,
+  },
+});
 
 class TestStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
@@ -21,7 +26,7 @@ class TestStack extends Stack {
     });
 
     // table with resource policy
-    const table = new dynamodb.TableV2(this, 'TableTestV2-1', {
+    new dynamodb.TableV2(this, 'TableTestV2-1', {
       partitionKey: {
         name: 'id',
         type: dynamodb.AttributeType.STRING,
@@ -30,11 +35,17 @@ class TestStack extends Stack {
       resourcePolicy: docu,
     });
 
-    table.grantReadData(new iam.AccountPrincipal('123456789012'));
+    const table = new dynamodb.TableV2(this, 'TableTestV2-2', {
+      partitionKey: {
+        name: 'id',
+        type: dynamodb.AttributeType.STRING,
+      },
+    });
+    table.grantReadData(new iam.AccountRootPrincipal());
   }
 }
 
-const stack = new TestStack(app, 'ResourcePolicyTest-v2', { env: { region: 'eu-west-1' } });
+const stack = new TestStack(app, 'ResourcePolicyTest-v2');
 
 new IntegTest(app, 'table-v2-resource-policy-integ-test', {
   testCases: [stack],

@@ -1,10 +1,12 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { Construct } from 'constructs';
 import { Match, Template } from '../../assertions';
 import * as iam from '../../aws-iam';
 import * as cxschema from '../../cloud-assembly-schema';
 import * as cdk from '../../core';
+import { flattenMeta } from '../../core/test/util';
 import * as cxapi from '../../cx-api';
 import { Asset } from '../lib/asset';
 
@@ -61,17 +63,19 @@ test('verify that the app resolves tokens in metadata', () => {
   });
 
   const synth = app.synth().getStackByName(stack.stackName);
-  const meta = synth.manifest.metadata || {};
-  expect(meta['/my-stack']).toBeTruthy();
-  expect(meta['/my-stack'][0]).toBeTruthy();
-  expect(meta['/my-stack'][0].data).toEqual({
-    path: 'asset.6b84b87243a4a01c592d78e1fd3855c4bfef39328cd0a450cc97e81717fea2a2',
-    id: '6b84b87243a4a01c592d78e1fd3855c4bfef39328cd0a450cc97e81717fea2a2',
-    packaging: 'zip',
-    sourceHash: '6b84b87243a4a01c592d78e1fd3855c4bfef39328cd0a450cc97e81717fea2a2',
-    s3BucketParameter: 'AssetParameters6b84b87243a4a01c592d78e1fd3855c4bfef39328cd0a450cc97e81717fea2a2S3Bucket50B5A10B',
-    s3KeyParameter: 'AssetParameters6b84b87243a4a01c592d78e1fd3855c4bfef39328cd0a450cc97e81717fea2a2S3VersionKey1F7D75F9',
-    artifactHashParameter: 'AssetParameters6b84b87243a4a01c592d78e1fd3855c4bfef39328cd0a450cc97e81717fea2a2ArtifactHash220DE9BD',
+  const meta = flattenMeta(synth.metadata || {});
+  expect(meta).toMatchObject({
+    '/my-stack': {
+      'aws:cdk:asset': [{
+        path: 'asset.6b84b87243a4a01c592d78e1fd3855c4bfef39328cd0a450cc97e81717fea2a2',
+        id: '6b84b87243a4a01c592d78e1fd3855c4bfef39328cd0a450cc97e81717fea2a2',
+        packaging: 'zip',
+        sourceHash: '6b84b87243a4a01c592d78e1fd3855c4bfef39328cd0a450cc97e81717fea2a2',
+        s3BucketParameter: 'AssetParameters6b84b87243a4a01c592d78e1fd3855c4bfef39328cd0a450cc97e81717fea2a2S3Bucket50B5A10B',
+        s3KeyParameter: 'AssetParameters6b84b87243a4a01c592d78e1fd3855c4bfef39328cd0a450cc97e81717fea2a2S3VersionKey1F7D75F9',
+        artifactHashParameter: 'AssetParameters6b84b87243a4a01c592d78e1fd3855c4bfef39328cd0a450cc97e81717fea2a2ArtifactHash220DE9BD',
+      }],
+    },
   });
 });
 
@@ -254,6 +258,29 @@ test('asset metadata is only emitted if ASSET_RESOURCE_METADATA_ENABLED_CONTEXT 
   }));
 });
 
+test('assets have a display name based on their construct path', () => {
+  // GIVEN
+  const app = new cdk.App();
+  const stack1 = new cdk.Stack(new cdk.Stage(app, 'Stage1'), 'Stack');
+  const ctr1 = new Construct(stack1, 'Ctr');
+
+  // WHEN
+  new Asset(ctr1, 'MyAsset', { path: SAMPLE_ASSET_DIR });
+
+  // THEN
+  const assembly = app.synth();
+
+  // Read the assets from the asset manifest
+  for (const stageName of ['Stage1']) {
+    const manifestArtifact = assembly.getNestedAssembly(`assembly-${stageName}`).artifacts.filter(cxapi.AssetManifestArtifact.isAssetManifestArtifact)[0];
+    const manifest = JSON.parse(fs.readFileSync(manifestArtifact.file, { encoding: 'utf-8' }));
+
+    expect(manifest.files[SAMPLE_ASSET_HASH]).toEqual(expect.objectContaining({
+      displayName: 'Ctr/MyAsset',
+    }));
+  }
+});
+
 test('nested assemblies share assets: legacy synth edition', () => {
   // GIVEN
   const app = new cdk.App();
@@ -422,9 +449,16 @@ describe('staging', () => {
     // WHEN
     const session = app.synth();
     const artifact = session.getStackByName(stack.stackName);
-    const metadata = artifact.manifest.metadata || {};
-    const md = Object.values(metadata)[0]![0]!.data as cxschema.AssetMetadataEntry;
-    expect(md.path).toBe('asset.6b84b87243a4a01c592d78e1fd3855c4bfef39328cd0a450cc97e81717fea2a2');
+    const metadata = flattenMeta(artifact.metadata || {});
+    expect(metadata).toMatchObject({
+      '/stack': {
+        'aws:cdk:asset': [
+          {
+            path: 'asset.6b84b87243a4a01c592d78e1fd3855c4bfef39328cd0a450cc97e81717fea2a2',
+          },
+        ],
+      },
+    });
   });
 });
 

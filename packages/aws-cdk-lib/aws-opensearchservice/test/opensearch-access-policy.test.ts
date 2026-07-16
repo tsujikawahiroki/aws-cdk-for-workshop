@@ -44,7 +44,6 @@ test('minimal example renders correctly', () => {
       },
       outputPaths: ['DomainConfig.AccessPolicies'],
       physicalResourceId: { id: 'TestDomainAccessPolicy' },
-      logApiResponseData: true,
     }),
     Update: JSON.stringify({
       action: 'updateDomainConfig',
@@ -55,7 +54,6 @@ test('minimal example renders correctly', () => {
       },
       outputPaths: ['DomainConfig.AccessPolicies'],
       physicalResourceId: { id: 'TestDomainAccessPolicy' },
-      logApiResponseData: true,
     }),
   });
   Template.fromStack(stack).hasResourceProperties('AWS::IAM::Policy', {
@@ -107,7 +105,6 @@ test('support access policy added inline and later', () => {
       },
       outputPaths: ['DomainConfig.AccessPolicies'],
       physicalResourceId: { id: 'TestDomainAccessPolicy' },
-      logApiResponseData: true,
     }),
     Update: JSON.stringify({
       action: 'updateDomainConfig',
@@ -118,7 +115,119 @@ test('support access policy added inline and later', () => {
       },
       outputPaths: ['DomainConfig.AccessPolicies'],
       physicalResourceId: { id: 'TestDomainAccessPolicy' },
-      logApiResponseData: true,
     }),
   });
 });
+
+test('handling of verbose output via flag explicitly set', () => {
+  const domainArn = 'test:arn';
+
+  new OpenSearchAccessPolicy(stack, 'OpenSearchAccessPolicy', {
+    domainName: 'TestDomain',
+    domainArn: 'test:arn',
+    accessPolicies: [
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ['es:ESHttp*'],
+        principals: [new iam.AnyPrincipal()],
+        resources: ['test:arn'],
+      }),
+    ],
+    verboseOutput: true,
+  });
+
+  Template.fromStack(stack).hasResourceProperties('Custom::OpenSearchAccessPolicy', {
+    ServiceToken: {
+      'Fn::GetAtt': [
+        'AWS679f53fac002430cb0da5b7982bd22872D164C4C',
+        'Arn',
+      ],
+    },
+    Create: JSON.stringify({
+      action: 'updateDomainConfig',
+      service: 'OpenSearch',
+      parameters: {
+        DomainName: 'TestDomain',
+        AccessPolicies: '{"Statement":[{"Action":"es:ESHttp*","Effect":"Allow","Principal":{"AWS":"*"},"Resource":"test:arn"}],"Version":"2012-10-17"}',
+      },
+      outputPaths: ['DomainConfig.AccessPolicies'],
+      physicalResourceId: { id: 'TestDomainAccessPolicy' },
+    }),
+    Update: JSON.stringify({
+      action: 'updateDomainConfig',
+      service: 'OpenSearch',
+      parameters: {
+        DomainName: 'TestDomain',
+        AccessPolicies: '{"Statement":[{"Action":"es:ESHttp*","Effect":"Allow","Principal":{"AWS":"*"},"Resource":"test:arn"}],"Version":"2012-10-17"}',
+      },
+      outputPaths: ['DomainConfig.AccessPolicies'],
+      physicalResourceId: { id: 'TestDomainAccessPolicy' },
+    }),
+  });
+  Template.fromStack(stack).hasResourceProperties('AWS::IAM::Policy', {
+    PolicyDocument: {
+      Statement: [{
+        Action: 'es:UpdateDomainConfig',
+        Effect: 'Allow',
+        Resource: domainArn,
+      }],
+    },
+  });
+});
+
+test('handling of less verbose output', () => {
+  const domainArn = 'test:arn';
+
+  new OpenSearchAccessPolicy(stack, 'OpenSearchAccessPolicy', {
+    domainName: 'TestDomain',
+    domainArn: 'test:arn',
+    accessPolicies: [
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ['es:ESHttp*'],
+        principals: [new iam.AnyPrincipal()],
+        resources: ['test:arn'],
+      }),
+    ],
+    verboseOutput: false,
+  });
+
+  Template.fromStack(stack).hasResourceProperties('Custom::OpenSearchAccessPolicy', {
+    ServiceToken: {
+      'Fn::GetAtt': [
+        'AWS679f53fac002430cb0da5b7982bd22872D164C4C',
+        'Arn',
+      ],
+    },
+    Create: JSON.stringify({
+      action: 'updateDomainConfig',
+      service: 'OpenSearch',
+      parameters: {
+        DomainName: 'TestDomain',
+        AccessPolicies: '{"Statement":[{"Action":"es:ESHttp*","Effect":"Allow","Principal":{"AWS":"*"},"Resource":"test:arn"}],"Version":"2012-10-17"}',
+      },
+      outputPaths: ['DomainConfig.AccessPolicies.Status.State', 'DomainConfig.AccessPolicies.Status.UpdateVersion'],
+      physicalResourceId: { id: 'TestDomainAccessPolicy' },
+    }),
+    Update: JSON.stringify({
+      action: 'updateDomainConfig',
+      service: 'OpenSearch',
+      parameters: {
+        DomainName: 'TestDomain',
+        AccessPolicies: '{"Statement":[{"Action":"es:ESHttp*","Effect":"Allow","Principal":{"AWS":"*"},"Resource":"test:arn"}],"Version":"2012-10-17"}',
+      },
+      outputPaths: ['DomainConfig.AccessPolicies.Status.State', 'DomainConfig.AccessPolicies.Status.UpdateVersion'],
+      physicalResourceId: { id: 'TestDomainAccessPolicy' },
+    }),
+  });
+  Template.fromStack(stack).hasResourceProperties('AWS::IAM::Policy', {
+    PolicyDocument: {
+      Statement: [{
+        Action: 'es:UpdateDomainConfig',
+        Effect: 'Allow',
+        Resource: domainArn,
+      }],
+    },
+  });
+});
+

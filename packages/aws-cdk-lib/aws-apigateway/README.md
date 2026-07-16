@@ -12,10 +12,12 @@ running on AWS Lambda, or any web application.
 - [Amazon API Gateway Construct Library](#amazon-api-gateway-construct-library)
   - [Table of Contents](#table-of-contents)
   - [Defining APIs](#defining-apis)
+    - [Breaking up Methods and Resources across Stacks](#breaking-up-methods-and-resources-across-stacks)
   - [AWS Lambda-backed APIs](#aws-lambda-backed-apis)
   - [AWS StepFunctions backed APIs](#aws-stepfunctions-backed-apis)
-    - [Breaking up Methods and Resources across Stacks](#breaking-up-methods-and-resources-across-stacks)
   - [Integration Targets](#integration-targets)
+    - [Response Streaming](#response-streaming)
+    - [Lambda Integration Permissions](#lambda-integration-permissions)
   - [Usage Plan \& API Keys](#usage-plan--api-keys)
     - [Adding an API Key to an imported RestApi](#adding-an-api-key-to-an-imported-restapi)
     - [⚠️ Multiple API Keys](#️-multiple-api-keys)
@@ -30,6 +32,10 @@ running on AWS Lambda, or any web application.
     - [Cognito User Pools authorizer](#cognito-user-pools-authorizer)
   - [Mutual TLS (mTLS)](#mutual-tls-mtls)
   - [Deployments](#deployments)
+    - [Deploying to an existing stage](#deploying-to-an-existing-stage)
+      - [Using RestApi](#using-restapi)
+      - [Using SpecRestApi](#using-specrestapi)
+    - [Controlled triggering of deployments](#controlled-triggering-of-deployments)
     - [Deep dive: Invalidation of deployments](#deep-dive-invalidation-of-deployments)
   - [Custom Domains](#custom-domains)
     - [Custom Domains with multi-level api mapping](#custom-domains-with-multi-level-api-mapping)
@@ -75,6 +81,23 @@ declare const user: iam.User;
 const method = api.root.addResource('books').addMethod('GET');
 method.grantExecute(user);
 ```
+
+### Breaking up Methods and Resources across Stacks
+
+It is fairly common for REST APIs with a large number of Resources and Methods to hit the [CloudFormation
+limit](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-limits.html) of 500 resources per
+stack.
+
+To help with this, Resources and Methods for the same REST API can be re-organized across multiple stacks. A common
+way to do this is to have a stack per Resource or groups of Resources, but this is not the only possible way.
+The following example uses sets up two Resources '/pets' and '/books' in separate stacks using nested stacks:
+
+[Resources grouped into nested stacks](test/integ.restapi-import.lit.ts)
+
+> **Warning:** In the code above, an API Gateway deployment is created during the initial CDK deployment.
+However, if there are changes to the resources in subsequent CDK deployments, a new API Gateway deployment is not
+automatically created. As a result, the latest state of the resources is not reflected. To ensure the latest state
+of the resources is reflected, a manual deployment of the API Gateway is required after the CDK deployment. See [Controlled triggering of deployments](#controlled-triggering-of-deployments) for more info.
 
 ## AWS Lambda-backed APIs
 
@@ -255,23 +278,6 @@ AWS Step Functions will receive the following execution input:
 }
 ```
 
-### Breaking up Methods and Resources across Stacks
-
-It is fairly common for REST APIs with a large number of Resources and Methods to hit the [CloudFormation
-limit](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-limits.html) of 500 resources per
-stack.
-
-To help with this, Resources and Methods for the same REST API can be re-organized across multiple stacks. A common
-way to do this is to have a stack per Resource or groups of Resources, but this is not the only possible way.
-The following example uses sets up two Resources '/pets' and '/books' in separate stacks using nested stacks:
-
-[Resources grouped into nested stacks](test/integ.restapi-import.lit.ts)
-
-> **Warning:** In the code above, an API Gateway deployment is created during the initial CDK deployment.
-However, if there are changes to the resources in subsequent CDK deployments, a new API Gateway deployment is not
-automatically created. As a result, the latest state of the resources is not reflected. To ensure the latest state
-of the resources is reflected, a manual deployment of the API Gateway is required after the CDK deployment. See [Controlled triggering of deployments](#controlled-triggering-of-deployments) for more info.
-
 ## Integration Targets
 
 Methods are associated with backend integrations, which are invoked when this
@@ -329,6 +335,45 @@ const getMessageIntegration = new apigateway.AwsIntegration({
   region: 'eu-west-1'
 });
 ```
+
+### Response Streaming
+
+Integrations support response streaming, which allows responses to be streamed back to clients.
+This is useful for large payloads or when you want to start sending data before the entire response is ready.
+
+To enable response streaming, set `ResponseTransferMode.STREAM` to the `responseTransferMode` option:
+
+```ts
+declare const handler: lambda.Function;
+new apigateway.LambdaIntegration(handler, {
+  responseTransferMode: apigateway.ResponseTransferMode.STREAM,
+});
+```
+
+### Lambda Integration Permissions
+
+By default, creating a `LambdaIntegration` will add a permission for API Gateway to invoke your AWS Lambda function, scoped to the specific method which uses the integration.
+
+If you reuse the same AWS Lambda function for many integrations, the AWS Lambda permission policy size can be exceeded by adding a separate policy statement for each method which invokes the AWS Lambda function. To avoid this, you can opt to scope permissions to any method on the API by setting `scopePermissionToMethod` to `false`, and this will ensure only a single policy statement is added to the AWS Lambda permission policy.
+
+```ts
+declare const book: apigateway.Resource;
+declare const backend: lambda.Function;
+
+const getBookIntegration = new apigateway.LambdaIntegration(backend, {
+  scopePermissionToMethod: false,
+});
+const createBookIntegration = new apigateway.LambdaIntegration(backend, {
+  scopePermissionToMethod: false,
+});
+
+book.addMethod('GET', getBookIntegration);
+book.addMethod('POST', createBookIntegration);
+```
+
+In the above example, a single permission is added, shared by both `getBookIntegration` and `createBookIntegration`.
+
+Note that setting `scopePermissionToMethod` to `false` will always allow test invocations, no matter the value specified for `allowTestInvoke`.
 
 ## Usage Plan & API Keys
 
@@ -465,7 +510,7 @@ declare const api: apigateway.RestApi;
 
 const key = new apigateway.RateLimitedApiKey(this, 'rate-limited-api-key', {
   customerId: 'hello-customer',
-  stages: [api.deploymentStage],
+  apiStages: [{ stage: api.deploymentStage }],
   quota: {
     limit: 10000,
     period: apigateway.Period.MONTH
@@ -1145,6 +1190,36 @@ new apigateway.DomainName(this, 'custom-domain', {
 });
 ```
 
+API Gateway supports both legacy security policies (TLS 1.0, TLS 1.2) and enhanced security policies.
+Enhanced security policies (those starting with `SecurityPolicy_`) support TLS 1.3 and provide additional options
+such as post-quantum cryptography. Use enhanced security policies for regulated workloads, advanced governance, or to use post-quantum cryptography.
+For more details, see the [AWS documentation](https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-security-policies.html).
+
+When using enhanced security policies, you must specify `endpointAccessMode`. `STRICT` is recommended for production workloads, but `BASIC` may be needed during migration or for certain application architectures:
+
+```ts
+declare const acmCertificateForExampleCom: any;
+
+// For regional or private APIs with enhanced security policy
+new apigateway.DomainName(this, 'custom-domain-tls13', {
+  domainName: 'example.com',
+  certificate: acmCertificateForExampleCom,
+  securityPolicy: apigateway.SecurityPolicy.TLS13_1_3_2025_09, // TLS 1.3
+  endpointAccessMode: apigateway.EndpointAccessMode.STRICT, // Recommended for production
+});
+
+// For edge-optimized APIs with enhanced security policy
+new apigateway.DomainName(this, 'custom-domain-edge-tls13', {
+  domainName: 'example.com',
+  certificate: acmCertificateForExampleCom,
+  endpointType: apigateway.EndpointType.EDGE,
+  securityPolicy: apigateway.SecurityPolicy.TLS13_2025_EDGE, // Enhanced security policy for edge
+  endpointAccessMode: apigateway.EndpointAccessMode.STRICT, // Recommended for production
+});
+```
+
+> **Note:** Mutual TLS (mTLS) cannot be enabled on a domain name that uses an enhanced security policy.
+
 Once you have a domain, you can map base paths of the domain to APIs.
 The following example will map the URL <https://example.com/go-to-api1>
 to the `api1` API and <https://example.com/boom> to the `api2` API.
@@ -1237,7 +1312,7 @@ Additional requirements for creating multi-level path mappings for RestApis:
 
 (both are defaults)
 
-- Must use `SecurityPolicy.TLS_1_2`
+- Must use `SecurityPolicy.TLS_1_2` or higher (TLS 1.0 is not supported for multi-level paths)
 - DomainNames must be `EndpointType.REGIONAL`
 
 ```ts
@@ -1400,7 +1475,7 @@ const api = new apigateway.RestApi(this, 'books', {
 
 **Note:** The delivery stream name must start with `amazon-apigateway-`.
 
-> Visit [Logging API calls to Kinesis Data Firehose](https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-logging-to-kinesis.html) for more details.
+> Visit [Logging API calls to Amazon Data Firehose](https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-logging-to-kinesis.html) for more details.
 
 ## Cross Origin Resource Sharing (CORS)
 
@@ -1472,6 +1547,20 @@ const api = new apigateway.RestApi(this, 'api', {
 });
 ```
 
+You can also configure [endpoint IP address type](https://docs.aws.amazon.com/apigateway/latest/developerguide/api-gateway-ip-address-type.html).
+The default value is `IpAddressType.DUAL_STACK` for private API, and `IpAddressType.IPV4` for regional and edge-optimized API.
+
+```ts
+const api = new apigateway.RestApi(this, 'api', {
+  endpointConfiguration: {
+    types: [ apigateway.EndpointType.REGIONAL ],
+    ipAddressType: apigateway.IpAddressType.DUAL_STACK,
+  }
+});
+```
+
+**Note**: If creating a private API, the `IPV4` IP address type is not supported.
+
 You can also create an association between your Rest API and a VPC endpoint. By doing so,
 API Gateway will generate a new
 Route53 Alias DNS record which you can use to invoke your private APIs. More info can be found
@@ -1494,6 +1583,20 @@ By performing this association, we can invoke the API gateway using the followin
 
 ```plaintext
 https://{rest-api-id}-{vpce-id}.execute-api.{region}.amazonaws.com/{stage}
+```
+
+To restrict access to the API Gateway to only the VPC endpoint, you can use the `grantInvokeFromVpcEndpointsOnly` method to [add resource policies](https://docs.aws.amazon.com/apigateway/latest/developerguide/private-api-tutorial.html#private-api-tutorial-attach-resource-policy) to the API Gateway:
+
+```ts
+declare const apiGwVpcEndpoint: ec2.IVpcEndpoint;
+
+const api = new apigateway.RestApi(this, 'PrivateApi', {
+  endpointConfiguration: {
+    types: [ apigateway.EndpointType.PRIVATE ],
+    vpcEndpoints: [ apiGwVpcEndpoint ]
+  }
+});
+api.grantInvokeFromVpcEndpointsOnly([apiGwVpcEndpoint]);
 ```
 
 ## Private Integrations
@@ -1601,6 +1704,34 @@ for more details.
 properties that can be configured directly in the OpenAPI specification file. This is to prevent people duplication
 of these properties and potential confusion.
 
+However, you can control how API Gateway handles resource updates using the `mode` property. Valid values are:
+
+* `overwrite` - The new API definition replaces the existing one. The existing API identifier remains unchanged.
+* `merge` - The new API definition is merged with the existing API.
+
+If you don't specify this property, a default value is chosen:
+* For REST APIs created before March 29, 2021, the default is `overwrite`
+* For REST APIs created after March 29, 2021, the new API definition takes precedence, but any container types such as endpoint configurations and binary media types are merged with the existing API.
+
+Use the default mode to define top-level RestApi properties in addition to using OpenAPI.
+Generally, it's preferred to use API Gateway's OpenAPI extensions to model these properties.
+
+```ts
+const api = new apigateway.SpecRestApi(this, 'books-api', {
+  apiDefinition: apigateway.ApiDefinition.fromAsset('path-to-file.json'),
+  mode: apigateway.RestApiMode.MERGE
+});
+```
+
+`SpecRestApi` also supports binary media types, similar to `RestApi`:
+
+```ts
+const api = new apigateway.SpecRestApi(this, 'books-api', {
+  apiDefinition: apigateway.ApiDefinition.fromAsset('path-to-file.json'),
+  binaryMediaTypes: ['image/png', 'application/pdf']
+});
+```
+
 ### Endpoint configuration
 
 By default, `SpecRestApi` will create an edge optimized endpoint.
@@ -1641,10 +1772,13 @@ const latencyMethodMetric = method.metricLatency(stage);
 
 ## APIGateway v2
 
-APIGateway v2 APIs are now moved to its own package named `aws-apigatewayv2`. For backwards compatibility, existing
-APIGateway v2 "CFN resources" (such as `CfnApi`) that were previously exported as part of this package, are still
-exported from here and have been marked deprecated. However, updates to these CloudFormation resources, such as new
-properties and new resource types will not be available.
+APIGateway v2 APIs are now moved to its own package named `aws-apigatewayv2`. Previously, these APIs were marked
+deprecated but retained for backwards compatibility. The deprecated usage of APIGateway v2 APIs within this module
+`aws-apigateway` has now been removed from the codebase.
+
+The reason for the removal of these deprecated Constructs is that CloudFormation team is releasing AWS resources
+like `AWS::APIGateway::DomainNameV2` and this would cause compatibility issue with the deprecated `CfnDomainNameV2`
+resource defined in `apigatewayv2.ts` file during the L1 generation.
 
 Move to using `aws-apigatewayv2` to get the latest APIs and updates.
 

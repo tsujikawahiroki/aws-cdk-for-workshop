@@ -1,18 +1,16 @@
-import { Construct } from 'constructs';
+import type { Construct } from 'constructs';
 import * as codebuild from '../../../aws-codebuild';
 import * as iam from '../../../aws-iam';
 import * as sfn from '../../../aws-stepfunctions';
 import * as cdk from '../../../core';
+import { lit } from '../../../core/lib/private/literal-string';
 import { integrationResourceArn, validatePatternSupported } from '../private/task-utils';
 
-/**
- * Properties for CodeBuildStartBuildBatch
- */
-export interface CodeBuildStartBuildBatchProps extends sfn.TaskStateBaseProps {
+interface CodeBuildStartBuildBatchOptions {
   /**
    * CodeBuild project to start
    */
-  readonly project: codebuild.IProject;
+  readonly project: codebuild.IProjectRef;
 
   /**
    * A set of environment variables to be used for this build only.
@@ -23,11 +21,44 @@ export interface CodeBuildStartBuildBatchProps extends sfn.TaskStateBaseProps {
 }
 
 /**
+ * Properties for CodeBuildStartBuildBatch using JSONPath
+ */
+export interface CodeBuildStartBuildBatchJsonPathProps extends sfn.TaskStateJsonPathBaseProps, CodeBuildStartBuildBatchOptions {}
+
+/**
+ * Properties for CodeBuildStartBuildBatch using JSONata
+ */
+export interface CodeBuildStartBuildBatchJsonataProps extends sfn.TaskStateJsonataBaseProps, CodeBuildStartBuildBatchOptions {}
+
+/**
+ * Properties for CodeBuildStartBuildBatch
+ */
+export interface CodeBuildStartBuildBatchProps extends sfn.TaskStateBaseProps, CodeBuildStartBuildBatchOptions {}
+
+/**
  * Start a CodeBuild BatchBuild as a task
  *
  * @see https://docs.aws.amazon.com/codebuild/latest/APIReference/API_StartBuildBatch.html
  */
 export class CodeBuildStartBuildBatch extends sfn.TaskStateBase {
+  /**
+   * Start a CodeBuild BatchBuild as a task using JSONPath
+   *
+   * @see https://docs.aws.amazon.com/codebuild/latest/APIReference/API_StartBuildBatch.html
+   */
+  public static jsonPath(scope: Construct, id: string, props: CodeBuildStartBuildBatchJsonPathProps): CodeBuildStartBuildBatch {
+    return new CodeBuildStartBuildBatch(scope, id, props);
+  }
+
+  /**
+   * Start a CodeBuild BatchBuild as a task using JSONata
+   *
+   * @see https://docs.aws.amazon.com/codebuild/latest/APIReference/API_StartBuildBatch.html
+   */
+  public static jsonata(scope: Construct, id: string, props: CodeBuildStartBuildBatchJsonataProps): CodeBuildStartBuildBatch {
+    return new CodeBuildStartBuildBatch(scope, id, { ...props, queryLanguage: sfn.QueryLanguage.JSONATA });
+  }
+
   private static readonly SUPPORTED_INTEGRATION_PATTERNS: sfn.IntegrationPattern[] = [
     sfn.IntegrationPattern.REQUEST_RESPONSE,
     sfn.IntegrationPattern.RUN_JOB,
@@ -48,7 +79,7 @@ export class CodeBuildStartBuildBatch extends sfn.TaskStateBase {
       metricPrefixSingular: 'CodeBuildProject',
       metricPrefixPlural: 'CodeBuildProjects',
       metricDimensions: {
-        ProjectArn: this.props.project.projectArn,
+        ProjectArn: this.props.project.projectRef.projectArn,
       },
     };
 
@@ -67,7 +98,7 @@ export class CodeBuildStartBuildBatch extends sfn.TaskStateBase {
       case sfn.IntegrationPattern.RUN_JOB:
         policyStatements = [
           new iam.PolicyStatement({
-            resources: [this.props.project.projectArn],
+            resources: [this.props.project.projectRef.projectArn],
             actions: [
               'codebuild:StartBuildBatch',
               'codebuild:StopBuildBatch',
@@ -88,13 +119,13 @@ export class CodeBuildStartBuildBatch extends sfn.TaskStateBase {
       case sfn.IntegrationPattern.REQUEST_RESPONSE:
         policyStatements = [
           new iam.PolicyStatement({
-            resources: [this.props.project.projectArn],
+            resources: [this.props.project.projectRef.projectArn],
             actions: ['codebuild:StartBuildBatch'],
           }),
         ];
         break;
       default:
-        throw new Error(`Unsupported integration pattern: ${this.integrationPattern}`);
+        throw new cdk.ValidationError(lit`UnsupportedIntegrationPattern`, `Unsupported integration pattern: ${this.integrationPattern}`, this);
     }
 
     return policyStatements;
@@ -105,15 +136,16 @@ export class CodeBuildStartBuildBatch extends sfn.TaskStateBase {
    *
    * @internal
    */
-  protected _renderTask(): any {
+  protected _renderTask(topLevelQueryLanguage?: sfn.QueryLanguage): any {
+    const queryLanguage = sfn._getActualQueryLanguage(topLevelQueryLanguage, this.props.queryLanguage);
     return {
       Resource: integrationResourceArn('codebuild', 'startBuildBatch', this.integrationPattern),
-      Parameters: sfn.FieldUtils.renderObject({
-        ProjectName: this.props.project.projectName,
+      ...this._renderParametersOrArguments({
+        ProjectName: this.props.project.projectRef.projectName,
         EnvironmentVariablesOverride: this.props.environmentVariablesOverride
           ? this.serializeEnvVariables(this.props.environmentVariablesOverride)
           : undefined,
-      }),
+      }, queryLanguage),
     };
   }
 

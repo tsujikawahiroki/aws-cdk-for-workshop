@@ -1,10 +1,15 @@
-import { Construct } from 'constructs';
+import type { Construct } from 'constructs';
 import { CertificateBase } from './certificate-base';
 import { CfnCertificate } from './certificatemanager.generated';
 import { apexDomain } from './util';
-import * as cloudwatch from '../../aws-cloudwatch';
-import * as route53 from '../../aws-route53';
-import { IResource, Token, Tags } from '../../core';
+import type * as cloudwatch from '../../aws-cloudwatch';
+import type * as route53 from '../../aws-route53';
+import type { IResource } from '../../core';
+import { Token, Tags, ValidationError, Validations } from '../../core';
+import { addConstructMetadata } from '../../core/lib/metadata-resource';
+import { lit } from '../../core/lib/private/literal-string';
+import { propertyInjectable } from '../../core/lib/prop-injectable';
+import type { ICertificateRef } from '../../interfaces/generated/aws-certificatemanager-interfaces.generated';
 
 /**
  * Name tag constant
@@ -14,7 +19,7 @@ const NAME_TAG: string = 'Name';
 /**
  * Represents a certificate in AWS Certificate Manager
  */
-export interface ICertificate extends IResource {
+export interface ICertificate extends IResource, ICertificateRef {
   /**
    * The certificate's ARN
    *
@@ -79,6 +84,16 @@ export interface CertificateProps {
   readonly validation?: CertificateValidation;
 
   /**
+   * Enable or disable export of this certificate.
+   *
+   * If you issue an exportable public certificate, there is a charge at certificate issuance and again when the certificate renews.
+   * Ref: https://aws.amazon.com/certificate-manager/pricing
+   *
+   * @default false
+   */
+  readonly allowExport?: boolean;
+
+  /**
    * Enable or disable transparency logging for this certificate
    *
    * Once a certificate has been logged, it cannot be removed from the log.
@@ -136,12 +151,32 @@ export class KeyAlgorithm {
    */
   public static readonly EC_SECP384R1 = new KeyAlgorithm('EC_secp384r1');
 
+  /**
+   * EC_secp521r1 algorithm
+   */
+  public static readonly EC_SECP521R1 = new KeyAlgorithm('EC_secp521r1');
+
+  /**
+   * RSA_4096 algorithm
+   */
+  public static readonly RSA_4096 = new KeyAlgorithm('RSA_4096');
+
+  /**
+   * RSA_3072 algorithm
+   */
+  public static readonly RSA_3072 = new KeyAlgorithm('RSA_3072');
+
+  /**
+   * RSA_1024 algorithm
+   */
+  public static readonly RSA_1024 = new KeyAlgorithm('RSA_1024');
+
   constructor(
     /**
      * The name of the algorithm
      */
     public readonly name: string,
-  ) { };
+  ) { }
 }
 
 /**
@@ -251,7 +286,13 @@ export class CertificateValidation {
 /**
  * A certificate managed by AWS Certificate Manager
  */
+@propertyInjectable
 export class Certificate extends CertificateBase implements ICertificate {
+  /**
+   * Uniquely identifies this class.
+   */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-certificatemanager.Certificate';
+
   /**
    * Import a certificate
    */
@@ -270,6 +311,8 @@ export class Certificate extends CertificateBase implements ICertificate {
 
   constructor(scope: Construct, id: string, props: CertificateProps) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     let validation: CertificateValidation;
     if (props.validation) {
@@ -284,10 +327,23 @@ export class Certificate extends CertificateBase implements ICertificate {
 
     // check if domain name is 64 characters or less
     if (!Token.isUnresolved(props.domainName) && props.domainName.length > 64) {
-      throw new Error('Domain name must be 64 characters or less');
+      throw new ValidationError(lit`DomainNameCharactersLess`, 'Domain name must be 64 characters or less', this);
     }
 
     const allDomainNames = [props.domainName].concat(props.subjectAlternativeNames || []);
+
+    // Due to the way `allDomainNames` is constructed, it can contain duplicates. Those don't hamper
+    // deployability, but will trigger validation warnings for nonsensicality. So silence them.
+    //
+    // We can't really fix this easily because it will lead to resource replacement.
+    if (allDomainNames.length !== new Set(allDomainNames).size) {
+      Validations.of(this).acknowledge({
+        id: 'CloudFormation-Validate::F3037',
+        reason: 'Duplicate domain names in subjectAlternativeNames exist for historical reasons',
+      });
+    }
+
+    const certificateExport = (props.allowExport === true) ? 'ENABLED' : undefined;
 
     let certificateTransparencyLoggingPreference: string | undefined;
     if (props.transparencyLoggingEnabled !== undefined) {
@@ -297,8 +353,9 @@ export class Certificate extends CertificateBase implements ICertificate {
     const cert = new CfnCertificate(this, 'Resource', {
       domainName: props.domainName,
       subjectAlternativeNames: props.subjectAlternativeNames,
-      domainValidationOptions: renderDomainValidation(validation, allDomainNames),
+      domainValidationOptions: renderDomainValidation(this, validation, allDomainNames),
       validationMethod: validation.method,
+      certificateExport,
       certificateTransparencyLoggingPreference,
       keyAlgorithm: props.keyAlgorithm?.name,
     });
@@ -329,7 +386,7 @@ export enum ValidationMethod {
 }
 
 // eslint-disable-next-line max-len
-function renderDomainValidation(validation: CertificateValidation, domainNames: string[]): CfnCertificate.DomainValidationOptionProperty[] | undefined {
+function renderDomainValidation(scope: Construct, validation: CertificateValidation, domainNames: string[]): CfnCertificate.DomainValidationOptionProperty[] | undefined {
   const domainValidation: CfnCertificate.DomainValidationOptionProperty[] = [];
 
   switch (validation.method) {
@@ -345,13 +402,13 @@ function renderDomainValidation(validation: CertificateValidation, domainNames: 
       for (const domainName of domainNames) {
         const validationDomain = validation.props.validationDomains?.[domainName];
         if (!validationDomain && Token.isUnresolved(domainName)) {
-          throw new Error('When using Tokens for domain names, \'validationDomains\' needs to be supplied');
+          throw new ValidationError(lit`UsingTokensDomainNames`, 'When using Tokens for domain names, \'validationDomains\' needs to be supplied', scope);
         }
         domainValidation.push({ domainName, validationDomain: validationDomain ?? apexDomain(domainName) });
       }
       break;
     default:
-      throw new Error(`Unknown validation method ${validation.method}`);
+      throw new ValidationError(lit`UnknownValidationMethod`, `Unknown validation method ${validation.method}`, scope);
   }
 
   return domainValidation.length !== 0 ? domainValidation : undefined;

@@ -1,5 +1,4 @@
-/* eslint-disable no-console */
-// eslint-disable-next-line import/no-extraneous-dependencies
+
 import { S3 } from '@aws-sdk/client-s3';
 import { makeHandler } from '../../nodejs-entrypoint';
 
@@ -20,7 +19,7 @@ export async function autoDeleteHandler(event: AWSLambda.CloudFormationCustomRes
     case 'Delete':
       return onDelete(event.ResourceProperties?.BucketName);
   }
-};
+}
 
 async function onUpdate(event: AWSLambda.CloudFormationCustomResourceEvent) {
   const updateEvent = event as AWSLambda.CloudFormationCustomResourceUpdateEvent;
@@ -30,8 +29,8 @@ async function onUpdate(event: AWSLambda.CloudFormationCustomResourceEvent) {
   /* If the name of the bucket has changed, CloudFormation will try to delete the bucket
     and create a new one with the new name. Returning a PhysicalResourceId that differs
     from the event's PhysicalResourceId will trigger a `Delete` event for the custom
-    resource, note that this is default CFN behaviour. The `Delete` event will trigger 
-    `onDelete` function which will empty the content of the bucket and then proceed to 
+    resource, note that this is default CFN behaviour. The `Delete` event will trigger
+    `onDelete` function which will empty the content of the bucket and then proceed to
     delete the bucket. */
   return { PhysicalResourceId: newBucketName };
 }
@@ -51,6 +50,8 @@ async function denyWrites(bucketName: string) {
         Principal: '*',
         Effect: 'Deny',
         Action: ['s3:PutObject'],
+        // TODO: this is probably an error of some sort
+        // eslint-disable-next-line @cdklabs/no-literal-partition
         Resource: [`arn:aws:s3:::${bucketName}/*`],
       },
     );
@@ -70,23 +71,22 @@ async function denyWrites(bucketName: string) {
 }
 
 /**
- * Recursively delete all items in the bucket
+ * Iteratively delete all items in the bucket
  *
  * @param bucketName the bucket name
  */
 async function emptyBucket(bucketName: string) {
-  const listedObjects = await s3.listObjectVersions({ Bucket: bucketName });
-  const contents = [...listedObjects.Versions ?? [], ...listedObjects.DeleteMarkers ?? []];
-  if (contents.length === 0) {
-    return;
-  }
+  let listedObjects;
+  do {
+    listedObjects = await s3.listObjectVersions({ Bucket: bucketName });
+    const contents = [...listedObjects.Versions ?? [], ...listedObjects.DeleteMarkers ?? []];
+    if (contents.length === 0) {
+      return;
+    }
 
-  const records = contents.map((record: any) => ({ Key: record.Key, VersionId: record.VersionId }));
-  await s3.deleteObjects({ Bucket: bucketName, Delete: { Objects: records } });
-
-  if (listedObjects?.IsTruncated) {
-    await emptyBucket(bucketName);
-  }
+    const records = contents.map((record) => ({ Key: record.Key, VersionId: record.VersionId }));
+    await s3.deleteObjects({ Bucket: bucketName, Delete: { Objects: records } });
+  } while (listedObjects?.IsTruncated);
 }
 
 async function onDelete(bucketName?: string) {

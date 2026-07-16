@@ -6,6 +6,7 @@ import * as secretsmanager from '../../aws-secretsmanager';
 import * as cdk from '../../core';
 import * as cxapi from '../../cx-api';
 import * as rds from '../lib';
+import { acknowledgeTestValidationRules } from './util';
 
 let stack: cdk.Stack;
 let vpc: ec2.IVpc;
@@ -15,6 +16,7 @@ let importedDbProxy: rds.IDatabaseProxy;
 describe('proxy', () => {
   beforeEach(() => {
     stack = new cdk.Stack();
+    acknowledgeTestValidationRules(stack);
     vpc = new ec2.Vpc(stack, 'VPC');
   });
 
@@ -216,7 +218,7 @@ describe('proxy', () => {
     });
   });
 
-  test('One or more secrets are required.', () => {
+  test('throws when defaultAuthScheme is NONE and no secrets are provided', () => {
     // GIVEN
     const cluster = new rds.DatabaseCluster(stack, 'Database', {
       engine: rds.DatabaseClusterEngine.auroraPostgres({ version: rds.AuroraPostgresEngineVersion.VER_10_7 }),
@@ -229,8 +231,27 @@ describe('proxy', () => {
         proxyTarget: rds.ProxyTarget.fromCluster(cluster),
         secrets: [], // No secret
         vpc,
+        defaultAuthScheme: rds.DefaultAuthScheme.NONE,
       });
-    }).toThrow('One or more secrets are required.');
+    }).toThrow('One or more secrets are required when defaultAuthScheme is not specified or is NONE.');
+  });
+
+  test('throws when defaultAuthScheme is undefined and no secrets are provided', () => {
+    // GIVEN
+    const cluster = new rds.DatabaseCluster(stack, 'Database', {
+      engine: rds.DatabaseClusterEngine.auroraPostgres({ version: rds.AuroraPostgresEngineVersion.VER_10_7 }),
+      instanceProps: { vpc },
+    });
+
+    // WHEN
+    expect(() => {
+      new rds.DatabaseProxy(stack, 'Proxy', {
+        proxyTarget: rds.ProxyTarget.fromCluster(cluster),
+        secrets: [], // No secret
+        vpc,
+        // defaultAuthScheme is not specified (undefined)
+      });
+    }).toThrow('One or more secrets are required when defaultAuthScheme is not specified or is NONE.');
   });
 
   test('fails when trying to create a proxy for a target without an engine', () => {
@@ -353,7 +374,7 @@ describe('proxy', () => {
   test('new Proxy with a single Secret can use grantConnect() without a dbUser passed', () => {
     // GIVEN
     const cluster = new rds.DatabaseCluster(stack, 'Database', {
-      engine: rds.DatabaseClusterEngine.AURORA,
+      engine: rds.DatabaseClusterEngine.AURORA_MYSQL,
       instanceProps: { vpc },
     });
 
@@ -409,7 +430,7 @@ describe('proxy', () => {
   test('new Proxy with multiple Secrets cannot use grantConnect() without a dbUser passed', () => {
     // GIVEN
     const cluster = new rds.DatabaseCluster(stack, 'Database', {
-      engine: rds.DatabaseClusterEngine.AURORA,
+      engine: rds.DatabaseClusterEngine.AURORA_MYSQL,
       instanceProps: { vpc },
     });
 
@@ -433,10 +454,96 @@ describe('proxy', () => {
     }).toThrow(/When the Proxy contains multiple Secrets, you must pass a dbUser explicitly to grantConnect/);
   });
 
+  test('throws when grantConnect() is used without dbUser on Proxy with no secrets', () => {
+    // GIVEN
+    const instance = new rds.DatabaseInstance(stack, 'Instance', {
+      engine: rds.DatabaseInstanceEngine.postgres({
+        version: rds.PostgresEngineVersion.VER_16_3,
+      }),
+      vpc,
+      iamAuthentication: true,
+    });
+
+    const proxy = new rds.DatabaseProxy(stack, 'Proxy', {
+      proxyTarget: rds.ProxyTarget.fromInstance(instance),
+      vpc,
+      defaultAuthScheme: rds.DefaultAuthScheme.IAM_AUTH,
+    });
+
+    // WHEN
+    const role = new Role(stack, 'DBProxyRole', {
+      assumedBy: new AccountPrincipal(stack.account),
+    });
+
+    // THEN
+    expect(() => {
+      proxy.grantConnect(role);
+    }).toThrow(/When using IAM authentication without secrets, you must specify a dbUser parameter in grantConnect/);
+  });
+
+  test('new Proxy with no secrets can use grantConnect() with a dbUser specified', () => {
+    // GIVEN
+    const instance = new rds.DatabaseInstance(stack, 'Instance', {
+      engine: rds.DatabaseInstanceEngine.postgres({
+        version: rds.PostgresEngineVersion.VER_16_3,
+      }),
+      vpc,
+      iamAuthentication: true,
+    });
+
+    const proxy = new rds.DatabaseProxy(stack, 'Proxy', {
+      proxyTarget: rds.ProxyTarget.fromInstance(instance),
+      vpc,
+      defaultAuthScheme: rds.DefaultAuthScheme.IAM_AUTH,
+      // No secrets provided
+    });
+
+    // WHEN
+    const role = new Role(stack, 'DBProxyRole', {
+      assumedBy: new AccountPrincipal(stack.account),
+    });
+    const databaseUser = 'testuser';
+    proxy.grantConnect(role, databaseUser);
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: {
+        Statement: [{
+          Effect: 'Allow',
+          Action: 'rds-db:connect',
+          Resource: {
+            'Fn::Join': ['', [
+              'arn:',
+              { Ref: 'AWS::Partition' },
+              ':rds-db:',
+              { Ref: 'AWS::Region' },
+              ':',
+              { Ref: 'AWS::AccountId' },
+              ':dbuser:',
+              {
+                'Fn::Select': [
+                  6,
+                  {
+                    'Fn::Split': [
+                      ':',
+                      { 'Fn::GetAtt': ['ProxyCB0DFB71', 'DBProxyArn'] },
+                    ],
+                  },
+                ],
+              },
+              '/testuser',
+            ]],
+          },
+        }],
+        Version: '2012-10-17',
+      },
+    });
+  });
+
   test('new Proxy with kms encrypted Secrets has permissions to kms:Decrypt that secret using its key', () => {
     // GIVEN
     const cluster = new rds.DatabaseCluster(stack, 'Database', {
-      engine: rds.DatabaseClusterEngine.AURORA,
+      engine: rds.DatabaseClusterEngine.AURORA_MYSQL,
       instanceProps: { vpc },
     });
 
@@ -481,13 +588,13 @@ describe('proxy', () => {
   test('DBProxyTargetGroup should have dependency on the proxy targets', () => {
     // GIVEN
     const cluster = new rds.DatabaseCluster(stack, 'cluster', {
-      engine: rds.DatabaseClusterEngine.AURORA,
+      engine: rds.DatabaseClusterEngine.AURORA_MYSQL,
       instanceProps: {
         vpc,
       },
     });
 
-    //WHEN
+    // WHEN
     new rds.DatabaseProxy(stack, 'proxy', {
       proxyTarget: rds.ProxyTarget.fromCluster(cluster),
       secrets: [cluster.secret!],
@@ -513,13 +620,13 @@ describe('proxy', () => {
   test('Correct dependencies are created when multiple DatabaseProxy are created with addProxy', () => {
     // GIVEN
     const cluster = new rds.DatabaseCluster(stack, 'cluster', {
-      engine: rds.DatabaseClusterEngine.AURORA,
+      engine: rds.DatabaseClusterEngine.AURORA_MYSQL,
       instanceProps: {
         vpc,
       },
     });
 
-    //WHEN
+    // WHEN
     cluster.addProxy('Proxy', {
       vpc,
       secrets: [cluster.secret!],
@@ -554,6 +661,86 @@ describe('proxy', () => {
         'clusterInstance183584D40',
         'clusterInstance23D1AD8B2',
         'cluster611F8AFF',
+      ],
+    });
+  });
+
+  test('DBProxyTargetGroup should have dependency on the proxy targets when using cluster with writer and readers properties', () => {
+    // GIVEN
+    const cluster = new rds.DatabaseCluster(stack, 'cluster', {
+      engine: rds.DatabaseClusterEngine.AURORA_MYSQL,
+      vpc,
+      writer: rds.ClusterInstance.provisioned('writer'),
+      readers: [rds.ClusterInstance.provisioned('reader')],
+    });
+
+    // WHEN
+    new rds.DatabaseProxy(stack, 'proxy', {
+      proxyTarget: rds.ProxyTarget.fromCluster(cluster),
+      secrets: [cluster.secret!],
+      vpc,
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResource('AWS::RDS::DBProxyTargetGroup', {
+      Properties: {
+        DBProxyName: {
+          Ref: 'proxy3A1DA9C7',
+        },
+        TargetGroupName: 'default',
+      },
+      DependsOn: [
+        'clusterreaderE226030A',
+        'cluster611F8AFF',
+        'clusterwriter3FDF01F3',
+      ],
+    });
+  });
+
+  test('Correct dependencies are created when multiple DatabaseProxy are created with addProxy for cluster with writer and readers properties', () => {
+    // GIVEN
+    const cluster = new rds.DatabaseCluster(stack, 'cluster', {
+      engine: rds.DatabaseClusterEngine.AURORA_MYSQL,
+      vpc,
+      writer: rds.ClusterInstance.provisioned('writer'),
+      readers: [rds.ClusterInstance.provisioned('reader')],
+    });
+
+    // WHEN
+    cluster.addProxy('Proxy', {
+      vpc,
+      secrets: [cluster.secret!],
+    });
+    cluster.addProxy('Proxy2', {
+      vpc,
+      secrets: [cluster.secret!],
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResource('AWS::RDS::DBProxyTargetGroup', {
+      Properties: {
+        DBProxyName: {
+          Ref: 'clusterProxy22303E35D',
+        },
+        TargetGroupName: 'default',
+      },
+      DependsOn: [
+        'clusterreaderE226030A',
+        'cluster611F8AFF',
+        'clusterwriter3FDF01F3',
+      ],
+    });
+    Template.fromStack(stack).hasResource('AWS::RDS::DBProxyTargetGroup', {
+      Properties: {
+        DBProxyName: {
+          Ref: 'clusterProxyC4BEF551',
+        },
+        TargetGroupName: 'default',
+      },
+      DependsOn: [
+        'clusterreaderE226030A',
+        'cluster611F8AFF',
+        'clusterwriter3FDF01F3',
       ],
     });
   });
@@ -692,12 +879,133 @@ describe('proxy', () => {
       }).toThrow(/SQL_SERVER_AUTHENTICATION client password authentication type requires SQLSERVER engineFamily, got MYSQL/);
     });
   });
+
+  describe('defaultAuthScheme', () => {
+    test('create a DB proxy with IAM_AUTH default authentication scheme', () => {
+      // GIVEN
+      const instance = new rds.DatabaseInstance(stack, 'Instance', {
+        engine: rds.DatabaseInstanceEngine.postgres({
+          version: rds.PostgresEngineVersion.VER_16_3,
+        }),
+        vpc,
+        iamAuthentication: true,
+      });
+
+      // WHEN
+      new rds.DatabaseProxy(stack, 'Proxy', {
+        proxyTarget: rds.ProxyTarget.fromInstance(instance),
+        vpc,
+        defaultAuthScheme: rds.DefaultAuthScheme.IAM_AUTH,
+      });
+
+      // THEN
+      Template.fromStack(stack).hasResourceProperties('AWS::RDS::DBProxy', {
+        DBProxyName: 'Proxy',
+        EngineFamily: 'POSTGRESQL',
+        RequireTLS: true,
+        DefaultAuthScheme: 'IAM_AUTH',
+        RoleArn: {
+          'Fn::GetAtt': [
+            'ProxyIAMRole2FE8AB0F',
+            'Arn',
+          ],
+        },
+        VpcSubnetIds: [
+          {
+            Ref: 'VPCPrivateSubnet1Subnet8BCA10E0',
+          },
+          {
+            Ref: 'VPCPrivateSubnet2SubnetCFCDAA7A',
+          },
+        ],
+      });
+    });
+
+    test('create a DB proxy with NONE default authentication scheme and secrets', () => {
+      // GIVEN
+      const instance = new rds.DatabaseInstance(stack, 'Instance', {
+        engine: rds.DatabaseInstanceEngine.postgres({
+          version: rds.PostgresEngineVersion.VER_16_3,
+        }),
+        vpc,
+      });
+
+      // WHEN
+      new rds.DatabaseProxy(stack, 'Proxy', {
+        proxyTarget: rds.ProxyTarget.fromInstance(instance),
+        secrets: [instance.secret!],
+        vpc,
+        defaultAuthScheme: rds.DefaultAuthScheme.NONE,
+      });
+
+      // THEN
+      Template.fromStack(stack).hasResourceProperties('AWS::RDS::DBProxy', {
+        Auth: [
+          {
+            AuthScheme: 'SECRETS',
+            IAMAuth: 'DISABLED',
+            SecretArn: {
+              Ref: 'InstanceSecretAttachment83BEE581',
+            },
+          },
+        ],
+        DBProxyName: 'Proxy',
+        EngineFamily: 'POSTGRESQL',
+        RequireTLS: true,
+        DefaultAuthScheme: 'NONE',
+        RoleArn: {
+          'Fn::GetAtt': [
+            'ProxyIAMRole2FE8AB0F',
+            'Arn',
+          ],
+        },
+        VpcSubnetIds: [
+          {
+            Ref: 'VPCPrivateSubnet1Subnet8BCA10E0',
+          },
+          {
+            Ref: 'VPCPrivateSubnet2SubnetCFCDAA7A',
+          },
+        ],
+      });
+    });
+  });
+
+  test('add additional proxy endpoint', () => {
+    // GIVEN
+    const instance = new rds.DatabaseInstance(stack, 'Instance', {
+      engine: rds.DatabaseInstanceEngine.mysql({
+        version: rds.MysqlEngineVersion.VER_5_7,
+      }),
+      vpc,
+    });
+
+    const dbProxy = new rds.DatabaseProxy(stack, 'Proxy', {
+      proxyTarget: rds.ProxyTarget.fromInstance(instance),
+      secrets: [instance.secret!],
+      vpc,
+    });
+
+    // WHEN
+    dbProxy.addEndpoint('ProxyEndpoint', {
+      vpc,
+      targetRole: rds.ProxyEndpointTargetRole.READ_ONLY,
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::RDS::DBProxyEndpoint', {
+      DBProxyName: {
+        Ref: 'ProxyCB0DFB71',
+      },
+    });
+  });
 });
 
 describe('feature flag @aws-cdk/aws-rds:databaseProxyUniqueResourceName', () => {
   test('create a DB proxy from an instance with a unique resource name', () => {
     // GIVEN
     stack = new cdk.Stack();
+    acknowledgeTestValidationRules(stack);
     stack.node.setContext(cxapi.DATABASE_PROXY_UNIQUE_RESOURCE_NAME, true);
     vpc = new ec2.Vpc(stack, 'VPC');
     const instance = new rds.DatabaseInstance(stack, 'Instance', {
@@ -748,6 +1056,7 @@ describe('feature flag @aws-cdk/aws-rds:databaseProxyUniqueResourceName', () => 
   test('create a DB proxy from an instance with a proxy name in the constructor', () => {
     // GIVEN
     stack = new cdk.Stack();
+    acknowledgeTestValidationRules(stack);
     stack.node.setContext(cxapi.DATABASE_PROXY_UNIQUE_RESOURCE_NAME, true);
     vpc = new ec2.Vpc(stack, 'VPC');
     const instance = new rds.DatabaseInstance(stack, 'Instance', {

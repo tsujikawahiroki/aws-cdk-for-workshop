@@ -1,7 +1,9 @@
-import { Construct } from 'constructs';
-import * as events from '../../../aws-events';
-import { ResourceEnvironment, Stack, Token, TokenComparison } from '../../../core';
-import { ActionBindOptions, ActionConfig, ActionProperties, IAction, IPipeline, IStage } from '../action';
+import type { Construct } from 'constructs';
+import type * as events from '../../../aws-events';
+import type { ResourceEnvironment } from '../../../core';
+import { Stack, Token, TokenComparison } from '../../../core';
+import type { IPipelineRef } from '../../../interfaces/generated/aws-codepipeline-interfaces.generated';
+import type { ActionBindOptions, ActionConfig, ActionProperties, IAction, IStage } from '../action';
 
 /**
  * Helper routines to work with Actions
@@ -19,7 +21,7 @@ import { ActionBindOptions, ActionConfig, ActionProperties, IAction, IPipeline, 
 export class RichAction implements IAction {
   public readonly actionProperties: ActionProperties;
 
-  constructor(private readonly action: IAction, private readonly pipeline: IPipeline) {
+  constructor(private readonly action: IAction, private readonly pipeline: IPipelineRef) {
     this.actionProperties = action.actionProperties;
   }
 
@@ -110,7 +112,7 @@ function sameEnv(env1: ResourceEnvironment, env2: ResourceEnvironment) {
  * Whether two string probably contain the same environment dimension (region or account)
  *
  * Used to compare either accounts or regions, and also returns true if both
- * are unresolved (in which case both are expted to be "current region" or "current account").
+ * are unresolved (in which case both are expected to be "current region" or "current account").
  */
 function sameEnvDimension(dim1: string, dim2: string) {
   return [TokenComparison.SAME, TokenComparison.BOTH_UNRESOLVED].includes(Token.compareStrings(dim1, dim2));

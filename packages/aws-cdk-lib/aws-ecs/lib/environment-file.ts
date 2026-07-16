@@ -1,6 +1,9 @@
-import { Construct } from 'constructs';
-import { IBucket, Location } from '../../aws-s3';
-import { Asset, AssetOptions } from '../../aws-s3-assets';
+import type { Construct } from 'constructs';
+import type { IBucket, Location } from '../../aws-s3';
+import type { AssetOptions } from '../../aws-s3-assets';
+import { Asset } from '../../aws-s3-assets';
+import { ValidationError } from '../../core';
+import { lit } from '../../core/lib/private/literal-string';
 
 /**
  * Constructs for types of environment files
@@ -10,7 +13,6 @@ export abstract class EnvironmentFile {
    * Loads the environment file from a local disk path.
    *
    * @param path Local disk path
-   * @param options
    */
   public static fromAsset(path: string, options?: AssetOptions): AssetEnvironmentFile {
     return new AssetEnvironmentFile(path, options);
@@ -45,7 +47,6 @@ export class AssetEnvironmentFile extends EnvironmentFile {
 
   /**
    * @param path The path to the asset file or directory.
-   * @param options
    */
   constructor(public readonly path: string, private readonly options: AssetOptions = { }) {
     super();
@@ -61,7 +62,7 @@ export class AssetEnvironmentFile extends EnvironmentFile {
     }
 
     if (!this.asset.isFile) {
-      throw new Error(`Asset must be a single file (${this.path})`);
+      throw new ValidationError(lit`MustBeAssetSingleFile`, `Asset must be a single file (${this.path})`, scope);
     }
 
     return {
@@ -84,7 +85,7 @@ export class S3EnvironmentFile extends EnvironmentFile {
     super();
 
     if (!bucket.bucketName) {
-      throw new Error('bucketName is undefined for the provided bucket');
+      throw new ValidationError(lit`BucketNameUndefinedProvidedBucket`, 'bucketName is undefined for the provided bucket', bucket);
     }
 
     this.bucketName = bucket.bucketName;

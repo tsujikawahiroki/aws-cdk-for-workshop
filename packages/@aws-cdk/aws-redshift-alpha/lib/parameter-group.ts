@@ -1,6 +1,10 @@
-import { IResource, Resource } from 'aws-cdk-lib/core';
-import { Construct } from 'constructs';
 import { CfnClusterParameterGroup } from 'aws-cdk-lib/aws-redshift';
+import type { IResource } from 'aws-cdk-lib/core';
+import { Resource, ValidationError } from 'aws-cdk-lib/core';
+import { lit } from 'aws-cdk-lib/core/lib/helpers-internal';
+import { addConstructMetadata, MethodMetadata } from 'aws-cdk-lib/core/lib/metadata-resource';
+import { propertyInjectable } from 'aws-cdk-lib/core/lib/prop-injectable';
+import type { Construct } from 'constructs';
 
 /**
  * A parameter group
@@ -18,7 +22,6 @@ export interface IClusterParameterGroup extends IResource {
  * A new cluster or instance parameter group
  */
 abstract class ClusterParameterGroupBase extends Resource implements IClusterParameterGroup {
-
   /**
    * The name of the parameter group
    */
@@ -47,7 +50,11 @@ export interface ClusterParameterGroupProps {
  *
  * @resource AWS::Redshift::ClusterParameterGroup
  */
+@propertyInjectable
 export class ClusterParameterGroup extends ClusterParameterGroupBase {
+  /** Uniquely identifies this class. */
+  public static readonly PROPERTY_INJECTION_ID: string = '@aws-cdk.aws-redshift-alpha.ClusterParameterGroup';
+
   /**
    * Imports a parameter group
    */
@@ -65,16 +72,18 @@ export class ClusterParameterGroup extends ClusterParameterGroupBase {
 
   /**
    * The parameters in the parameter group
-  */
+   */
   readonly parameters: { [name: string]: string };
 
   /**
    * The underlying CfnClusterParameterGroup
-  */
+   */
   private readonly resource: CfnClusterParameterGroup;
 
   constructor(scope: Construct, id: string, props: ClusterParameterGroupProps) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
     this.parameters = props.parameters;
     this.resource = new CfnClusterParameterGroup(this, 'Resource', {
       description: props.description || 'Cluster parameter group for family redshift-1.0',
@@ -96,13 +105,14 @@ export class ClusterParameterGroup extends ClusterParameterGroupBase {
    * @param name the parameter name
    * @param value the parameter name
    */
+  @MethodMetadata()
   public addParameter(name: string, value: string): void {
     const existingValue = Object.entries(this.parameters).find(([key, _]) => key === name)?.[1];
     if (existingValue === undefined) {
       this.parameters[name] = value;
       this.resource.parameters = this.parseParameters();
     } else if (existingValue !== value) {
-      throw new Error(`The parameter group already contains the parameter "${name}", but with a different value (Given: ${value}, Existing: ${existingValue}).`);
+      throw new ValidationError(lit`ConflictingParameterValue`, `The parameter group already contains the parameter "${name}", but with a different value (Given: ${value}, Existing: ${existingValue}).`, this);
     }
   }
 }

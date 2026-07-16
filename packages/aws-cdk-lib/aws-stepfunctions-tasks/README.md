@@ -23,7 +23,8 @@ This module is part of the [AWS Cloud Development Kit](https://github.com/aws/aw
   - [API Gateway](#api-gateway)
     - [Call REST API Endpoint](#call-rest-api-endpoint)
     - [Call HTTP API Endpoint](#call-http-api-endpoint)
-    - [AWS SDK](#aws-sdk)
+  - [AWS SDK](#aws-sdk)
+    - [Cross-region AWS API call](#cross-region-aws-api-call)
   - [Athena](#athena)
     - [StartQueryExecution](#startqueryexecution)
     - [GetQueryExecution](#getqueryexecution)
@@ -33,8 +34,12 @@ This module is part of the [AWS Cloud Development Kit](https://github.com/aws/aw
     - [SubmitJob](#submitjob)
   - [Bedrock](#bedrock)
     - [InvokeModel](#invokemodel)
+    - [Using Input Path for S3 URI](#using-input-path-for-s3-uri)
+    - [Using Input Path](#using-input-path)
+    - [createModelCustomizationJob](#createmodelcustomizationjob)
   - [CodeBuild](#codebuild)
     - [StartBuild](#startbuild)
+    - [StartBuildBatch](#startbuildbatch)
   - [DynamoDB](#dynamodb)
     - [GetItem](#getitem)
     - [PutItem](#putitem)
@@ -44,6 +49,9 @@ This module is part of the [AWS Cloud Development Kit](https://github.com/aws/aw
     - [RunTask](#runtask)
       - [EC2](#ec2)
       - [Fargate](#fargate)
+      - [Capacity Provider Options](#capacity-provider-options)
+      - [Override CPU and Memory Parameter](#override-cpu-and-memory-parameter)
+      - [ECS enable Exec](#ecs-enable-exec)
   - [EMR](#emr)
     - [Create Cluster](#create-cluster)
     - [Termination Protection](#termination-protection)
@@ -60,15 +68,18 @@ This module is part of the [AWS Cloud Development Kit](https://github.com/aws/aw
     - [Call](#call)
   - [EventBridge](#eventbridge)
     - [Put Events](#put-events)
+  - [EventBridge Scheduler](#eventbridge-scheduler)
+    - [Create Scheduler](#create-scheduler)
   - [Glue](#glue)
-    - [Start Job Run](#start-job-run)
-    - [Start Crawler Run](#startcrawlerrun)
+    - [StartJobRun](#startjobrun)
+    - [StartCrawlerRun](#startcrawlerrun)
   - [Glue DataBrew](#glue-databrew)
     - [Start Job Run](#start-job-run-1)
+  - [Invoke HTTP API](#invoke-http-api)
   - [Lambda](#lambda)
     - [Invoke](#invoke)
   - [MediaConvert](#mediaconvert)
-    - [Create Job](#create-job)
+    - [CreateJob](#createjob)
   - [SageMaker](#sagemaker)
     - [Create Training Job](#create-training-job)
     - [Create Transform Job](#create-transform-job)
@@ -131,6 +142,17 @@ The `EvaluateExpression` supports a `runtime` prop to specify the Lambda
 runtime to use to evaluate the expression. Currently, only runtimes
 of the Node.js family are supported.
 
+The `EvaluateExpression` also supports an `architecture` prop to specify the Lambda
+architecture. This can be useful when migrating to ARM64 or when running integration
+tests on ARM64 systems.
+
+```ts
+const convertToSecondsArm64 = new tasks.EvaluateExpression(this, 'Convert to seconds', {
+  expression: '$.waitMilliseconds / 1000',
+  architecture: lambda.Architecture.ARM_64,
+});
+```
+
 ## API Gateway
 
 Step Functions supports [API Gateway](https://docs.aws.amazon.com/step-functions/latest/dg/connect-api-gateway.html) through the service integration pattern.
@@ -151,6 +173,21 @@ const invokeTask = new tasks.CallApiGatewayRestApiEndpoint(this, 'Call REST API'
   api: restApi,
   stageName: 'prod',
   method: tasks.HttpMethod.GET,
+});
+```
+
+By default, the API endpoint URI will be constructed using the AWS region of
+the stack in which the provided `api` is created.
+
+To construct the endpoint with a different region, use the `region` parameter:
+```ts
+import * as apigateway from 'aws-cdk-lib/aws-apigateway';
+const restApi = new apigateway.RestApi(this, 'MyRestApi');
+const invokeTask = new tasks.CallApiGatewayRestApiEndpoint(this, 'Call REST API', {
+  api: restApi,
+  stageName: 'prod',
+  method: tasks.HttpMethod.GET,
+  region: 'us-west-2',
 });
 ```
 
@@ -188,7 +225,7 @@ const invokeTask = new tasks.CallApiGatewayHttpApiEndpoint(this, 'Call HTTP API'
 });
 ```
 
-### AWS SDK
+## AWS SDK
 
 Step Functions supports calling [AWS service's API actions](https://docs.aws.amazon.com/step-functions/latest/dg/supported-services-awssdk.html)
 through the service integration pattern.
@@ -238,11 +275,33 @@ const detectLabels = new tasks.CallAwsService(this, 'DetectLabels', {
   additionalIamStatements: [
     new iam.PolicyStatement({
       actions: ['s3:getObject'],
-      resources: ['arn:aws:s3:::my-bucket/*'],
+      resources: ['arn:aws:s3:::amzn-s3-demo-bucket/*'],
     }),
   ],
 });
 ```
+
+### Cross-region AWS API call
+
+You can call AWS API in a different region from your state machine by using the `CallAwsServiceCrossRegion` construct. In addition to the properties for `CallAwsService` construct, you have to set `region` property to call the API.
+
+```ts
+declare const myBucket: s3.Bucket;
+const getObject = new tasks.CallAwsServiceCrossRegion(this, 'GetObject', {
+  region: 'ap-northeast-1',
+  service: 's3',
+  action: 'getObject',
+  parameters: {
+    Bucket: myBucket.bucketName,
+    Key: sfn.JsonPath.stringAt('$.key')
+  },
+  iamResources: [myBucket.arnForObjects('*')],
+});
+```
+
+Other properties such as `additionalIamStatements` can be used in the same way as the `CallAwsService` task.
+
+Note that when you use `integrationPattern.WAIT_FOR_TASK_TOKEN`, the output path changes under `Payload` property.
 
 ## Athena
 
@@ -263,11 +322,33 @@ const startQueryExecutionJob = new tasks.AthenaStartQueryExecution(this, 'Start 
       encryptionOption: tasks.EncryptionOption.S3_MANAGED,
     },
     outputLocation: {
+      bucketName: 'amzn-s3-demo-bucket',
+      objectKey: 'folder',
+    },
+  },
+  executionParameters: ['param1', 'param2'],
+});
+```
+
+You can reuse the query results by setting the `resultReuseConfigurationMaxAge` property.
+
+```ts
+const startQueryExecutionJob = new tasks.AthenaStartQueryExecution(this, 'Start Athena Query', {
+  queryString: sfn.JsonPath.stringAt('$.queryString'),
+  queryExecutionContext: {
+    databaseName: 'mydatabase',
+  },
+  resultConfiguration: {
+    encryptionConfiguration: {
+      encryptionOption: tasks.EncryptionOption.S3_MANAGED,
+    },
+    outputLocation: {
       bucketName: 'query-results-bucket',
       objectKey: 'folder',
     },
   },
   executionParameters: ['param1', 'param2'],
+  resultReuseConfigurationMaxAge: Duration.minutes(100),
 });
 ```
 
@@ -353,6 +434,147 @@ const task = new tasks.BedrockInvokeModel(this, 'Prompt Model', {
   ),
   resultSelector: {
     names: sfn.JsonPath.stringAt('$.Body.results[0].outputText'),
+  },
+});
+
+```
+### Using Input Path for S3 URI
+
+Provide S3 URI as an input or output path to invoke a model
+
+To specify the S3 URI as JSON path to your input or output fields, use props `s3InputUri` and `s3OutputUri` under BedrockInvokeModelProps and set 
+feature flag `@aws-cdk/aws-stepfunctions-tasks:useNewS3UriParametersForBedrockInvokeModelTask` to true.
+
+
+If this flag is not enabled, the code will populate the S3Uri using `InputPath` and `OutputPath` fields, which is not recommended.
+
+```ts
+
+import * as bedrock from 'aws-cdk-lib/aws-bedrock';
+
+const model = bedrock.FoundationModel.fromFoundationModelId(
+  this,
+  'Model',
+  bedrock.FoundationModelIdentifier.AMAZON_TITAN_TEXT_G1_EXPRESS_V1,
+);
+
+const task = new tasks.BedrockInvokeModel(this, 'Prompt Model', {
+  model,
+  input : { s3InputUri: sfn.JsonPath.stringAt('$.prompt') },
+  output: { s3OutputUri: sfn.JsonPath.stringAt('$.prompt') },
+});
+
+```
+
+### Using Input Path
+
+Provide S3 URI as an input or output path to invoke a model
+
+Currently, input and output Path provided in the BedrockInvokeModelProps input is defined as S3URI field under task definition of state machine.
+To modify the existing behaviour, set `@aws-cdk/aws-stepfunctions-tasks:useNewS3UriParametersForBedrockInvokeModelTask` to true. 
+
+If this feature flag is enabled, S3URI fields will be generated from other Props(`s3InputUri` and `s3OutputUri`), and the given inputPath, OutputPath will be rendered as 
+it is in the JSON task definition.
+
+If the feature flag is set to `false`, the behavior will be to populate the S3Uri using the `InputPath` and `OutputPath` fields, which is not recommended.
+
+```ts
+
+import * as bedrock from 'aws-cdk-lib/aws-bedrock';
+
+const model = bedrock.FoundationModel.fromFoundationModelId(
+  this,
+  'Model',
+  bedrock.FoundationModelIdentifier.AMAZON_TITAN_TEXT_G1_EXPRESS_V1,
+);
+
+const task = new tasks.BedrockInvokeModel(this, 'Prompt Model', {
+  model,
+  inputPath: sfn.JsonPath.stringAt('$.prompt'),
+  outputPath: sfn.JsonPath.stringAt('$.prompt'),
+});
+
+```
+
+You can apply a guardrail to the invocation by setting `guardrail`.
+
+```ts
+import * as bedrock from 'aws-cdk-lib/aws-bedrock';
+
+const model = bedrock.FoundationModel.fromFoundationModelId(
+  this,
+  'Model',
+  bedrock.FoundationModelIdentifier.AMAZON_TITAN_TEXT_G1_EXPRESS_V1,
+);
+
+const task = new tasks.BedrockInvokeModel(this, 'Prompt Model with guardrail', {
+  model,
+  body: sfn.TaskInput.fromObject(
+    {
+      inputText: 'Generate a list of five first names.',
+      textGenerationConfig: {
+        maxTokenCount: 100,
+        temperature: 1,
+      },
+    },
+  ),
+  guardrail: tasks.Guardrail.enable('guardrailId', 1),
+  resultSelector: {
+    names: sfn.JsonPath.stringAt('$.Body.results[0].outputText'),
+  },
+});
+```
+
+### createModelCustomizationJob
+
+The [CreateModelCustomizationJob](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_CreateModelCustomizationJob.html) API creates a fine-tuning job to customize a base model.
+
+```ts
+import * as bedrock from 'aws-cdk-lib/aws-bedrock';
+import * as kms from 'aws-cdk-lib/aws-kms';
+
+declare const outputBucket: s3.IBucket;
+declare const trainingBucket: s3.IBucket;
+declare const validationBucket: s3.IBucket;
+declare const kmsKey: kms.IKey;
+declare const vpc: ec2.IVpc;
+
+const model = bedrock.FoundationModel.fromFoundationModelId(
+  this,
+  'Model',
+  bedrock.FoundationModelIdentifier.AMAZON_TITAN_TEXT_G1_EXPRESS_V1,
+);
+
+const task = new tasks.BedrockCreateModelCustomizationJob(this, 'CreateModelCustomizationJob', {
+  baseModel: model,
+  clientRequestToken: 'MyToken',
+  customizationType: tasks.CustomizationType.FINE_TUNING,
+  customModelKmsKey: kmsKey,
+  customModelName: 'MyCustomModel', // required
+  customModelTags: [{ key: 'key1', value: 'value1' }],
+  hyperParameters: {
+    batchSize: '10',
+  },
+  jobName: 'MyCustomizationJob', // required
+  jobTags: [{ key: 'key2', value: 'value2' }],
+  outputData: {
+    bucket: outputBucket, // required
+    path: 'output-data/',
+  },
+  trainingData: {
+    bucket: trainingBucket,
+    path: 'training-data/data.json',
+  }, // required
+  // If you don't provide validation data, you have to specify `Evaluation percentage` hyperparameter.
+  validationData: [
+    {
+      bucket: validationBucket,
+      path: 'validation-data/data.json',
+    },
+  ],
+  vpcConfig: {
+    securityGroups: [new ec2.SecurityGroup(this, 'SecurityGroup', { vpc })],
+    subnets: vpc.privateSubnets,
   },
 });
 ```
@@ -608,6 +830,85 @@ const runTask = new tasks.EcsRunTask(this, 'RunFargate', {
 });
 ```
 
+#### Capacity Provider Options
+
+The `capacityProviderOptions` property allows you to configure the capacity provider
+strategy for both EC2 and Fargate launch targets.
+
+- When `CapacityProviderOptions.custom()` is used, you can specify a custom capacity provider strategy.
+- When `CapacityProviderOptions.default()` is used, the task uses the cluster's default capacity provider strategy.
+- If `capacityProviderOptions` is not specified, the task uses the launch type (EC2 or FARGATE) without a capacity provider strategy.
+
+```ts
+const vpc = ec2.Vpc.fromLookup(this, 'Vpc', {
+  isDefault: true,
+});
+
+const cluster = new ecs.Cluster(this, 'FargateCluster', { vpc });
+
+const taskDefinition = new ecs.TaskDefinition(this, 'TD', {
+  memoryMiB: '512',
+  cpu: '256',
+  compatibility: ecs.Compatibility.FARGATE,
+});
+
+// Use custom() option - specify custom capacity provider strategy
+const runTaskWithCustom = new tasks.EcsRunTask(this, 'RunTaskWithCustom', {
+  cluster,
+  taskDefinition,
+  launchTarget: new tasks.EcsFargateLaunchTarget({
+    platformVersion: ecs.FargatePlatformVersion.VERSION1_4,
+    capacityProviderOptions: tasks.CapacityProviderOptions.custom([
+      { capacityProvider: 'FARGATE_SPOT', weight: 2, base: 1 },
+      { capacityProvider: 'FARGATE', weight: 1 },
+    ]),
+  }),
+});
+
+// Use default() option - uses cluster's default capacity provider strategy
+const runTaskWithDefault = new tasks.EcsRunTask(this, 'RunTaskWithDefault', {
+  cluster,
+  taskDefinition,
+  launchTarget: new tasks.EcsFargateLaunchTarget({
+    platformVersion: ecs.FargatePlatformVersion.VERSION1_4,
+    capacityProviderOptions: tasks.CapacityProviderOptions.default(),
+  }),
+});
+```
+
+#### Override CPU and Memory Parameter
+
+By setting the property cpu or memoryMiB, you can override the Fargate or EC2 task instance size at runtime.
+
+see: https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_TaskOverride.html
+
+```ts
+const vpc = ec2.Vpc.fromLookup(this, 'Vpc', {
+  isDefault: true,
+});
+const cluster = new ecs.Cluster(this, 'ECSCluster', { vpc });
+
+const taskDefinition = new ecs.TaskDefinition(this, 'TD', {
+  compatibility: ecs.Compatibility.FARGATE,
+  cpu: '256',
+  memoryMiB: '512'
+});
+
+taskDefinition.addContainer('TheContainer', {
+  image: ecs.ContainerImage.fromRegistry('foo/bar'),
+});
+
+const runTask = new tasks.EcsRunTask(this, 'Run', {
+  integrationPattern: sfn.IntegrationPattern.RUN_JOB,
+  cluster,
+  taskDefinition,
+  launchTarget: new tasks.EcsFargateLaunchTarget(),
+  cpu: '1024',
+  memoryMiB: '1048'
+});
+```
+
+
 #### ECS enable Exec
 
 By setting the property [`enableExecuteCommand`](https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_RunTask.html#ECS-RunTask-request-enableExecuteCommand) to `true`, you can enable the [ECS Exec feature](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs-exec.html) for the task for either Fargate or EC2 launch types.
@@ -719,6 +1020,45 @@ new tasks.EmrCreateCluster(this, 'SpotSpecification', {
 });
 ```
 
+You can use the prioritized allocation strategy to specify instance type priorities for On-Demand instances:
+
+```ts
+new tasks.EmrCreateCluster(this, 'PrioritizedAllocation', {
+  instances: {
+    instanceFleets: [{
+      instanceFleetType: tasks.EmrCreateCluster.InstanceRoleType.CORE,
+      instanceTypeConfigs: [{
+        instanceType: 'm5.large',
+        priority: 0, // Highest priority
+      }, {
+        instanceType: 'm5.xlarge',
+        priority: 1, // Lower priority
+      }],
+      launchSpecifications: {
+        onDemandSpecification: {
+          allocationStrategy: tasks.EmrCreateCluster.OnDemandAllocationStrategy.PRIORITIZED,
+        },
+      },
+      targetOnDemandCapacity: 2,
+    }],
+  },
+  name: 'PrioritizedCluster',
+  integrationPattern: sfn.IntegrationPattern.RUN_JOB,
+});
+```
+
+You can [customize EBS root device volume](https://docs.aws.amazon.com/emr/latest/ManagementGuide/emr-custom-ami-root-volume-size.html).
+
+```ts
+new tasks.EmrCreateCluster(this, 'Create Cluster', {
+  instances: {},
+  name: 'ClusterName',
+  ebsRootVolumeIops: 4000,
+  ebsRootVolumeSize: Size.gibibytes(20),
+  ebsRootVolumeThroughput: 200,
+});
+```
+
 If you want to run multiple steps in [parallel](https://docs.aws.amazon.com/emr/latest/ManagementGuide/emr-concurrent-steps.html),
 you can specify the `stepConcurrencyLevel` property. The concurrency range is between 1
 and 256 inclusive, where the default concurrency of 1 means no step concurrency is allowed.
@@ -729,6 +1069,59 @@ new tasks.EmrCreateCluster(this, 'Create Cluster', {
   instances: {},
   name: sfn.TaskInput.fromJsonPathAt('$.ClusterName').value,
   stepConcurrencyLevel: 10,
+});
+```
+
+If you want to use an [auto-termination policy](https://docs.aws.amazon.com/emr/latest/ManagementGuide/emr-auto-termination-policy.html),
+you can specify the `autoTerminationPolicyIdleTimeout` property.
+Specifies the amount of idle time after which the cluster automatically terminates. You can specify a minimum of 60 seconds and a maximum of 604800 seconds (seven days).
+
+```ts
+new tasks.EmrCreateCluster(this, 'Create Cluster', {
+  instances: {},
+  name: 'ClusterName',
+  autoTerminationPolicyIdleTimeout: Duration.seconds(100),
+});
+```
+
+If you want to use [managed scaling](https://docs.aws.amazon.com/emr/latest/ManagementGuide/emr-managed-scaling.html),
+you can specify the `managedScalingPolicy` property.
+
+```ts
+new tasks.EmrCreateCluster(this, 'CreateCluster', {
+  instances: {
+    instanceFleets: [
+      {
+        instanceFleetType: tasks.EmrCreateCluster.InstanceRoleType.CORE,
+        instanceTypeConfigs: [
+          {
+            instanceType: 'm5.xlarge',
+          },
+        ],
+        targetOnDemandCapacity: 1,
+      },
+      {
+        instanceFleetType: tasks.EmrCreateCluster.InstanceRoleType.MASTER,
+        instanceTypeConfigs: [
+          {
+            instanceType: 'm5.xlarge',
+          },
+        ],
+        targetOnDemandCapacity: 1,
+      },
+    ],
+  },
+  name: 'ClusterName',
+  releaseLabel: 'emr-7.9.0',
+  managedScalingPolicy: {
+    computeLimits: {
+      unitType: tasks.EmrCreateCluster.ComputeLimitsUnitType.INSTANCE_FLEET_UNITS,
+      maximumCapacityUnits: 4,
+      minimumCapacityUnits: 1,
+      maximumOnDemandCapacityUnits: 4,
+      maximumCoreCapacityUnits: 2,
+    },
+  },
 });
 ```
 
@@ -1066,10 +1459,12 @@ The following code snippet includes a Task state that uses eks:call to list the 
 
 ```ts
 import * as eks from 'aws-cdk-lib/aws-eks';
+import { KubectlV35Layer } from '@aws-cdk/lambda-layer-kubectl-v35';
 
 const myEksCluster = new eks.Cluster(this, 'my sample cluster', {
-  version: eks.KubernetesVersion.V1_18,
+  version: eks.KubernetesVersion.V1_35,
   clusterName: 'myEksCluster',
+  kubectlLayer: new KubectlV35Layer(this, 'kubectl'),
 });
 
 new tasks.EksCall(this, 'Call a EKS Endpoint', {
@@ -1112,6 +1507,61 @@ new tasks.EventBridgePutEvents(this, 'Send an event to EventBridge', {
 });
 ```
 
+## EventBridge Scheduler
+
+You can call EventBridge Scheduler APIs from a `Task` state.
+Read more about calling Scheduler APIs [here](https://docs.aws.amazon.com/scheduler/latest/APIReference/API_Operations.html)
+
+### Create Scheduler
+
+The [CreateSchedule](https://docs.aws.amazon.com/scheduler/latest/APIReference/API_CreateSchedule.html) API creates a new schedule.
+
+Here is an example of how to create a schedule that puts an event to SQS queue every 5 minutes:
+
+```ts
+import * as scheduler from 'aws-cdk-lib/aws-scheduler';
+import * as kms from 'aws-cdk-lib/aws-kms';
+
+declare const key: kms.Key;
+declare const scheduleGroup: scheduler.CfnScheduleGroup;
+declare const targetQueue: sqs.Queue;
+declare const deadLetterQueue: sqs.Queue;
+
+const schedulerRole = new iam.Role(this, 'SchedulerRole', {
+  assumedBy: new iam.ServicePrincipal('scheduler.amazonaws.com'),
+});
+// To send the message to the queue
+// This policy changes depending on the type of target.
+schedulerRole.addToPrincipalPolicy(new iam.PolicyStatement({
+  actions: ['sqs:SendMessage'],
+  resources: [targetQueue.queueArn],
+}));
+
+const createScheduleTask1 = new tasks.EventBridgeSchedulerCreateScheduleTask(this, 'createSchedule', {
+  scheduleName: 'TestSchedule',
+  actionAfterCompletion: tasks.ActionAfterCompletion.NONE,
+  clientToken: 'testToken',
+  description: 'TestDescription',
+  startDate: new Date(),
+  endDate: new Date(new Date().getTime() + 1000 * 60 * 60),
+  flexibleTimeWindow: Duration.minutes(5),
+  groupName: scheduleGroup.ref,
+  kmsKey: key,
+  schedule: tasks.Schedule.rate(Duration.minutes(5)),
+  timezone: 'UTC',
+  enabled: true,
+  target: new tasks.EventBridgeSchedulerTarget({
+    arn: targetQueue.queueArn,
+    role: schedulerRole,
+    retryPolicy: {
+      maximumRetryAttempts: 2,
+      maximumEventAge: Duration.minutes(5),
+    },
+    deadLetterQueue,
+  }),
+});
+```
+
 ## Glue
 
 Step Functions supports [AWS Glue](https://docs.aws.amazon.com/step-functions/latest/dg/connect-glue.html) through the service integration pattern.
@@ -1130,15 +1580,41 @@ new tasks.GlueStartJobRun(this, 'Task', {
   notifyDelayAfter: Duration.minutes(5),
 });
 ```
-You can configure workers by setting the `workerType` and `numberOfWorkers` properties.
+
+You can configure workers by setting the `workerTypeV2` and `numberOfWorkers` properties.
+`workerType` is deprecated and no longer recommended. Use `workerTypeV2` which is
+a ENUM-like class for more powerful worker configuration around using pre-defined values or
+dynamic values.
 
 ```ts
 new tasks.GlueStartJobRun(this, 'Task', {
   glueJobName: 'my-glue-job',
   workerConfiguration: {
-    workerType: tasks.WorkerType.G_1X, // Worker type
+    workerTypeV2: tasks.WorkerTypeV2.G_1X, // Worker type
     numberOfWorkers: 2, // Number of Workers
   },
+});
+```
+
+To configure the worker type or number of workers dynamically from StateMachine's input,
+you can configure it using JSON Path values using `workerTypeV2` like this:
+
+```ts
+new tasks.GlueStartJobRun(this, 'Glue Job Task', {
+  glueJobName: 'my-glue-job',
+  workerConfiguration: {
+    workerTypeV2: tasks.WorkerTypeV2.of(sfn.JsonPath.stringAt('$.glue_jobs_configs.executor_type')),
+    numberOfWorkers: sfn.JsonPath.numberAt('$.glue_jobs_configs.max_number_workers'),
+  },
+});
+```
+
+You can choose the execution class by setting the `executionClass` property.
+
+```ts
+new tasks.GlueStartJobRun(this, 'Task', {
+  glueJobName: 'my-glue-job',
+  executionClass: tasks.ExecutionClass.FLEX,
 });
 ```
 
@@ -1191,7 +1667,7 @@ const connection = new events.Connection(this, 'Connection', {
 
 new tasks.HttpInvoke(this, 'Invoke HTTP API', {
   apiRoot: 'https://api.example.com',
-  apiEndpoint: sfn.TaskInput.fromText('https://api.example.com/path/to/resource'),
+  apiEndpoint: sfn.TaskInput.fromText(sfn.JsonPath.format('resource/{}/details', sfn.JsonPath.stringAt('$.resourceId'))),
   body: sfn.TaskInput.fromObject({ foo: 'bar' }),
   connection,
   headers: sfn.TaskInput.fromObject({ 'Content-Type': 'application/json' }),
@@ -1309,13 +1785,13 @@ Step Functions supports [AWS MediaConvert](https://docs.aws.amazon.com/step-func
 
 ### CreateJob
 
-The [CreateJob](https://docs.aws.amazon.com/mediaconvert/latest/apireference/jobs.html#jobspost) API creates a new transcoding job. 
-For information about jobs and job settings, see the User Guide at http://docs.aws.amazon.com/mediaconvert/latest/ug/what-is.html
+The [CreateJob](https://docs.aws.amazon.com/mediaconvert/latest/apireference/jobs.html#jobspost) API creates a new transcoding job.
+For information about jobs and job settings, see the User Guide at https://docs.aws.amazon.com/mediaconvert/latest/ug/what-is.html
 
-You can call the `CreateJob` API from a `Task` state. Optionally you can specify the `integrationPattern`. 
+You can call the `CreateJob` API from a `Task` state. Optionally you can specify the `integrationPattern`.
 
-Make sure you update the required fields - [Role](https://docs.aws.amazon.com/mediaconvert/latest/apireference/jobs.html#jobs-prop-createjobrequest-role) & 
-[Settings](https://docs.aws.amazon.com/mediaconvert/latest/apireference/jobs.html#jobs-prop-createjobrequest-settings) and refer 
+Make sure you update the required fields - [Role](https://docs.aws.amazon.com/mediaconvert/latest/apireference/jobs.html#jobs-prop-createjobrequest-role) &
+[Settings](https://docs.aws.amazon.com/mediaconvert/latest/apireference/jobs.html#jobs-prop-createjobrequest-settings) and refer
 [CreateJobRequest](https://docs.aws.amazon.com/mediaconvert/latest/apireference/jobs.html#jobs-model-createjobrequest) for all other optional parameters.
 
 ```ts
@@ -1409,7 +1885,7 @@ new tasks.SageMakerCreateTrainingJob(this, 'TrainSagemaker', {
     },
   }],
   outputDataConfig: {
-    s3OutputLocation: tasks.S3Location.fromBucket(s3.Bucket.fromBucketName(this, 'Bucket', 'mybucket'), 'myoutputpath'),
+    s3OutputLocation: tasks.S3Location.fromBucket(s3.Bucket.fromBucketName(this, 'Bucket', 'amzn-s3-demo-bucket'), 'myoutputpath'),
   },
   resourceConfig: {
     instanceCount: 1,
@@ -1565,7 +2041,7 @@ Step Functions supports [AWS Step Functions](https://docs.aws.amazon.com/step-fu
 
 You can manage [AWS Step Functions](https://docs.aws.amazon.com/step-functions/latest/dg/connect-stepfunctions.html) executions.
 
-AWS Step Functions supports it's own [`StartExecution`](https://docs.aws.amazon.com/step-functions/latest/apireference/API_StartExecution.html) API as a service integration.
+AWS Step Functions supports its own [`StartExecution`](https://docs.aws.amazon.com/step-functions/latest/apireference/API_StartExecution.html) API as a service integration.
 
 ```ts
 // Define a state machine with one Pass state

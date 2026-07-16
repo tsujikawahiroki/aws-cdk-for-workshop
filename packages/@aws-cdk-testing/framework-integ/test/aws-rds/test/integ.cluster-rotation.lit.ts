@@ -1,9 +1,12 @@
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
+import { INTEG_TEST_LATEST_AURORA_MYSQL } from './db-versions';
 import * as cdk from 'aws-cdk-lib';
+import { IntegTestBaseStack } from './integ-test-base-stack';
 import * as rds from 'aws-cdk-lib/aws-rds';
+import { IntegTest } from '@aws-cdk/integ-tests-alpha';
 
 const app = new cdk.App();
-const stack = new cdk.Stack(app, 'aws-cdk-rds-cluster-rotation');
+const stack = new IntegTestBaseStack(app, 'aws-cdk-rds-cluster-rotation');
 
 const vpc = new ec2.Vpc(stack, 'VPC', { restrictDefaultSecurityGroup: false });
 const securityGroup = new ec2.SecurityGroup(stack, 'SecurityGroup', { vpc });
@@ -19,7 +22,7 @@ const instanceProps = {
 };
 const cluster = new rds.DatabaseCluster(stack, 'Database', {
   engine: rds.DatabaseClusterEngine.auroraMysql({
-    version: rds.AuroraMysqlEngineVersion.VER_3_03_0,
+    version: INTEG_TEST_LATEST_AURORA_MYSQL,
   }),
   vpc,
   writer: rds.ClusterInstance.provisioned('Instance1', {
@@ -36,7 +39,7 @@ cluster.addRotationSingleUser();
 
 const clusterWithCustomRotationOptions = new rds.DatabaseCluster(stack, 'CustomRotationOptions', {
   engine: rds.DatabaseClusterEngine.auroraMysql({
-    version: rds.AuroraMysqlEngineVersion.VER_3_03_0,
+    version: INTEG_TEST_LATEST_AURORA_MYSQL,
   }),
   vpc,
   writer: rds.ClusterInstance.provisioned('Instance1', {
@@ -58,4 +61,7 @@ clusterWithCustomRotationOptions.addRotationSingleUser({
 });
 /// !hide
 
-app.synth();
+new IntegTest(app, 'test-rds-cluster-rotation', {
+  testCases: [stack],
+});
+

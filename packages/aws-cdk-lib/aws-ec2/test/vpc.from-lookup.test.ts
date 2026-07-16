@@ -1,6 +1,7 @@
-import { Construct } from 'constructs';
+import type { Construct } from 'constructs';
 import * as cxschema from '../../cloud-assembly-schema';
-import { ContextProvider, GetContextValueOptions, GetContextValueResult, Lazy, Stack } from '../../core';
+import type { GetContextValueOptions, GetContextValueResult } from '../../core';
+import { ContextProvider, Lazy, Stack } from '../../core';
 import * as cxapi from '../../cx-api';
 import { GenericLinuxImage, Instance, InstanceType, SubnetType, Vpc } from '../lib';
 
@@ -14,9 +15,7 @@ describe('vpc from lookup', () => {
         Vpc.fromLookup(stack, 'Vpc', {
           vpcId: Lazy.string({ produce: () => 'some-id' }),
         });
-
       }).toThrow('All arguments to Vpc.fromLookup() must be concrete');
-
     });
 
     test('selecting subnets by name from a looked-up VPC does not throw', () => {
@@ -30,7 +29,6 @@ describe('vpc from lookup', () => {
       vpc.selectSubnets({ subnetName: 'Bleep' });
 
       // THEN: no exception
-
     });
 
     test('accepts asymmetric subnets', () => {
@@ -99,7 +97,6 @@ describe('vpc from lookup', () => {
       expect(vpc.isolatedSubnets.length).toEqual(0);
 
       restoreContextProvider(previous);
-
     });
 
     test('selectSubnets onePerAz works on imported VPC', () => {
@@ -169,7 +166,6 @@ describe('vpc from lookup', () => {
       expect(subnets.subnets.map(s => s.availabilityZone)).toEqual(['us-east-1c', 'us-east-1d']);
 
       restoreContextProvider(previous);
-
     });
 
     test('AZ in dummy lookup VPC matches AZ in Stack', () => {
@@ -184,7 +180,6 @@ describe('vpc from lookup', () => {
 
       // THEN
       expect(subnets.subnets.length).toEqual(2);
-
     });
 
     test('don\'t crash when using subnetgroup name in lookup VPC', () => {
@@ -203,7 +198,6 @@ describe('vpc from lookup', () => {
       });
 
       // THEN -- no exception occurred
-
     });
     test('subnets in imported VPC has all expected attributes', () => {
       const previous = mockVpcContextProviderWith({
@@ -243,7 +237,6 @@ describe('vpc from lookup', () => {
       expect(subnet.ipv4CidrBlock).toEqual('10.100.0.0/24');
 
       restoreContextProvider(previous);
-
     });
     test('passes account and region', () => {
       const previous = mockVpcContextProviderWith({

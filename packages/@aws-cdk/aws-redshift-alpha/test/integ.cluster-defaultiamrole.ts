@@ -1,9 +1,10 @@
 #!/usr/bin/env node
+import * as integ from '@aws-cdk/integ-tests-alpha';
+import type { StackProps } from 'aws-cdk-lib';
+import { Stack, App, RemovalPolicy } from 'aws-cdk-lib';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as iam from 'aws-cdk-lib/aws-iam';
-import { Stack, App, StackProps, RemovalPolicy } from 'aws-cdk-lib';
-import * as integ from '@aws-cdk/integ-tests-alpha';
-import { Construct } from 'constructs';
+import type { Construct } from 'constructs';
 import * as redshift from '../lib';
 
 class RedshiftEnv extends Stack {
@@ -13,8 +14,7 @@ class RedshiftEnv extends Stack {
     const vpc = new ec2.Vpc(this, 'VPC', { restrictDefaultSecurityGroup: false });
     const defaultRole = new iam.Role(this, 'IAM', {
       assumedBy: new iam.ServicePrincipal('redshift.amazonaws.com'),
-    },
-    );
+    });
 
     // Adding default role on cluster creation
     new redshift.Cluster(this, 'Cluster1', {
@@ -48,9 +48,12 @@ class RedshiftEnv extends Stack {
 }
 
 const app = new App();
+const stack = new Stack(app, 'aws-cdk-redshift-cluster-database');
+
+new RedshiftEnv(stack, 'redshift-defaultiamrole-integ');
 
 new integ.IntegTest(app, 'DefaultIamRoleInteg', {
-  testCases: [new RedshiftEnv(app, 'redshift-defaultiamrole-integ')],
+  testCases: [stack],
 });
 
 app.synth();

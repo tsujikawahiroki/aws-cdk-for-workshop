@@ -2,8 +2,14 @@ import * as autoscaling from 'aws-cdk-lib/aws-autoscaling';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as cdk from 'aws-cdk-lib';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
+import * as integ from '@aws-cdk/integ-tests-alpha';
 
-const app = new cdk.App();
+const app = new cdk.App({
+  postCliContext: {
+    '@aws-cdk/aws-lambda:useCdkManagedLogGroup': false,
+    '@aws-cdk/aws-lambda:createNewPoliciesWithAddToRolePolicy': false,
+  },
+});
 const stack = new cdk.Stack(app, 'integ-ec2-capacity-provider');
 
 const vpc = new ec2.Vpc(stack, 'Vpc', { maxAzs: 2, restrictDefaultSecurityGroup: false });
@@ -43,6 +49,16 @@ new ecs.Ec2Service(stack, 'EC2Service', {
       weight: 1,
     },
   ],
+});
+
+new integ.IntegTest(app, 'Ec2CapacityProviderTest', {
+  testCases: [stack],
+  cdkCommandOptions: {
+    destroy: {
+      // https://github.com/aws/aws-cdk/issues/19275
+      expectError: true,
+    },
+  },
 });
 
 app.synth();

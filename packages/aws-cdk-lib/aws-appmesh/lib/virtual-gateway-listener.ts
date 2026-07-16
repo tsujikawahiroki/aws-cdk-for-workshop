@@ -1,12 +1,15 @@
-import { Construct } from 'constructs';
-import { CfnVirtualGateway } from './appmesh.generated';
-import { HealthCheck } from './health-checks';
-import { ListenerTlsOptions } from './listener-tls-options';
-import { ConnectionPoolConfig, renderListenerTlsOptions } from './private/utils';
-import {
+import type { Construct } from 'constructs';
+import type { CfnVirtualGateway } from './appmesh.generated';
+import type { HealthCheck } from './health-checks';
+import type { ListenerTlsOptions } from './listener-tls-options';
+import type { ConnectionPoolConfig } from './private/utils';
+import { renderListenerTlsOptions } from './private/utils';
+import type {
   GrpcConnectionPool,
   Http2ConnectionPool,
   HttpConnectionPool,
+} from './shared-interfaces';
+import {
   Protocol,
 } from './shared-interfaces';
 
@@ -118,7 +121,6 @@ export abstract class VirtualGatewayListener {
  * Represents the properties needed to define an HTTP Listener for a VirtualGateway
  */
 class VirtualGatewayListenerImpl extends VirtualGatewayListener {
-
   constructor(private readonly protocol: Protocol,
     private readonly healthCheck: HealthCheck | undefined,
     private readonly port: number = 8080,

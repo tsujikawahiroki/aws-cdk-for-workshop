@@ -1,8 +1,9 @@
-import { Construct, IConstruct, Node } from 'constructs';
+import type { IConstruct, Node } from 'constructs';
+import { Construct } from 'constructs';
 import * as _ from 'lodash';
 import * as codepipeline from '../../../aws-codepipeline';
-import * as notifications from '../../../aws-codestarnotifications';
-import * as events from '../../../aws-events';
+import type * as notifications from '../../../aws-codestarnotifications';
+import type * as events from '../../../aws-events';
 import * as iam from '../../../aws-iam';
 import * as s3 from '../../../aws-s3';
 import * as cdk from '../../../core';
@@ -48,7 +49,6 @@ describe('Pipeline Actions', () => {
       });
 
       done();
-
     });
 
     test('uses a single permission statement if the same ChangeSet name is used', () => {
@@ -97,15 +97,14 @@ describe('Pipeline Actions', () => {
             Condition: { StringEqualsIfExists: { 'cloudformation:ChangeSetName': 'MyChangeSet' } },
             Effect: 'Allow',
             Resource: [
-              // eslint-disable-next-line max-len
+
               { 'Fn::Join': ['', ['arn:', { Ref: 'AWS::Partition' }, ':cloudformation:', { Ref: 'AWS::Region' }, ':', { Ref: 'AWS::AccountId' }, ':stack/StackA/*']] },
-              // eslint-disable-next-line max-len
+
               { 'Fn::Join': ['', ['arn:', { Ref: 'AWS::Partition' }, ':cloudformation:', { Ref: 'AWS::Region' }, ':', { Ref: 'AWS::AccountId' }, ':stack/StackB/*']] },
             ],
           },
         ],
       );
-
     });
   });
 
@@ -170,15 +169,14 @@ describe('Pipeline Actions', () => {
             Condition: { StringEqualsIfExists: { 'cloudformation:ChangeSetName': 'MyChangeSet' } },
             Effect: 'Allow',
             Resource: [
-              // eslint-disable-next-line max-len
+
               { 'Fn::Join': ['', ['arn:', { Ref: 'AWS::Partition' }, ':cloudformation:', { Ref: 'AWS::Region' }, ':', { Ref: 'AWS::AccountId' }, ':stack/StackA/*']] },
-              // eslint-disable-next-line max-len
+
               { 'Fn::Join': ['', ['arn:', { Ref: 'AWS::Partition' }, ':cloudformation:', { Ref: 'AWS::Region' }, ':', { Ref: 'AWS::AccountId' }, ':stack/StackB/*']] },
             ],
           },
         ],
       );
-
     });
   });
 
@@ -385,6 +383,13 @@ class PipelineDouble extends cdk.Resource implements codepipeline.IPipeline {
     _scope: Construct,
   ): notifications.NotificationRuleSourceConfig {
     throw new Error('Method not implemented.');
+  }
+  // eslint-disable-next-line @typescript-eslint/consistent-type-imports
+  public get pipelineRef(): import('../../../interfaces/generated/aws-codepipeline-interfaces.generated').PipelineReference {
+    return {
+      pipelineName: this.pipelineName,
+      pipelineArn: this.pipelineArn,
+    };
   }
 }
 

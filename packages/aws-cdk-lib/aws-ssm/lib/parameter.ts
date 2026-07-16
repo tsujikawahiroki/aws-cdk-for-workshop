@@ -1,19 +1,27 @@
-import { Construct } from 'constructs';
+import type { Construct } from 'constructs';
 import * as ssm from './ssm.generated';
+import type { IParameterRef, ParameterReference } from './ssm.generated';
 import { arnForParameterName, AUTOGEN_MARKER } from './util';
 import * as iam from '../../aws-iam';
-import * as kms from '../../aws-kms';
+import type { GrantOnKeyResult, IEncryptedResource, IGrantable } from '../../aws-iam';
+import type * as kms from '../../aws-kms';
 import * as cxschema from '../../cloud-assembly-schema';
+import type { IResource } from '../../core';
 import {
+  Annotations,
   CfnDynamicReference, CfnDynamicReferenceService, CfnParameter,
-  ContextProvider, Fn, IResource, Resource, Stack, Token,
+  ContextProvider, Fn, Resource, Stack, Token,
   Tokenization,
 } from '../../core';
+import { ValidationError } from '../../core/lib/errors';
+import { addConstructMetadata } from '../../core/lib/metadata-resource';
+import { lit } from '../../core/lib/private/literal-string';
+import { propertyInjectable } from '../../core/lib/prop-injectable';
 
 /**
  * An SSM Parameter reference.
  */
-export interface IParameter extends IResource {
+export interface IParameter extends IResource, IParameterRef {
   /**
    * The ARN of the SSM Parameter resource.
    * @attribute
@@ -99,8 +107,10 @@ export interface ParameterOptions {
   readonly parameterName?: string;
 
   /**
-   * Indicates if the parameter name is a simple name (i.e. does not include "/"
-   * separators).
+   * Indicates whether the parameter name is a simple name. A parameter name
+   * without any "/" is considered a simple name. If the parameter name includes
+   * "/", setting simpleName to true might cause unintended issues such
+   * as duplicate "/" in the resulting ARN.
    *
    * This is required only if `parameterName` is a token, which means we
    * are unable to detect if the name is simple or "path-like" for the purpose
@@ -160,7 +170,7 @@ export interface StringListParameterProps extends ParameterOptions {
 /**
  * Basic features shared across all types of SSM Parameters.
  */
-abstract class ParameterBase extends Resource implements IParameter {
+abstract class ParameterBase extends Resource implements IParameter, IEncryptedResource {
   public abstract readonly parameterArn: string;
   public abstract readonly parameterName: string;
   public abstract readonly parameterType: string;
@@ -172,6 +182,24 @@ abstract class ParameterBase extends Resource implements IParameter {
    */
   public readonly encryptionKey?: kms.IKey;
 
+  public grantOnKey(grantee: IGrantable, ...actions: string[]): GrantOnKeyResult {
+    const grant = this.encryptionKey
+      ? this.encryptionKey.grant(grantee, ...actions)
+      : undefined;
+
+    return { grant };
+  }
+
+  public get parameterRef(): ParameterReference {
+    return {
+      parameterName: this.parameterName,
+      parameterArn: this.parameterArn,
+    };
+  }
+
+  /**
+   * [disable-awslint:no-grants]
+   */
   public grantRead(grantee: iam.IGrantable): iam.Grant {
     if (this.encryptionKey) {
       this.encryptionKey.grantDecrypt(grantee);
@@ -188,6 +216,9 @@ abstract class ParameterBase extends Resource implements IParameter {
     });
   }
 
+  /**
+   * [disable-awslint:no-grants]
+   */
   public grantWrite(grantee: iam.IGrantable): iam.Grant {
     if (this.encryptionKey) {
       this.encryptionKey.grantEncrypt(grantee);
@@ -337,8 +368,10 @@ export interface CommonStringParameterAttributes {
   readonly parameterName: string;
 
   /**
-   * Indicates if the parameter name is a simple name (i.e. does not include "/"
-   * separators).
+   * Indicates whether the parameter name is a simple name. A parameter name
+   * without any "/" is considered a simple name. If the parameter name includes
+   * "/", setting simpleName to true might cause unintended issues such
+   * as duplicate "/" in the resulting ARN.
    *
    * This is required only if `parameterName` is a token, which means we
    * are unable to detect if the name is simple or "path-like" for the purpose
@@ -397,6 +430,7 @@ export interface StringParameterAttributes extends CommonStringParameterAttribut
    * @default false
    */
   readonly forceDynamicReference?: boolean;
+
 }
 
 /**
@@ -450,6 +484,18 @@ export interface SecureStringParameterAttributes extends CommonStringParameterAt
 }
 
 /**
+ * Additional properties for looking up an existing StringParameter
+ */
+export interface StringParameterLookupOptions {
+  /**
+   * Adds an additional discriminator to the `cdk.context.json` cache key.
+   *
+   * @default - no additional cache key
+   */
+  readonly additionalCacheKey?: string;
+}
+
+/**
  * Creates a new String SSM Parameter.
  * @resource AWS::SSM::Parameter
  *
@@ -459,7 +505,10 @@ export interface SecureStringParameterAttributes extends CommonStringParameterAt
  *    stringValue: 'mySsmParameterValue',
  * });
  */
+@propertyInjectable
 export class StringParameter extends ParameterBase implements IStringParameter {
+  /** Uniquely identifies this class. */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-ssm.StringParameter';
 
   /**
    * Imports an external string parameter by name.
@@ -469,14 +518,51 @@ export class StringParameter extends ParameterBase implements IStringParameter {
   }
 
   /**
+   * Imports an external string parameter by ARN.
+   */
+  public static fromStringParameterArn(scope: Construct, id: string, stringParameterArn: string): IStringParameter {
+    if (Token.isUnresolved(stringParameterArn)) {
+      throw new ValidationError(lit`StringParameterArnCannotBeUnresolvedToken`, 'stringParameterArn cannot be an unresolved token', scope);
+    }
+
+    // has to be the same region
+    // split the arn string to get the region string
+    // arn sample: arn:aws:ssm:us-east-1:123456789012:parameter/dummyName
+    const arnParts = stringParameterArn.split(':');
+    const stackRegion = Stack.of(scope).region;
+    if (arnParts.length !== 6) {
+      throw new ValidationError(lit`UnexpectedStringParameterArnFormat`, 'unexpected StringParameterArn format', scope);
+    } else if (Token.isUnresolved(stackRegion)) {
+      // Region is unknown during synthesis, emit a warning for visibility
+      Annotations.of(scope).addWarningV2('aws-cdk-lib/aws-ssm:crossAccountReferenceSameRegion', 'Cross-account references will only work within the same region');
+    } else if (!Token.isUnresolved(stackRegion) && arnParts[3] !== stackRegion) {
+      // If the region is known, it must match the region specified in the ARN string
+      throw new ValidationError(lit`StringParameterArnMustBeSameRegion`, 'stringParameterArn must be in the same region as the stack', scope);
+    }
+
+    const parameterType = ParameterValueType.STRING;
+
+    let stringValue: string;
+    stringValue = new CfnParameter(scope, `${id}.Parameter`, { type: `AWS::SSM::Parameter::Value<${parameterType}>`, default: stringParameterArn }).valueAsString;
+    class Import extends ParameterBase {
+      public readonly parameterName = stringParameterArn.split('/').pop()?.replace(/parameter\/$/, '') ?? '';
+      public readonly parameterArn = stringParameterArn;
+      public readonly parameterType = parameterType;
+      public readonly stringValue = stringValue;
+    }
+
+    return new Import(scope, id);
+  }
+
+  /**
    * Imports an external string parameter with name and optional version.
    */
   public static fromStringParameterAttributes(scope: Construct, id: string, attrs: StringParameterAttributes): IStringParameter {
     if (!attrs.parameterName) {
-      throw new Error('parameterName cannot be an empty string');
+      throw new ValidationError(lit`ParameterNameCannotBeEmpty`, 'parameterName cannot be an empty string', scope);
     }
     if (attrs.type && ![ParameterType.STRING, ParameterType.AWS_EC2_IMAGE_ID].includes(attrs.type)) {
-      throw new Error(`fromStringParameterAttributes does not support ${attrs.type}. Please use ParameterType.STRING or ParameterType.AWS_EC2_IMAGE_ID`);
+      throw new ValidationError(lit`FromStringParameterAttributesUnsupportedType`, `fromStringParameterAttributes does not support ${attrs.type}. Please use ParameterType.STRING or ParameterType.AWS_EC2_IMAGE_ID`, scope);
     }
 
     const type = attrs.type ?? attrs.valueType ?? ParameterValueType.STRING;
@@ -531,12 +617,21 @@ export class StringParameter extends ParameterBase implements IStringParameter {
    *
    * Requires that the stack this scope is defined in will have explicit
    * account/region information. Otherwise, it will fail during synthesis.
+   *
+   * If defaultValue is provided, it will be used as the dummyValue
+   * and the ContextProvider will be told NOT to raise an error on synthesis
+   * if the SSM Parameter is not found in the account at synth time.
    */
-  public static valueFromLookup(scope: Construct, parameterName: string): string {
+
+  public static valueFromLookup(scope: Construct, parameterName: string, defaultValue?: string, options?: StringParameterLookupOptions): string {
     const value = ContextProvider.getValue(scope, {
       provider: cxschema.ContextProvider.SSM_PARAMETER_PROVIDER,
-      props: { parameterName },
-      dummyValue: `dummy-value-for-${parameterName}`,
+      props: {
+        parameterName,
+      },
+      dummyValue: defaultValue || `dummy-value-for-${parameterName}`,
+      mustExist: defaultValue === undefined,
+      additionalCacheKey: options?.additionalCacheKey,
     }).value;
 
     return value;
@@ -579,8 +674,8 @@ export class StringParameter extends ParameterBase implements IStringParameter {
    */
   public static valueForTypedStringParameter(scope: Construct, parameterName: string, type = ParameterType.STRING, version?: number): string {
     if (type === ParameterType.STRING_LIST) {
-      throw new Error('valueForTypedStringParameter does not support STRING_LIST, '
-        +'use valueForTypedListParameter instead');
+      throw new ValidationError(lit`ValueForTypedStringParameterDoesNotSupportStringList`, 'valueForTypedStringParameter does not support STRING_LIST, '
+        +'use valueForTypedListParameter instead', scope);
     }
     const stack = Stack.of(scope);
     const id = makeIdentityForImportedValue(parameterName);
@@ -616,19 +711,21 @@ export class StringParameter extends ParameterBase implements IStringParameter {
     super(scope, id, {
       physicalName: props.parameterName,
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     if (props.allowedPattern) {
-      _assertValidValue(props.stringValue, props.allowedPattern);
+      _assertValidValue(this, props.stringValue, props.allowedPattern);
     }
 
-    validateParameterName(this.physicalName);
+    validateParameterName(this, this.physicalName);
 
     if (props.description && props.description?.length > 1024) {
-      throw new Error('Description cannot be longer than 1024 characters.');
+      throw new ValidationError(lit`DescriptionTooLong`, 'Description cannot be longer than 1024 characters.', this);
     }
 
     if (props.type && props.type === ParameterType.AWS_EC2_IMAGE_ID) {
-      throw new Error('The type must either be ParameterType.STRING or ParameterType.STRING_LIST. Did you mean to set dataType: ParameterDataType.AWS_EC2_IMAGE instead?');
+      throw new ValidationError(lit`InvalidParameterType`, 'The type must either be ParameterType.STRING or ParameterType.STRING_LIST. Did you mean to set dataType: ParameterDataType.AWS_EC2_IMAGE instead?', this);
     }
 
     const resource = new ssm.CfnParameter(this, 'Resource', {
@@ -641,6 +738,8 @@ export class StringParameter extends ParameterBase implements IStringParameter {
       value: props.stringValue,
     });
 
+    // Too fiddly to refactor
+    // eslint-disable-next-line @cdklabs/no-unconditional-token-allocation
     this.parameterName = this.getResourceNameAttribute(resource.ref);
     this.parameterArn = arnForParameterName(this, this.parameterName, {
       physicalName: props.parameterName || AUTOGEN_MARKER,
@@ -656,7 +755,10 @@ export class StringParameter extends ParameterBase implements IStringParameter {
  * Creates a new StringList SSM Parameter.
  * @resource AWS::SSM::Parameter
  */
+@propertyInjectable
 export class StringListParameter extends ParameterBase implements IStringListParameter {
+  /** Uniquely identifies this class. */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-ssm.StringListParameter';
 
   /**
    * Imports an external parameter of type string list.
@@ -678,7 +780,7 @@ export class StringListParameter extends ParameterBase implements IStringListPar
    */
   public static fromListParameterAttributes(scope: Construct, id: string, attrs: ListParameterAttributes): IStringListParameter {
     if (!attrs.parameterName) {
-      throw new Error('parameterName cannot be an empty string');
+      throw new ValidationError(lit`ParameterNameCannotBeEmpty`, 'parameterName cannot be an empty string', scope);
     }
 
     const type = attrs.elementType ?? ParameterValueType.STRING;
@@ -724,19 +826,21 @@ export class StringListParameter extends ParameterBase implements IStringListPar
     super(scope, id, {
       physicalName: props.parameterName,
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     if (props.stringListValue.find(str => !Token.isUnresolved(str) && str.indexOf(',') !== -1)) {
-      throw new Error('Values of a StringList SSM Parameter cannot contain the \',\' character. Use a string parameter instead.');
+      throw new ValidationError(lit`StringListParameterCannotContainCommas`, 'Values of a StringList SSM Parameter cannot contain the \',\' character. Use a string parameter instead.', this);
     }
 
     if (props.allowedPattern && !Token.isUnresolved(props.stringListValue)) {
-      props.stringListValue.forEach(str => _assertValidValue(str, props.allowedPattern!));
+      props.stringListValue.forEach(str => _assertValidValue(this, str, props.allowedPattern!));
     }
 
-    validateParameterName(this.physicalName);
+    validateParameterName(this, this.physicalName);
 
     if (props.description && props.description?.length > 1024) {
-      throw new Error('Description cannot be longer than 1024 characters.');
+      throw new ValidationError(lit`DescriptionTooLong`, 'Description cannot be longer than 1024 characters.', this);
     }
 
     const resource = new ssm.CfnParameter(this, 'Resource', {
@@ -747,6 +851,9 @@ export class StringListParameter extends ParameterBase implements IStringListPar
       type: ParameterType.STRING_LIST,
       value: Fn.join(',', props.stringListValue),
     });
+
+    // Too fiddly to refactor
+    // eslint-disable-next-line @cdklabs/no-unconditional-token-allocation
     this.parameterName = this.getResourceNameAttribute(resource.ref);
     this.parameterArn = arnForParameterName(this, this.parameterName, {
       physicalName: props.parameterName || AUTOGEN_MARKER,
@@ -767,13 +874,13 @@ export class StringListParameter extends ParameterBase implements IStringListPar
  * @throws if the ``value`` does not conform to the ``allowedPattern`` and neither is an unresolved token (per
  *         ``cdk.unresolved``).
  */
-function _assertValidValue(value: string, allowedPattern: string): void {
+function _assertValidValue(scope: Construct, value: string, allowedPattern: string): void {
   if (Token.isUnresolved(value) || Token.isUnresolved(allowedPattern)) {
     // Unable to perform validations against unresolved tokens
     return;
   }
   if (!new RegExp(allowedPattern).test(value)) {
-    throw new Error(`The supplied value (${value}) does not match the specified allowedPattern (${allowedPattern})`);
+    throw new ValidationError(lit`SuppliedValueDoesNotMatchPattern`, `The supplied value (${value}) does not match the specified allowedPattern (${allowedPattern})`, scope);
   }
 }
 
@@ -781,12 +888,12 @@ function makeIdentityForImportedValue(parameterName: string) {
   return `SsmParameterValue:${parameterName}:C96584B6-F00A-464E-AD19-53AFF4B05118`;
 }
 
-function validateParameterName(parameterName: string) {
+function validateParameterName(scope: Construct, parameterName: string) {
   if (Token.isUnresolved(parameterName)) { return; }
   if (parameterName.length > 2048) {
-    throw new Error('name cannot be longer than 2048 characters.');
+    throw new ValidationError(lit`ParameterNameTooLong`, 'name cannot be longer than 2048 characters.', scope);
   }
   if (!parameterName.match(/^[\/\w.-]+$/)) {
-    throw new Error(`name must only contain letters, numbers, and the following 4 symbols .-_/; got ${parameterName}`);
+    throw new ValidationError(lit`ParameterNameInvalidCharacters`, `name must only contain letters, numbers, and the following 4 symbols .-_/; got ${parameterName}`, scope);
   }
 }

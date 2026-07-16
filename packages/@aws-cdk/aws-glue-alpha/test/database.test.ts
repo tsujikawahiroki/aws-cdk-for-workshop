@@ -1,5 +1,5 @@
-import { Template } from 'aws-cdk-lib/assertions';
 import { App, Stack } from 'aws-cdk-lib';
+import { Template } from 'aws-cdk-lib/assertions';
 import * as glue from '../lib';
 
 let stack: Stack;
@@ -31,7 +31,6 @@ test('default database does not create a bucket', () => {
       },
     },
   });
-
 });
 
 test('explicit locationURI', () => {
@@ -55,7 +54,6 @@ test('explicit locationURI', () => {
       },
     },
   });
-
 });
 
 test('explicit description', () => {

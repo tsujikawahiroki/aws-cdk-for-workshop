@@ -1,5 +1,6 @@
-import { DefaultTokenResolver, IResolveContext, Lazy, StringConcat, Token, Tokenization } from 'aws-cdk-lib';
-import { IPipe } from './pipe';
+import type { IResolveContext } from 'aws-cdk-lib';
+import { DefaultTokenResolver, Lazy, StringConcat, Token, Tokenization } from 'aws-cdk-lib';
+import type { IPipe } from './pipe';
 import { unquote } from './unquote';
 
 type InputTransformationValue = string | Record<string, any>;
@@ -71,7 +72,6 @@ export class InputTransformation implements IInputTransformation {
   }
 
   public bind(pipe: IPipe): InputTransformationConfig {
-
     if (this.type === 'Text') {
       return { inputTemplate: this.inputTemplate as string };
     }
@@ -85,7 +85,7 @@ export class InputTransformation implements IInputTransformation {
   }
 
   private unquoteDynamicInputs(sub: string) {
-
+    // eslint-disable-next-line no-restricted-syntax
     return Lazy.uncachedString({ produce: (ctx: IResolveContext) => Token.asString(deepUnquote(ctx.resolve(sub))) });
 
     /**

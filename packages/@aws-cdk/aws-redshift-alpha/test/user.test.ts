@@ -1,8 +1,8 @@
+import * as cdk from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as kms from 'aws-cdk-lib/aws-kms';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
-import * as cdk from 'aws-cdk-lib';
 import * as redshift from '../lib';
 
 describe('cluster user', () => {
@@ -218,6 +218,23 @@ describe('cluster user', () => {
 
     Template.fromStack(stack).hasResourceProperties('Custom::RedshiftDatabaseQuery', {
       handler: 'user-table-privileges',
+    });
+  });
+
+  it('set excludeCharacters', () => {
+    const username = 'username';
+
+    new redshift.User(stack, 'User', {
+      ...databaseOptions,
+      username,
+      excludeCharacters: '"@/\\\ \'`',
+    });
+
+    Template.fromStack(stack).hasResourceProperties('AWS::SecretsManager::Secret', {
+      GenerateSecretString: {
+        ExcludeCharacters: '"@/\\\ \'`',
+        SecretStringTemplate: `{"username":"${username}"}`,
+      },
     });
   });
 });

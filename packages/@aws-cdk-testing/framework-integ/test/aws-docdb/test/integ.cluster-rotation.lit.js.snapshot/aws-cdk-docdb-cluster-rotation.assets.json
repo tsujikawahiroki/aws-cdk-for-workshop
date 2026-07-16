@@ -1,15 +1,16 @@
 {
-  "version": "36.0.0",
+  "version": "48.0.0",
   "files": {
-    "3c9156cdc8ad159436e7f5cb61779d4c5d50cd06b66950b225e3154c85941930": {
+    "5de8a2cdbbde73660dd750a88c3b38c37d6e193be15b2be866a2c85b8b55ef2b": {
+      "displayName": "aws-cdk-docdb-cluster-rotation Template",
       "source": {
         "path": "aws-cdk-docdb-cluster-rotation.template.json",
         "packaging": "file"
       },
       "destinations": {
-        "current_account-current_region": {
+        "current_account-current_region-b5b8a286": {
           "bucketName": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}",
-          "objectKey": "3c9156cdc8ad159436e7f5cb61779d4c5d50cd06b66950b225e3154c85941930.json",
+          "objectKey": "5de8a2cdbbde73660dd750a88c3b38c37d6e193be15b2be866a2c85b8b55ef2b.json",
           "assumeRoleArn": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cdk-hnb659fds-file-publishing-role-${AWS::AccountId}-${AWS::Region}"
         }
       }

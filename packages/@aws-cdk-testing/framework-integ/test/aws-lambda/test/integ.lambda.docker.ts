@@ -1,10 +1,11 @@
 import * as path from 'path';
 import { App, Stack } from 'aws-cdk-lib';
 import { ExpectedResult, IntegTest, Match } from '@aws-cdk/integ-tests-alpha';
-import { DockerImageCode, DockerImageFunction, Function } from 'aws-cdk-lib/aws-lambda';
+import type { Function } from 'aws-cdk-lib/aws-lambda';
+import { DockerImageCode, DockerImageFunction } from 'aws-cdk-lib/aws-lambda';
 
 class TestStack extends Stack {
-  public fn: Function
+  public fn: Function;
   constructor(scope: App, id: string) {
     super(scope, id);
 
@@ -14,7 +15,11 @@ class TestStack extends Stack {
   }
 }
 
-const app = new App();
+const app = new App({
+  postCliContext: {
+    '@aws-cdk/aws-lambda:useCdkManagedLogGroup': false,
+  },
+});
 const testStack = new TestStack(app, 'lambda-ecr-docker');
 const integ = new IntegTest(app, 'integ', {
   testCases: [testStack],

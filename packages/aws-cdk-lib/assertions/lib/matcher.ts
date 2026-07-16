@@ -1,4 +1,4 @@
-import { Capture } from './capture';
+import type { Capture } from './capture';
 
 /**
  * Represents a matcher that can perform special data matching
@@ -182,7 +182,6 @@ export class MatchResult {
    */
   public toHumanStrings(): string[] {
     const failures = new Array<MatchFailure>();
-    debugger;
     recurse(this, []);
 
     return failures.map(r => {

@@ -1,10 +1,13 @@
+
 import * as path from 'path';
-import { Template } from 'aws-cdk-lib/assertions';
-import { Code, Runtime, Architecture } from 'aws-cdk-lib/aws-lambda';
-import * as lambda from 'aws-cdk-lib/aws-lambda';
 import { AssetHashType, DockerImage, Stack } from 'aws-cdk-lib';
+import { Template } from 'aws-cdk-lib/assertions';
+import type { Code } from 'aws-cdk-lib/aws-lambda';
+import { Runtime, Architecture } from 'aws-cdk-lib/aws-lambda';
+import * as lambda from 'aws-cdk-lib/aws-lambda';
 import { PythonFunction } from '../lib';
-import { Bundling, BundlingProps } from '../lib/bundling';
+import type { BundlingProps } from '../lib/bundling';
+import { Bundling } from '../lib/bundling';
 
 jest.mock('../lib/bundling', () => {
   return {
@@ -24,16 +27,15 @@ jest.mock('../lib/bundling', () => {
           throw new Error('unexpected asset hash type');
         })();
 
-        return {
-          isInline: false,
-          bind: () => ({
+        return new class extends lambda.Code {
+          public readonly isInline: boolean = false;
+          public bind = () => ({
             s3Location: {
               bucketName: 'mock-bucket-name',
               objectKey: mockObjectKey,
             },
-          }),
-          bindToResource: () => { return; },
-        };
+          });
+        }();
       }),
       hasDependencies: jest.fn().mockReturnValue(false),
     },

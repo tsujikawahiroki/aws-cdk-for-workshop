@@ -1,18 +1,38 @@
-import { Construct } from 'constructs';
-import { IHttpApi } from './api';
-import { CfnStage } from '.././index';
-import { Metric, MetricOptions } from '../../../aws-cloudwatch';
-import { Stack } from '../../../core';
-import { StageOptions, IStage, StageAttributes } from '../common';
-import { IApi } from '../common/api';
+import type { Construct } from 'constructs';
+import type { IHttpApi, IHttpApiRef } from './api';
+import { toIHttpApi } from './api';
+import { AccessLogFormat } from '../../../aws-apigateway';
+import type { Metric, MetricOptions } from '../../../aws-cloudwatch';
+import { Lazy, Stack } from '../../../core';
+import { ValidationError } from '../../../core/lib/errors';
+import { addConstructMetadata } from '../../../core/lib/metadata-resource';
+import { lit } from '../../../core/lib/private/literal-string';
+import { propertyInjectable } from '../../../core/lib/prop-injectable';
+import type { StageOptions, IStage, StageAttributes } from '../common';
+import type { IApi } from '../common/api';
 import { StageBase } from '../common/base';
+import type { IStageRef } from '../index';
+import { CfnStage } from '../index';
 
 const DEFAULT_STAGE_NAME = '$default';
 
 /**
+ * Represents a reference to an HTTP Stage
+ */
+export interface IHttpStageRef extends IStageRef {
+  /**
+   * Indicates that this is an HTTP Stage
+   *
+   * Will always return true, but is necessary to prevent accidental structural
+   * equality in TypeScript.
+   */
+  readonly isHttpStage: boolean;
+}
+
+/**
  * Represents the HttpStage
  */
-export interface IHttpStage extends IStage {
+export interface IHttpStage extends IStage, IHttpStageRef {
   /**
    * The API this stage is associated to.
    */
@@ -87,7 +107,7 @@ export interface HttpStageProps extends HttpStageOptions {
   /**
    * The HTTP API to which this stage is associated.
    */
-  readonly httpApi: IHttpApi;
+  readonly httpApi: IHttpApiRef;
 }
 
 /**
@@ -101,6 +121,7 @@ export interface HttpStageAttributes extends StageAttributes {
 }
 
 abstract class HttpStageBase extends StageBase implements IHttpStage {
+  public readonly isHttpStage = true;
   public abstract readonly domainUrl: string;
   public abstract readonly api: IHttpApi;
 
@@ -133,53 +154,85 @@ abstract class HttpStageBase extends StageBase implements IHttpStage {
  * Represents a stage where an instance of the API is deployed.
  * @resource AWS::ApiGatewayV2::Stage
  */
+@propertyInjectable
 export class HttpStage extends HttpStageBase {
+  /** Uniquely identifies this class. */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-apigatewayv2.HttpStage';
+
   /**
    * Import an existing stage into this CDK app.
    */
   public static fromHttpStageAttributes(scope: Construct, id: string, attrs: HttpStageAttributes): IHttpStage {
     class Import extends HttpStageBase {
+      public readonly isHttpStage = true;
       protected readonly baseApi = attrs.api;
       public readonly stageName = attrs.stageName;
       public readonly api = attrs.api;
 
       get url(): string {
-        throw new Error('url is not available for imported stages.');
+        throw new ValidationError(lit`UrlAvailableImportedStages`, 'url is not available for imported stages.', scope);
       }
 
       get domainUrl(): string {
-        throw new Error('domainUrl is not available for imported stages.');
+        throw new ValidationError(lit`DomainUrlAvailableImportedStages`, 'domainUrl is not available for imported stages.', scope);
+      }
+
+      /**
+       * CLF Log format for HTTP API Stage.
+       *
+       * @see https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-logging.html
+       */
+      defaultAccessLogFormat(): AccessLogFormat {
+        return AccessLogFormat.clf();
       }
     }
     return new Import(scope, id);
   }
 
-  protected readonly baseApi: IApi;
   public readonly stageName: string;
-  public readonly api: IHttpApi;
+  private readonly _api: IHttpApiRef;
 
   constructor(scope: Construct, id: string, props: HttpStageProps) {
     super(scope, id, {
       physicalName: props.stageName ? props.stageName : DEFAULT_STAGE_NAME,
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
+
+    if (props.stageVariables) {
+      Object.entries(props.stageVariables).forEach(([key, value]) => {
+        this.addStageVariable(key, value);
+      });
+    }
 
     new CfnStage(this, 'Resource', {
-      apiId: props.httpApi.apiId,
+      apiId: props.httpApi.apiRef.apiId,
       stageName: this.physicalName,
+      accessLogSettings: this._validateAccessLogSettings(props.accessLogSettings),
       autoDeploy: props.autoDeploy,
-      defaultRouteSettings: !props.throttle ? undefined : {
+      defaultRouteSettings: props.throttle || props.detailedMetricsEnabled ? {
         throttlingBurstLimit: props.throttle?.burstLimit,
         throttlingRateLimit: props.throttle?.rateLimit,
-      },
+        detailedMetricsEnabled: props.detailedMetricsEnabled,
+      } : undefined,
+      description: props.description,
+      stageVariables: Lazy.any({ produce: () => this._stageVariables }),
     });
 
     this.stageName = this.physicalName;
-    this.baseApi = props.httpApi;
-    this.api = props.httpApi;
+    this._api = props.httpApi;
 
     if (props.domainMapping) {
       this._addDomainMapping(props.domainMapping);
     }
+  }
+
+  public get api(): IHttpApi {
+    return toIHttpApi(this._api);
+  }
+
+  protected get baseApi(): IApi {
+    return this.api;
   }
 
   /**
@@ -193,9 +246,17 @@ export class HttpStage extends HttpStageBase {
 
   public get domainUrl(): string {
     if (!this._apiMapping) {
-      throw new Error('domainUrl is not available when no API mapping is associated with the Stage');
+      throw new ValidationError(lit`DomainUrlAvailableMappingAssociated`, 'domainUrl is not available when no API mapping is associated with the Stage', this);
     }
+    return this._apiMapping.domainUrl;
+  }
 
-    return `https://${this._apiMapping.domainName.name}/${this._apiMapping.mappingKey ?? ''}`;
+  /**
+   * CLF Log format for HTTP API Stage.
+   *
+   * @see https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-logging.html
+   */
+  defaultAccessLogFormat(): AccessLogFormat {
+    return AccessLogFormat.clf();
   }
 }

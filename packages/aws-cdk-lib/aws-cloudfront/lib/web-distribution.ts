@@ -1,16 +1,30 @@
-import { Construct } from 'constructs';
+import type { Construct } from 'constructs';
+import { DistributionGrants } from './cloudfront-grants.generated';
+import type { DistributionReference } from './cloudfront.generated';
 import { CfnDistribution } from './cloudfront.generated';
-import { HttpVersion, IDistribution, LambdaEdgeEventType, OriginProtocolPolicy, PriceClass, ViewerProtocolPolicy, SSLMethod, SecurityPolicyProtocol } from './distribution';
-import { FunctionAssociation } from './function';
-import { GeoRestriction } from './geo-restriction';
-import { IKeyGroup } from './key-group';
-import { IOriginAccessIdentity } from './origin-access-identity';
+import type { IDistribution } from './distribution';
+import {
+  HttpVersion,
+  LambdaEdgeEventType,
+  OriginProtocolPolicy,
+  PriceClass,
+  SecurityPolicyProtocol,
+  SSLMethod,
+  ViewerProtocolPolicy,
+} from './distribution';
+import type { FunctionAssociation } from './function';
+import type { GeoRestriction } from './geo-restriction';
 import { formatDistributionArn } from './private/utils';
 import * as certificatemanager from '../../aws-certificatemanager';
 import * as iam from '../../aws-iam';
-import * as lambda from '../../aws-lambda';
+import type * as lambda from '../../aws-lambda';
 import * as s3 from '../../aws-s3';
 import * as cdk from '../../core';
+import { addConstructMetadata, MethodMetadata } from '../../core/lib/metadata-resource';
+import { lit } from '../../core/lib/private/literal-string';
+import { propertyInjectable } from '../../core/lib/prop-injectable';
+import type { ICertificateRef } from '../../interfaces/generated/aws-certificatemanager-interfaces.generated';
+import type { ICloudFrontOriginAccessIdentityRef, IKeyGroupRef } from '../../interfaces/generated/aws-cloudfront-interfaces.generated';
 
 /**
  * HTTP status code to failover to second origin
@@ -129,7 +143,7 @@ interface SourceConfigurationRender {
 
 /**
  * A source configuration is a wrapper for CloudFront origins and behaviors.
- * An origin is what CloudFront will "be in front of" - that is, CloudFront will pull it's assets from an origin.
+ * An origin is what CloudFront will "be in front of" - that is, CloudFront will pull its assets from an origin.
  *
  * If you're using s3 as a source - pass the `s3Origin` property, otherwise, pass the `customOriginSource` property.
  *
@@ -309,7 +323,7 @@ export interface S3OriginConfig {
    *
    * @default No Origin Access Identity which requires the S3 bucket to be public accessible
    */
-  readonly originAccessIdentity?: IOriginAccessIdentity;
+  readonly originAccessIdentity?: ICloudFrontOriginAccessIdentityRef & iam.IGrantable;
 
   /**
    * The relative path to the origin root to use for sources.
@@ -385,7 +399,7 @@ export interface Behavior {
    * @default - no KeyGroups are associated with cache behavior
    * @see https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/PrivateContent.html
    */
-  readonly trustedKeyGroups?: IKeyGroup[];
+  readonly trustedKeyGroups?: IKeyGroupRef[];
 
   /**
    *
@@ -479,7 +493,7 @@ export interface LambdaFunctionAssociation {
   /**
    * Allows a Lambda function to have read access to the body content.
    * Only valid for "request" event types (`ORIGIN_REQUEST` or `VIEWER_REQUEST`).
-   * See https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/lambda-include-body-access.html
+   * @see https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/lambda-include-body-access.html
    *
    * @default false
    */
@@ -524,7 +538,7 @@ export class ViewerCertificate {
    *                    Your certificate must be located in the us-east-1 (US East (N. Virginia)) region to be accessed by CloudFront
    * @param options certificate configuration options
    */
-  public static fromAcmCertificate(certificate: certificatemanager.ICertificate, options: ViewerCertificateOptions = {}) {
+  public static fromAcmCertificate(certificate: ICertificateRef, options: ViewerCertificateOptions = {}) {
     const {
       sslMethod: sslSupportMethod = SSLMethod.SNI,
       securityPolicy: minimumProtocolVersion,
@@ -532,7 +546,7 @@ export class ViewerCertificate {
     } = options;
 
     return new ViewerCertificate({
-      acmCertificateArn: certificate.certificateArn, sslSupportMethod, minimumProtocolVersion,
+      acmCertificateArn: certificate.certificateRef.certificateId, sslSupportMethod, minimumProtocolVersion,
     }, aliases);
   }
 
@@ -736,13 +750,19 @@ export interface CloudFrontWebDistributionAttributes {
  * });
  * ```
  *
- * This will create a CloudFront distribution that uses your S3Bucket as it's origin.
+ * This will create a CloudFront distribution that uses your S3Bucket as its origin.
  *
  * You can customize the distribution using additional properties from the CloudFrontWebDistributionProps interface.
  *
  * @resource AWS::CloudFront::Distribution
+ * @deprecated Use `Distribution` instead
  */
+@propertyInjectable
 export class CloudFrontWebDistribution extends cdk.Resource implements IDistribution {
+  /**
+   * Uniquely identifies this class.
+   */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-cloudfront.CloudFrontWebDistribution';
 
   /**
    * Creates a construct that represents an external (imported) distribution.
@@ -752,6 +772,9 @@ export class CloudFrontWebDistribution extends cdk.Resource implements IDistribu
       public readonly domainName: string;
       public readonly distributionDomainName: string;
       public readonly distributionId: string;
+      public readonly distributionRef = {
+        distributionId: attrs.distributionId,
+      };
 
       constructor() {
         super(scope, id);
@@ -760,14 +783,33 @@ export class CloudFrontWebDistribution extends cdk.Resource implements IDistribu
         this.distributionId = attrs.distributionId;
       }
 
+      public get distributionArn(): string {
+        return formatDistributionArn(this);
+      }
+
+      /**
+       * [disable-awslint:no-grants]
+       */
       public grant(grantee: iam.IGrantable, ...actions: string[]): iam.Grant {
         return iam.Grant.addToPrincipal({ grantee, actions, resourceArns: [formatDistributionArn(this)] });
       }
+
+      /**
+       *
+       * The use of this method is discouraged. Please use `grants.createInvalidation()` instead.
+       *
+       * [disable-awslint:no-grants]
+       */
       public grantCreateInvalidation(identity: iam.IGrantable): iam.Grant {
-        return this.grant(identity, 'cloudfront:CreateInvalidation');
+        return DistributionGrants.fromDistribution(this).createInvalidation(identity);
       }
     }();
   }
+
+  /**
+   * Collection of grant methods for a Distribution
+   */
+  public readonly grants = DistributionGrants.fromDistribution(this);
 
   /**
    * The logging bucket for this CloudFront distribution.
@@ -796,6 +838,8 @@ export class CloudFrontWebDistribution extends cdk.Resource implements IDistribu
    */
   public readonly distributionId: string;
 
+  public readonly distributionRef: DistributionReference;
+
   /**
    * Maps our methods to the string arrays they are
    */
@@ -815,10 +859,16 @@ export class CloudFrontWebDistribution extends cdk.Resource implements IDistribu
       SecurityPolicyProtocol.TLS_V1_2_2019, SecurityPolicyProtocol.TLS_V1_2_2021,
     ],
     [SSLMethod.VIP]: [SecurityPolicyProtocol.SSL_V3, SecurityPolicyProtocol.TLS_V1],
+    [SSLMethod.STATIC_IP]: [
+      SecurityPolicyProtocol.TLS_V1_2_2018, SecurityPolicyProtocol.TLS_V1_2_2019,
+      SecurityPolicyProtocol.TLS_V1_2_2021,
+    ],
   };
 
   constructor(scope: Construct, id: string, props: CloudFrontWebDistributionProps) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     // Comments have an undocumented limit of 128 characters
     const trimmedComment =
@@ -878,7 +928,7 @@ export class CloudFrontWebDistribution extends cdk.Resource implements IDistribu
 
     origins.forEach(origin => {
       if (!origin.s3OriginConfig && !origin.customOriginConfig) {
-        throw new Error(`Origin ${origin.domainName} is missing either S3OriginConfig or CustomOriginConfig. At least 1 must be specified.`);
+        throw new cdk.ValidationError(lit`OriginMissingS3OrCustomConfig`, `Origin ${origin.domainName} is missing either S3OriginConfig or CustomOriginConfig. At least 1 must be specified.`, this);
       }
     });
     const originGroupsDistConfig =
@@ -891,13 +941,13 @@ export class CloudFrontWebDistribution extends cdk.Resource implements IDistribu
 
     const defaultBehaviors = behaviors.filter(behavior => behavior.isDefaultBehavior);
     if (defaultBehaviors.length !== 1) {
-      throw new Error('There can only be one default behavior across all sources. [ One default behavior per distribution ].');
+      throw new cdk.ValidationError(lit`OnlyOneDefaultBehaviorAllowed`, 'There can only be one default behavior across all sources. [ One default behavior per distribution ].', this);
     }
 
     const otherBehaviors: CfnDistribution.CacheBehaviorProperty[] = [];
     for (const behavior of behaviors.filter(b => !b.isDefaultBehavior)) {
       if (!behavior.pathPattern) {
-        throw new Error('pathPattern is required for all non-default behaviors');
+        throw new cdk.ValidationError(lit`PathPatternRequiredForNonDefaultBehaviors`, 'pathPattern is required for all non-default behaviors', this);
       }
       otherBehaviors.push(this.toBehavior(behavior, props.viewerProtocolPolicy) as CfnDistribution.CacheBehaviorProperty);
     }
@@ -909,7 +959,7 @@ export class CloudFrontWebDistribution extends cdk.Resource implements IDistribu
       httpVersion: props.httpVersion || HttpVersion.HTTP2,
       priceClass: props.priceClass || PriceClass.PRICE_CLASS_100,
       ipv6Enabled: props.enableIpV6 ?? true,
-      // eslint-disable-next-line max-len
+
       customErrorResponses: props.errorConfigurations, // TODO: validation : https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-cloudfront-distribution-customerrorresponse.html#cfn-cloudfront-distribution-customerrorresponse-errorcachingminttl
       webAclId: props.webACLId,
 
@@ -921,10 +971,10 @@ export class CloudFrontWebDistribution extends cdk.Resource implements IDistribu
     };
 
     if (props.aliasConfiguration && props.viewerCertificate) {
-      throw new Error([
+      throw new cdk.ValidationError(lit`CannotSetBothAliasConfigurationAndViewerCertificate`, [
         'You cannot set both aliasConfiguration and viewerCertificate properties.',
         'Please only use viewerCertificate, as aliasConfiguration is deprecated.',
-      ].join(' '));
+      ].join(' '), this);
     }
 
     let _viewerCertificate = props.viewerCertificate;
@@ -947,8 +997,7 @@ export class CloudFrontWebDistribution extends cdk.Resource implements IDistribu
         const validProtocols = this.VALID_SSL_PROTOCOLS[sslSupportMethod as SSLMethod];
 
         if (validProtocols.indexOf(minimumProtocolVersion.toString()) === -1) {
-          // eslint-disable-next-line max-len
-          throw new Error(`${minimumProtocolVersion} is not compabtible with sslMethod ${sslSupportMethod}.\n\tValid Protocols are: ${validProtocols.join(', ')}`);
+          throw new cdk.ValidationError(lit`IncompatibleSslProtocolAndMethod`, `${minimumProtocolVersion} is not compabtible with sslMethod ${sslSupportMethod}.\n\tValid Protocols are: ${validProtocols.join(', ')}`, this);
         }
       }
     } else {
@@ -985,30 +1034,42 @@ export class CloudFrontWebDistribution extends cdk.Resource implements IDistribu
     }
 
     const distribution = new CfnDistribution(this, 'CFDistribution', { distributionConfig });
+    cdk.Validations.of(distribution).acknowledge({
+      id: 'CloudFormation-Validate::W9009',
+      reason: 'distributionConfig is deprecated, but still in use for historical reasons',
+    });
+    this.distributionRef = distribution.distributionRef;
     this.node.defaultChild = distribution;
     this.domainName = distribution.attrDomainName;
     this.distributionDomainName = distribution.attrDomainName;
     this.distributionId = distribution.ref;
   }
 
+  public get distributionArn(): string {
+    return formatDistributionArn(this);
+  }
+
   /**
    * Adds an IAM policy statement associated with this distribution to an IAM
    * principal's policy.
+   * [disable-awslint:no-grants]
    *
    * @param identity The principal
    * @param actions The set of actions to allow (i.e. "cloudfront:ListInvalidations")
    */
+  @MethodMetadata()
   public grant(identity: iam.IGrantable, ...actions: string[]): iam.Grant {
     return iam.Grant.addToPrincipal({ grantee: identity, actions, resourceArns: [formatDistributionArn(this)] });
   }
 
   /**
    * Grant to create invalidations for this bucket to an IAM principal (Role/Group/User).
+   * [disable-awslint:no-grants]
    *
    * @param identity The principal
    */
   grantCreateInvalidation(identity: iam.IGrantable): iam.Grant {
-    return this.grant(identity, 'cloudfront:CreateInvalidation');
+    return this.grants.createInvalidation(identity);
   }
 
   private toBehavior(input: BehaviorWithOrigin, protoPolicy?: ViewerProtocolPolicy) {
@@ -1020,7 +1081,7 @@ export class CloudFrontWebDistribution extends cdk.Resource implements IDistribu
       forwardedValues: input.forwardedValues || { queryString: false, cookies: { forward: 'none' } },
       maxTtl: input.maxTtl && input.maxTtl.toSeconds(),
       minTtl: input.minTtl && input.minTtl.toSeconds(),
-      trustedKeyGroups: input.trustedKeyGroups?.map(key => key.keyGroupId),
+      trustedKeyGroups: input.trustedKeyGroups?.map(key => key.keyGroupRef.keyGroupId),
       trustedSigners: input.trustedSigners,
       targetOriginId: input.targetOriginId,
       viewerProtocolPolicy: input.viewerProtocolPolicy || protoPolicy || ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
@@ -1031,7 +1092,7 @@ export class CloudFrontWebDistribution extends cdk.Resource implements IDistribu
     if (input.functionAssociations) {
       toReturn = Object.assign(toReturn, {
         functionAssociations: input.functionAssociations.map(association => ({
-          functionArn: association.function.functionArn,
+          functionArn: association.function.functionRef.functionArn,
           eventType: association.eventType.toString(),
         })),
       });
@@ -1039,7 +1100,7 @@ export class CloudFrontWebDistribution extends cdk.Resource implements IDistribu
     if (input.lambdaFunctionAssociations) {
       const includeBodyEventTypes = [LambdaEdgeEventType.ORIGIN_REQUEST, LambdaEdgeEventType.VIEWER_REQUEST];
       if (input.lambdaFunctionAssociations.some(fna => fna.includeBody && !includeBodyEventTypes.includes(fna.eventType))) {
-        throw new Error('\'includeBody\' can only be true for ORIGIN_REQUEST or VIEWER_REQUEST event types.');
+        throw new cdk.ValidationError(lit`IncludeBodyOnlyForRequestEventTypes`, '\'includeBody\' can only be true for ORIGIN_REQUEST or VIEWER_REQUEST event types.', this);
       }
 
       toReturn = Object.assign(toReturn, {
@@ -1069,13 +1130,17 @@ export class CloudFrontWebDistribution extends cdk.Resource implements IDistribu
       !originConfig.s3OriginSource &&
       !originConfig.customOriginSource
     ) {
-      throw new Error(
+      throw new cdk.ValidationError(
+        lit`AtLeastOneOriginSourceRequired`,
         'There must be at least one origin source - either an s3OriginSource, a customOriginSource',
+        this,
       );
     }
     if (originConfig.customOriginSource && originConfig.s3OriginSource) {
-      throw new Error(
+      throw new cdk.ValidationError(
+        lit`CannotHaveBothS3AndCustomOriginSource`,
         'There cannot be both an s3OriginSource and a customOriginSource in the same SourceConfiguration.',
+        this,
       );
     }
 
@@ -1084,7 +1149,7 @@ export class CloudFrontWebDistribution extends cdk.Resource implements IDistribu
       originConfig.s3OriginSource?.originHeaders,
       originConfig.customOriginSource?.originHeaders,
     ].filter(x => x).length > 1) {
-      throw new Error('Only one originHeaders field allowed across origin and failover origins');
+      throw new cdk.ValidationError(lit`OnlyOneOriginHeadersFieldAllowed`, 'Only one originHeaders field allowed across origin and failover origins', this);
     }
 
     if ([
@@ -1092,7 +1157,7 @@ export class CloudFrontWebDistribution extends cdk.Resource implements IDistribu
       originConfig.s3OriginSource?.originPath,
       originConfig.customOriginSource?.originPath,
     ].filter(x => x).length > 1) {
-      throw new Error('Only one originPath field allowed across origin and failover origins');
+      throw new cdk.ValidationError(lit`OnlyOneOriginPathFieldAllowed`, 'Only one originPath field allowed across origin and failover origins', this);
     }
 
     if ([
@@ -1100,7 +1165,7 @@ export class CloudFrontWebDistribution extends cdk.Resource implements IDistribu
       originConfig.s3OriginSource?.originShieldRegion,
       originConfig.customOriginSource?.originShieldRegion,
     ].filter(x => x).length > 1) {
-      throw new Error('Only one originShieldRegion field allowed across origin and failover origins');
+      throw new cdk.ValidationError(lit`OnlyOneOriginShieldRegionFieldAllowed`, 'Only one originShieldRegion field allowed across origin and failover origins', this);
     }
 
     const headers = originConfig.originHeaders ?? originConfig.s3OriginSource?.originHeaders ?? originConfig.customOriginSource?.originHeaders;
@@ -1132,7 +1197,7 @@ export class CloudFrontWebDistribution extends cdk.Resource implements IDistribu
         }));
 
         s3OriginConfig = {
-          originAccessIdentity: `origin-access-identity/cloudfront/${originConfig.s3OriginSource.originAccessIdentity.originAccessIdentityId}`,
+          originAccessIdentity: `origin-access-identity/cloudfront/${originConfig.s3OriginSource.originAccessIdentity.cloudFrontOriginAccessIdentityRef.cloudFrontOriginAccessIdentityId}`,
         };
       } else {
         s3OriginConfig = {};
@@ -1141,12 +1206,12 @@ export class CloudFrontWebDistribution extends cdk.Resource implements IDistribu
 
     const connectionAttempts = originConfig.connectionAttempts ?? 3;
     if (connectionAttempts < 1 || 3 < connectionAttempts || !Number.isInteger(connectionAttempts)) {
-      throw new Error('connectionAttempts: You can specify 1, 2, or 3 as the number of attempts.');
+      throw new cdk.ValidationError(lit`InvalidConnectionAttempts`, 'connectionAttempts: You can specify 1, 2, or 3 as the number of attempts.', this);
     }
 
     const connectionTimeout = (originConfig.connectionTimeout || cdk.Duration.seconds(10)).toSeconds();
     if (connectionTimeout < 1 || 10 < connectionTimeout || !Number.isInteger(connectionTimeout)) {
-      throw new Error('connectionTimeout: You can specify a number of seconds between 1 and 10 (inclusive).');
+      throw new cdk.ValidationError(lit`InvalidConnectionTimeout`, 'connectionTimeout: You can specify a number of seconds between 1 and 10 (inclusive).', this);
     }
 
     const originProperty: CfnDistribution.OriginProperty = {

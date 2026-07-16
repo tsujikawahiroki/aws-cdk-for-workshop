@@ -1,8 +1,9 @@
-import { IConstruct } from 'constructs';
+import type { IConstruct } from 'constructs';
 import { PolicyStatement, deriveEstimateSizeOptions } from './policy-statement';
 import { mergeStatements } from './private/merge-statements';
 import { PostProcessPolicyDocument } from './private/postprocess-policy-document';
 import * as cdk from '../../core';
+import { lit } from '../../core/lib/private/literal-string';
 import * as cxapi from '../../cx-api';
 
 /**
@@ -46,7 +47,6 @@ export interface PolicyDocumentProps {
  * A PolicyDocument is a collection of statements
  */
 export class PolicyDocument implements cdk.IResolvable {
-
   /**
    * Creates a new PolicyDocument based on the object provided.
    * This will accept an object created from the `.toJSON()` call
@@ -56,19 +56,18 @@ export class PolicyDocument implements cdk.IResolvable {
     const newPolicyDocument = new PolicyDocument();
     const statement = obj.Statement ?? [];
     if (statement && !Array.isArray(statement)) {
-      throw new Error('Statement must be an array');
+      throw new cdk.UnscopedValidationError(lit`StatementMustBeArray`, 'Statement must be an array');
     }
     newPolicyDocument.addStatements(...obj.Statement.map((s: any) => PolicyStatement.fromJson(s)));
     return newPolicyDocument;
   }
 
-  public readonly creationStack: string[];
+  public readonly creationStack: string[] = ['Token stack traces are no longer captured'];
   private readonly statements = new Array<PolicyStatement>();
   private readonly autoAssignSids: boolean;
   private readonly minimize?: boolean;
 
   constructor(props: PolicyDocumentProps = {}) {
-    this.creationStack = cdk.captureStackTrace();
     this.autoAssignSids = !!props.assignSids;
     this.minimize = props.minimize;
 

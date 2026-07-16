@@ -1,8 +1,8 @@
-import { Construct, IConstruct } from 'constructs';
-import * as cognito from '../../aws-cognito';
+import type { Construct, IConstruct } from 'constructs';
+import type * as cognito from '../../aws-cognito';
 import { Port } from '../../aws-ec2';
 import * as elbv2 from '../../aws-elasticloadbalancingv2';
-import { Duration } from '../../core';
+import type { Duration } from '../../core';
 
 /**
  * Properties for AuthenticateCognitoAction
@@ -85,7 +85,6 @@ export interface AuthenticateCognitoActionProps {
  * A Listener Action to authenticate with Cognito
  */
 export class AuthenticateCognitoAction extends elbv2.ListenerAction {
-
   private static config(options: AuthenticateCognitoActionProps): elbv2.CfnListener.AuthenticateCognitoConfigProperty {
     return {
       userPoolArn: options.userPool.userPoolArn,

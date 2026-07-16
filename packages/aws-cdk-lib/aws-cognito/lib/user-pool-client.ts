@@ -1,10 +1,19 @@
-import { Construct } from 'constructs';
+import type { Construct } from 'constructs';
 import { CfnUserPoolClient } from './cognito.generated';
-import { IUserPool } from './user-pool';
-import { ClientAttributes } from './user-pool-attr';
-import { IUserPoolResourceServer, ResourceServerScope } from './user-pool-resource-server';
-import { IResource, Resource, Duration, Stack, SecretValue } from '../../core';
-import { AwsCustomResource, AwsCustomResourcePolicy, PhysicalResourceId } from '../../custom-resources';
+import type { ClientAttributes } from './user-pool-attr';
+import type { IUserPoolResourceServer, ResourceServerScope } from './user-pool-resource-server';
+import type { IRoleRef } from '../../aws-iam';
+import type { CfnApp } from '../../aws-pinpoint';
+import type { IResource } from '../../core';
+import { Resource, Duration, Stack, SecretValue, Token, FeatureFlags } from '../../core';
+import { toIUserPool } from './private/ref-utils';
+import { UnscopedValidationError, ValidationError } from '../../core/lib/errors';
+import { addConstructMetadata } from '../../core/lib/metadata-resource';
+import { lit } from '../../core/lib/private/literal-string';
+import { propertyInjectable } from '../../core/lib/prop-injectable';
+import { AwsCustomResource, AwsCustomResourcePolicy, Logging, PhysicalResourceId } from '../../custom-resources';
+import * as cxapi from '../../cx-api';
+import type { IUserPoolClientRef, IUserPoolRef, UserPoolClientReference } from '../../interfaces/generated/aws-cognito-interfaces.generated';
 
 /**
  * Types of authentication flow
@@ -34,6 +43,12 @@ export interface AuthFlow {
    * @default false
    */
   readonly userSrp?: boolean;
+
+  /**
+   * Enable Choice-based authentication
+   * @default false
+   */
+  readonly user?: boolean;
 }
 
 /**
@@ -66,6 +81,25 @@ export interface OAuthSettings {
    * @default [OAuthScope.PHONE,OAuthScope.EMAIL,OAuthScope.OPENID,OAuthScope.PROFILE,OAuthScope.COGNITO_ADMIN]
    */
   readonly scopes?: OAuthScope[];
+
+  /**
+   * The default redirect URI.
+   * Must be in the `callbackUrls` list.
+   *
+   * A redirect URI must:
+   * * Be an absolute URI
+   * * Be registered with the authorization server.
+   * * Not include a fragment component.
+   *
+   * @see https://tools.ietf.org/html/rfc6749#section-3.1.2
+   *
+   * Amazon Cognito requires HTTPS over HTTP except for http://localhost for testing purposes only.
+   *
+   * App callback URLs such as myapp://example are also supported.
+   *
+   * @default - no default redirect URI
+   */
+  readonly defaultRedirectUri?: string;
 }
 
 /**
@@ -268,7 +302,7 @@ export interface UserPoolClientOptions {
 
   /**
    * Validity of the ID token.
-   * Values between 5 minutes and 1 day are valid. The duration can not be longer than the refresh token validity.
+   * Values between 5 minutes and 1 day are valid. The duration cannot be longer than the refresh token validity.
    * @see https://docs.aws.amazon.com/en_us/cognito/latest/developerguide/amazon-cognito-user-pools-using-tokens-with-identity-providers.html#amazon-cognito-user-pools-using-the-id-token
    * @default Duration.minutes(60)
    */
@@ -284,11 +318,19 @@ export interface UserPoolClientOptions {
 
   /**
    * Validity of the access token.
-   * Values between 5 minutes and 1 day are valid. The duration can not be longer than the refresh token validity.
+   * Values between 5 minutes and 1 day are valid. The duration cannot be longer than the refresh token validity.
    * @see https://docs.aws.amazon.com/en_us/cognito/latest/developerguide/amazon-cognito-user-pools-using-tokens-with-identity-providers.html#amazon-cognito-user-pools-using-the-access-token
    * @default Duration.minutes(60)
    */
   readonly accessTokenValidity?: Duration;
+
+  /**
+   * Enables refresh token rotation when set.
+   * Defines the grace period for the original refresh token (0-60 seconds).
+   * @see https://docs.aws.amazon.com/cognito/latest/developerguide/amazon-cognito-user-pools-using-the-refresh-token.html#using-the-refresh-token-rotation
+   * @default - undefined (refresh token rotation is disabled)
+   */
+  readonly refreshTokenRotationGracePeriod?: Duration;
 
   /**
    * The set of attributes this client will be able to read.
@@ -318,6 +360,12 @@ export interface UserPoolClientOptions {
    * @default false for new user pool clients
    */
   readonly enablePropagateAdditionalUserContextData?: boolean;
+
+  /**
+   * The analytics configuration for this client.
+   * @default - no analytics configuration
+   */
+  readonly analytics?: AnalyticsConfiguration;
 }
 
 /**
@@ -327,13 +375,54 @@ export interface UserPoolClientProps extends UserPoolClientOptions {
   /**
    * The UserPool resource this client will have access to
    */
-  readonly userPool: IUserPool;
+  readonly userPool: IUserPoolRef;
+}
+
+/**
+ * The settings for Amazon Pinpoint analytics configuration.
+ * With an analytics configuration, your application can collect user-activity metrics for user notifications with an Amazon Pinpoint campaign.
+ * Amazon Pinpoint isn't available in all AWS Regions.
+ * For a list of available Regions, see Amazon Cognito and Amazon Pinpoint Region availability: https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pools-pinpoint-integration.html#cognito-user-pools-find-region-mappings.
+ */
+export interface AnalyticsConfiguration {
+  /**
+   * The Amazon Pinpoint project that you want to connect to your user pool app client.
+   * Amazon Cognito publishes events to the Amazon Pinpoint project.
+   * You can also configure your application to pass an endpoint ID in the `AnalyticsMetadata` parameter of sign-in operations.
+   * The endpoint ID is information about the destination for push notifications.
+   * @default - no configuration, you need to specify either `application` or all of `applicationId`, `externalId`, and `role`.
+   */
+  readonly application?: CfnApp;
+
+  /**
+   * Your Amazon Pinpoint project ID.
+   * @default - no configuration, you need to specify either this property along with `externalId` and `role` or `application`.
+   */
+  readonly applicationId?: string;
+
+  /**
+   * The external ID of the role that Amazon Cognito assumes to send analytics data to Amazon Pinpoint. More info here: https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_create_for-user_externalid.html
+   * @default - no configuration, you need to specify either this property along with `applicationId` and `role` or `application`.
+   */
+  readonly externalId?: string;
+
+  /**
+   * The IAM role that has the permissions required for Amazon Cognito to publish events to Amazon Pinpoint analytics.
+   * @default - no configuration, you need to specify either this property along with `applicationId` and `externalId` or `application`.
+   */
+  readonly role?: IRoleRef;
+
+  /**
+   * If `true`, Amazon Cognito includes user data in the events that it publishes to Amazon Pinpoint analytics.
+   * @default - false
+   */
+  readonly shareUserData?: boolean;
 }
 
 /**
  * Represents a Cognito user pool client.
  */
-export interface IUserPoolClient extends IResource {
+export interface IUserPoolClient extends IResource, IUserPoolClientRef {
   /**
    * Name of the application client
    * @attribute
@@ -350,7 +439,12 @@ export interface IUserPoolClient extends IResource {
 /**
  * Define a UserPool App Client
  */
+@propertyInjectable
 export class UserPoolClient extends Resource implements IUserPoolClient {
+  /**
+   * Uniquely identifies this class.
+   */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-cognito.UserPoolClient';
 
   /**
    * Import a user pool client given its id.
@@ -359,7 +453,15 @@ export class UserPoolClient extends Resource implements IUserPoolClient {
     class Import extends Resource implements IUserPoolClient {
       public readonly userPoolClientId = userPoolClientId;
       get userPoolClientSecret(): SecretValue {
-        throw new Error('UserPool Client Secret is not available for imported Clients');
+        throw new ValidationError(lit`UserPoolClientSecretAvailable`, 'UserPool Client Secret is not available for imported Clients', this);
+      }
+      public get userPoolClientRef(): UserPoolClientReference {
+        return {
+          clientId: userPoolClientId,
+          get userPoolId(): string {
+            throw new UnscopedValidationError(lit`UserpoolidAvailableUserpoolclient`, 'userPoolId is not available on UserPoolClient.fromUserPoolClientId().');
+          },
+        };
       }
     }
 
@@ -369,7 +471,7 @@ export class UserPoolClient extends Resource implements IUserPoolClient {
   public readonly userPoolClientId: string;
 
   private _generateSecret?: boolean;
-  private readonly userPool: IUserPool;
+  private readonly userPool: IUserPoolRef;
   private _userPoolClientSecret?: SecretValue;
 
   /**
@@ -377,6 +479,13 @@ export class UserPoolClient extends Resource implements IUserPoolClient {
    */
   public readonly oAuthFlows: OAuthFlows;
   private readonly _userPoolClientName?: string;
+
+  public get userPoolClientRef(): UserPoolClientReference {
+    return {
+      userPoolId: this.userPool.userPoolRef.userPoolId,
+      clientId: this.userPoolClientId,
+    };
+  }
 
   /*
    * Note to implementers: Two CloudFormation return values Name and ClientSecret are part of the spec.
@@ -388,9 +497,13 @@ export class UserPoolClient extends Resource implements IUserPoolClient {
 
   constructor(scope: Construct, id: string, props: UserPoolClientProps) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
+
+    this.userPool = props.userPool;
 
     if (props.disableOAuth && props.oAuth) {
-      throw new Error('OAuth settings cannot be specified when disableOAuth is set.');
+      throw new ValidationError(lit`AuthSettingsCannotSpecifiedDisable`, 'OAuth settings cannot be specified when disableOAuth is set.', this);
     }
 
     this.oAuthFlows = props.oAuth?.flows ?? {
@@ -403,12 +516,23 @@ export class UserPoolClient extends Resource implements IUserPoolClient {
       if (callbackUrls === undefined) {
         callbackUrls = ['https://example.com'];
       } else if (callbackUrls.length === 0) {
-        throw new Error('callbackUrl must not be empty when codeGrant or implicitGrant OAuth flows are enabled.');
+        throw new ValidationError(lit`CallbackUrlEmptyCodeGrant`, 'callbackUrl must not be empty when codeGrant or implicitGrant OAuth flows are enabled.', this);
+      }
+    }
+
+    if (props.oAuth?.defaultRedirectUri && !Token.isUnresolved(props.oAuth.defaultRedirectUri)) {
+      if (callbackUrls && !callbackUrls.includes(props.oAuth.defaultRedirectUri)) {
+        throw new ValidationError(lit`DefaultRedirectUriIncludedCallback`, 'defaultRedirectUri must be included in callbackUrls.', this);
+      }
+
+      const defaultRedirectUriPattern = /^(?=.{1,1024}$)[\p{L}\p{M}\p{S}\p{N}\p{P}]+$/u;
+      if (!defaultRedirectUriPattern.test(props.oAuth.defaultRedirectUri)) {
+        throw new ValidationError(lit`DefaultRedirectUriInvalidPattern`, `defaultRedirectUri must match the \`^(?=.{1,1024}$)[\p{L}\p{M}\p{S}\p{N}\p{P}]+$\` pattern, got ${props.oAuth.defaultRedirectUri}`, this);
       }
     }
 
     if (!props.generateSecret && props.enablePropagateAdditionalUserContextData) {
-      throw new Error('Cannot activate enablePropagateAdditionalUserContextData in an app client without a client secret.');
+      throw new ValidationError(lit`CannotActivateEnablePropagateAdditional`, 'Cannot activate enablePropagateAdditionalUserContextData in an app client without a client secret.', this);
     }
 
     this._generateSecret = props.generateSecret;
@@ -417,10 +541,11 @@ export class UserPoolClient extends Resource implements IUserPoolClient {
     const resource = new CfnUserPoolClient(this, 'Resource', {
       clientName: props.userPoolClientName,
       generateSecret: props.generateSecret,
-      userPoolId: props.userPool.userPoolId,
+      userPoolId: props.userPool.userPoolRef.userPoolId,
       explicitAuthFlows: this.configureAuthFlows(props),
       allowedOAuthFlows: props.disableOAuth ? undefined : this.configureOAuthFlows(),
       allowedOAuthScopes: props.disableOAuth ? undefined : this.configureOAuthScopes(props.oAuth),
+      defaultRedirectUri: props.oAuth?.defaultRedirectUri,
       callbackUrLs: callbackUrls && callbackUrls.length > 0 && !props.disableOAuth ? callbackUrls : undefined,
       logoutUrLs: props.oAuth?.logoutUrls,
       allowedOAuthFlowsUserPoolClient: !props.disableOAuth,
@@ -430,9 +555,11 @@ export class UserPoolClient extends Resource implements IUserPoolClient {
       writeAttributes: props.writeAttributes?.attributes(),
       enableTokenRevocation: props.enableTokenRevocation,
       enablePropagateAdditionalUserContextData: props.enablePropagateAdditionalUserContextData,
+      analyticsConfiguration: props.analytics ? this.configureAnalytics(props.analytics) : undefined,
     });
     this.configureAuthSessionValidity(resource, props);
     this.configureTokenValidity(resource, props);
+    this.configureRefreshTokenRotation(resource, props);
 
     this.userPoolClientId = resource.ref;
     this._userPoolClientName = props.userPoolClientName;
@@ -444,17 +571,17 @@ export class UserPoolClient extends Resource implements IUserPoolClient {
    */
   public get userPoolClientName(): string {
     if (this._userPoolClientName === undefined) {
-      throw new Error('userPoolClientName is available only if specified on the UserPoolClient during initialization');
+      throw new ValidationError(lit`UserPoolClientNameAvailable`, 'userPoolClientName is available only if specified on the UserPoolClient during initialization', this);
     }
     return this._userPoolClientName;
   }
 
   public get userPoolClientSecret(): SecretValue {
     if (!this._generateSecret) {
-      throw new Error(
-        'userPoolClientSecret is available only if generateSecret is set to true.',
-      );
+      throw new ValidationError(lit`UserPoolClientSecretAvailable`, 'userPoolClientSecret is available only if generateSecret is set to true.', this);
     }
+
+    const isEnableLogUserPoolClientSecret = FeatureFlags.of(this).isEnabled(cxapi.LOG_USER_POOL_CLIENT_SECRET_VALUE);
 
     // Create the Custom Resource that assists in resolving the User Pool Client secret
     // just once, no matter how many times this method is called
@@ -469,13 +596,14 @@ export class UserPoolClient extends Resource implements IUserPoolClient {
             service: 'CognitoIdentityServiceProvider',
             action: 'describeUserPoolClient',
             parameters: {
-              UserPoolId: this.userPool.userPoolId,
+              UserPoolId: this.userPool.userPoolRef.userPoolId,
               ClientId: this.userPoolClientId,
             },
             physicalResourceId: PhysicalResourceId.of(this.userPoolClientId),
+            logging: isEnableLogUserPoolClientSecret ? undefined : Logging.withDataHidden(),
           },
           policy: AwsCustomResourcePolicy.fromSdkCalls({
-            resources: [this.userPool.userPoolArn],
+            resources: [this.userPool.userPoolRef.userPoolArn],
           }),
           // APIs are available in 2.1055.0
           installLatestAwsSdk: false,
@@ -494,16 +622,19 @@ export class UserPoolClient extends Resource implements IUserPoolClient {
     if (props.authFlows.adminUserPassword) { authFlows.push('ALLOW_ADMIN_USER_PASSWORD_AUTH'); }
     if (props.authFlows.custom) { authFlows.push('ALLOW_CUSTOM_AUTH'); }
     if (props.authFlows.userSrp) { authFlows.push('ALLOW_USER_SRP_AUTH'); }
+    if (props.authFlows.user) { authFlows.push('ALLOW_USER_AUTH'); }
 
-    // refreshToken should always be allowed if authFlows are present
-    authFlows.push('ALLOW_REFRESH_TOKEN_AUTH');
+    // refreshToken should only be allowed if authFlows are present and refresh token rotation is disabled
+    if (!props.refreshTokenRotationGracePeriod) {
+      authFlows.push('ALLOW_REFRESH_TOKEN_AUTH');
+    }
 
     return authFlows;
   }
 
   private configureOAuthFlows(): string[] | undefined {
     if ((this.oAuthFlows.authorizationCodeGrant || this.oAuthFlows.implicitCodeGrant) && this.oAuthFlows.clientCredentials) {
-      throw new Error('clientCredentials OAuth flow cannot be selected along with codeGrant or implicitGrant.');
+      throw new ValidationError(lit`ClientCredentialsAuthFlowCannot`, 'clientCredentials OAuth flow cannot be selected along with codeGrant or implicitGrant.', this);
     }
     const oAuthFlows: string[] = [];
     if (this.oAuthFlows.clientCredentials) { oAuthFlows.push('client_credentials'); }
@@ -537,7 +668,8 @@ export class UserPoolClient extends Resource implements IUserPoolClient {
   private configureIdentityProviders(props: UserPoolClientProps): string[] | undefined {
     let providers: string[];
     if (!props.supportedIdentityProviders) {
-      const providerSet = new Set(props.userPool.identityProviders.map((p) => p.providerName));
+      const userPool = toIUserPool(props.userPool);
+      const providerSet = new Set(userPool.identityProviders.map((p) => p.providerName));
       providerSet.add('COGNITO');
       providers = Array.from(providerSet);
     } else {
@@ -567,17 +699,52 @@ export class UserPoolClient extends Resource implements IUserPoolClient {
         accessToken: props.accessTokenValidity ? 'minutes' : undefined,
         refreshToken: props.refreshTokenValidity ? 'minutes' : undefined,
       };
-    };
+    }
 
     resource.idTokenValidity = props.idTokenValidity ? props.idTokenValidity.toMinutes() : undefined;
     resource.refreshTokenValidity = props.refreshTokenValidity ? props.refreshTokenValidity.toMinutes() : undefined;
     resource.accessTokenValidity = props.accessTokenValidity ? props.accessTokenValidity.toMinutes() : undefined;
   }
 
+  private configureRefreshTokenRotation(resource: CfnUserPoolClient, props: UserPoolClientProps) {
+    if (props.refreshTokenRotationGracePeriod) {
+      this.validateDuration('refreshTokenRotationGracePeriod', Duration.seconds(0), Duration.minutes(1), props.refreshTokenRotationGracePeriod);
+      resource.refreshTokenRotation = {
+        feature: 'ENABLED',
+        retryGracePeriodSeconds: props.refreshTokenRotationGracePeriod.toSeconds(),
+      };
+    }
+  }
+
   private validateDuration(name: string, min: Duration, max: Duration, value?: Duration) {
     if (value === undefined) { return; }
     if (value.toMilliseconds() < min.toMilliseconds() || value.toMilliseconds() > max.toMilliseconds()) {
-      throw new Error(`${name}: Must be a duration between ${min.toHumanString()} and ${max.toHumanString()} (inclusive); received ${value.toHumanString()}.`);
+      throw new ValidationError(lit`DurationOutOfRange`, `${name}: Must be a duration between ${min.toHumanString()} and ${max.toHumanString()} (inclusive); received ${value.toHumanString()}.`, this);
     }
+  }
+
+  private configureAnalytics(analytics: AnalyticsConfiguration): CfnUserPoolClient.AnalyticsConfigurationProperty {
+    // NOTE: CloudFormation expects either `ApplicationArn` or all of `ApplicationId`, `ExternalId`, and `RoleArn` to be provided.
+    if (
+      analytics.application &&
+        (analytics.applicationId || analytics.externalId || analytics.role)
+    ) {
+      throw new ValidationError(lit`Either`, 'Either `application` or all of `applicationId`, `externalId` and `role` must be specified.', this);
+    }
+
+    if (
+      !analytics.application &&
+        (!analytics.applicationId || !analytics.externalId || !analytics.role)
+    ) {
+      throw new ValidationError(lit`Either`, 'Either all of `applicationId`, `externalId` and `role` must be specified or `application` must be specified.', this);
+    }
+
+    return {
+      applicationArn: analytics.application?.attrArn,
+      applicationId: analytics.applicationId,
+      externalId: analytics.externalId,
+      roleArn: analytics.role?.roleRef.roleArn,
+      userDataShared: analytics.shareUserData,
+    };
   }
 }

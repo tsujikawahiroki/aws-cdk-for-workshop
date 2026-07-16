@@ -1,16 +1,24 @@
-import { Construct } from 'constructs';
+import type { Construct } from 'constructs';
+import type { InstanceReference } from '.';
 import { InstanceArchitecture, InstanceClass, InstanceSize, InstanceType } from '.';
-import { CloudFormationInit } from './cfn-init';
-import { Connections } from './connections';
-import { ApplyCloudFormationInitOptions, IInstance, Instance } from './instance';
-import { AmazonLinuxCpuType, IMachineImage, MachineImage } from './machine-image';
-import { IPeer } from './peer';
+import type { CloudFormationInit } from './cfn-init';
+import type { Connections } from './connections';
+import type { ApplyCloudFormationInitOptions, IInstance } from './instance';
+import { Instance } from './instance';
+import type { IMachineImage } from './machine-image';
+import { AmazonLinuxCpuType, MachineImage } from './machine-image';
+import type { IPeer } from './peer';
 import { Port } from './port';
-import { ISecurityGroup } from './security-group';
-import { BlockDevice } from './volume';
-import { IVpc, SubnetSelection } from './vpc';
-import { IPrincipal, IRole, PolicyStatement } from '../../aws-iam';
-import { CfnOutput, Resource, Stack } from '../../core';
+import type { ISecurityGroup } from './security-group';
+import type { BlockDevice } from './volume';
+import type { IVpc, SubnetSelection } from './vpc';
+import type { IPrincipal, IRole } from '../../aws-iam';
+import { PolicyStatement } from '../../aws-iam';
+import { CfnOutput, FeatureFlags, Resource, UnscopedValidationError } from '../../core';
+import { addConstructMetadata, MethodMetadata } from '../../core/lib/metadata-resource';
+import { lit } from '../../core/lib/private/literal-string';
+import { propertyInjectable } from '../../core/lib/prop-injectable';
+import { BASTION_HOST_USE_AMAZON_LINUX_2023_BY_DEFAULT } from '../../cx-api';
 
 /**
  * Properties of the bastion host
@@ -63,7 +71,7 @@ export interface BastionHostLinuxProps {
   /**
    * The machine image to use, assumed to have SSM Agent preinstalled.
    *
-   * @default - An Amazon Linux 2 image which is kept up-to-date automatically (the instance
+   * @default - An Amazon Linux 2023 image if the `@aws-cdk/aws-ec2:bastionHostUseAmazonLinux2023ByDefault` feature flag is enabled. Otherwise, an Amazon Linux 2 image. In both cases, the image is kept up-to-date automatically (the instance
    * may be replaced on every deployment) and already has SSM Agent installed.
    */
   readonly machineImage?: IMachineImage;
@@ -104,6 +112,25 @@ export interface BastionHostLinuxProps {
    * @default - false
    */
   readonly requireImdsv2?: boolean;
+
+  /**
+   * Determines whether changes to the UserData will force instance replacement.
+   *
+   * Depending on the EC2 instance type, modifying the UserData may either restart
+   * or replace the instance:
+   *
+   * - Instance store-backed instances are replaced.
+   * - EBS-backed instances are restarted.
+   *
+   * Note that by default, restarting does not execute the updated UserData, so an alternative
+   * mechanism is needed to ensure the instance re-executes the UserData.
+   *
+   * When set to `true`, the instance's Logical ID will depend on the UserData, causing
+   * CloudFormation to replace the instance if the UserData changes.
+   *
+   * @default - `true` if `initOptions` is specified, otherwise `false`.
+   */
+  readonly userDataCausesReplacement?: boolean;
 }
 
 /**
@@ -117,8 +144,12 @@ export interface BastionHostLinuxProps {
  *
  * @resource AWS::EC2::Instance
  */
+@propertyInjectable
 export class BastionHostLinux extends Resource implements IInstance {
-  public readonly stack: Stack;
+  /**
+   * Uniquely identifies this class.
+   */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-ec2.BastionHostLinux';
 
   /**
    * Allows specify security group connections for the instance.
@@ -172,7 +203,8 @@ export class BastionHostLinux extends Resource implements IInstance {
 
   constructor(scope: Construct, id: string, props: BastionHostLinuxProps) {
     super(scope, id);
-    this.stack = Stack.of(scope);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
     const instanceType = props.instanceType ?? InstanceType.of(InstanceClass.T3, InstanceSize.NANO);
     this.instance = new Instance(this, 'Resource', {
       vpc: props.vpc,
@@ -180,14 +212,13 @@ export class BastionHostLinux extends Resource implements IInstance {
       securityGroup: props.securityGroup,
       instanceName: props.instanceName ?? 'BastionHost',
       instanceType,
-      machineImage: props.machineImage ?? MachineImage.latestAmazonLinux2({
-        cpuType: this.toAmazonLinuxCpuType(instanceType.architecture),
-      }),
+      machineImage: this.getMachineImage(this, instanceType, props),
       vpcSubnets: props.subnetSelection ?? {},
       blockDevices: props.blockDevices ?? undefined,
       init: props.init,
       initOptions: props.initOptions,
       requireImdsv2: props.requireImdsv2 ?? false,
+      userDataCausesReplacement: props.userDataCausesReplacement,
     });
     this.instance.addToRolePolicy(new PolicyStatement({
       actions: [
@@ -213,6 +244,12 @@ export class BastionHostLinux extends Resource implements IInstance {
     });
   }
 
+  public get instanceRef(): InstanceReference {
+    return {
+      instanceId: this.instanceId,
+    };
+  }
+
   /**
    * Returns the AmazonLinuxCpuType corresponding to the given instance architecture
    * @param architecture the instance architecture value to convert
@@ -224,7 +261,7 @@ export class BastionHostLinux extends Resource implements IInstance {
       return AmazonLinuxCpuType.X86_64;
     }
 
-    throw new Error(`Unsupported instance architecture '${architecture}'`);
+    throw new UnscopedValidationError(lit`UnsupportedInstanceArchitecture`, `Unsupported instance architecture '${architecture}'`);
   }
 
   /**
@@ -233,9 +270,25 @@ export class BastionHostLinux extends Resource implements IInstance {
    * Necessary if you want to connect to the instance using ssh. If not
    * called, you should use SSM Session Manager to connect to the instance.
    */
+  @MethodMetadata()
   public allowSshAccessFrom(...peer: IPeer[]): void {
     peer.forEach(p => {
       this.connections.allowFrom(p, Port.tcp(22), 'SSH access');
     });
+  }
+
+  /**
+   * Returns the machine image to use for the bastion host, respecting the feature flag
+   * to default to Amazon Linux 2023 if enabled, otherwise defaulting to Amazon Linux 2.
+   */
+  private getMachineImage(scope: Construct, instanceType: InstanceType, props: BastionHostLinuxProps): IMachineImage {
+    const defaultMachineImage = FeatureFlags.of(scope).isEnabled(BASTION_HOST_USE_AMAZON_LINUX_2023_BY_DEFAULT)
+      ? MachineImage.latestAmazonLinux2023({
+        cpuType: this.toAmazonLinuxCpuType(instanceType.architecture),
+      })
+      : MachineImage.latestAmazonLinux2({
+        cpuType: this.toAmazonLinuxCpuType(instanceType.architecture),
+      });
+    return props.machineImage ?? defaultMachineImage;
   }
 }

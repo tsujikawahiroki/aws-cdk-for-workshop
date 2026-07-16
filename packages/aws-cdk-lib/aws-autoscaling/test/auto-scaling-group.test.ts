@@ -3,7 +3,8 @@ import { Annotations, Match, Template } from '../../assertions';
 import * as cloudwatch from '../../aws-cloudwatch';
 import * as ec2 from '../../aws-ec2';
 import { AmazonLinuxCpuType, AmazonLinuxGeneration, AmazonLinuxImage, InstanceType, LaunchTemplate } from '../../aws-ec2';
-import { ApplicationListener, ApplicationLoadBalancer, ApplicationTargetGroup } from '../../aws-elasticloadbalancingv2';
+import type { ApplicationListener } from '../../aws-elasticloadbalancingv2';
+import { ApplicationLoadBalancer, ApplicationTargetGroup } from '../../aws-elasticloadbalancingv2';
 import * as iam from '../../aws-iam';
 import * as sns from '../../aws-sns';
 import * as ssm from '../../aws-ssm';
@@ -12,7 +13,7 @@ import { AUTOSCALING_GENERATE_LAUNCH_TEMPLATE } from '../../cx-api';
 import * as autoscaling from '../lib';
 import { OnDemandAllocationStrategy, SpotAllocationStrategy } from '../lib';
 
-/* eslint-disable quote-props */
+/* eslint-disable @stylistic/quote-props */
 
 describe('auto scaling group', () => {
   test('default fleet', () => {
@@ -564,7 +565,6 @@ describe('auto scaling group', () => {
         ],
       },
     });
-
   });
 
   testDeprecated('can configure replacing update', () => {
@@ -651,7 +651,7 @@ describe('auto scaling group', () => {
     });
   });
 
-  test('can configure EC2 health check', () => {
+  testDeprecated('can configure EC2 health check', () => {
     // GIVEN
     const stack = new cdk.Stack(undefined, 'MyStack', { env: { region: 'us-east-1', account: '1234' } });
     const vpc = mockVpc(stack);
@@ -670,7 +670,7 @@ describe('auto scaling group', () => {
     });
   });
 
-  test('can configure EBS health check', () => {
+  testDeprecated('can configure ELB health check', () => {
     // GIVEN
     const stack = new cdk.Stack(undefined, 'MyStack', { env: { region: 'us-east-1', account: '1234' } });
     const vpc = mockVpc(stack);
@@ -688,6 +688,106 @@ describe('auto scaling group', () => {
       HealthCheckType: 'ELB',
       HealthCheckGracePeriod: 900,
     });
+  });
+
+  test.each([
+    cdk.Duration.seconds(100),
+    undefined,
+  ])('can configure EC2 health checks with gracePeriod is %s', (gracePeriod) => {
+    // GIVEN
+    const stack = new cdk.Stack(undefined, 'MyStack', { env: { region: 'us-east-1', account: '1234' } });
+    const vpc = mockVpc(stack);
+
+    // WHEN
+    new autoscaling.AutoScalingGroup(stack, 'MyFleet', {
+      instanceType: ec2.InstanceType.of(ec2.InstanceClass.M4, ec2.InstanceSize.MICRO),
+      machineImage: new ec2.AmazonLinuxImage(),
+      vpc,
+      healthChecks: autoscaling.HealthChecks.ec2({
+        gracePeriod,
+      }),
+    });
+
+    const expectedGrace = gracePeriod ? gracePeriod.toSeconds() : Match.absent();
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::AutoScaling::AutoScalingGroup', {
+      HealthCheckType: 'EC2',
+      HealthCheckGracePeriod: expectedGrace,
+    });
+  });
+
+  test.each([
+    cdk.Duration.seconds(100),
+    undefined,
+  ])('can configure additional health checks with gracePeriod is %s', (gracePeriod) => {
+    // GIVEN
+    const stack = new cdk.Stack(undefined, 'MyStack', { env: { region: 'us-east-1', account: '1234' } });
+    const vpc = mockVpc(stack);
+
+    // WHEN
+    new autoscaling.AutoScalingGroup(stack, 'MyFleet', {
+      instanceType: ec2.InstanceType.of(ec2.InstanceClass.M4, ec2.InstanceSize.MICRO),
+      machineImage: new ec2.AmazonLinuxImage(),
+      vpc,
+      healthChecks: autoscaling.HealthChecks.withAdditionalChecks({
+        gracePeriod,
+        additionalTypes: [
+          autoscaling.AdditionalHealthCheckType.EBS,
+          autoscaling.AdditionalHealthCheckType.ELB,
+          autoscaling.AdditionalHealthCheckType.VPC_LATTICE,
+        ],
+      }),
+    });
+
+    const expectedGrace = gracePeriod ? gracePeriod.toSeconds() : Match.absent();
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::AutoScaling::AutoScalingGroup', {
+      HealthCheckType: 'EBS,ELB,VPC_LATTICE',
+      HealthCheckGracePeriod: expectedGrace,
+    });
+  });
+
+  test('throws if both healthCheck and healthChecks are specified.', () => {
+    // GIVEN
+    const stack = new cdk.Stack(undefined, 'MyStack', { env: { region: 'us-east-1', account: '1234' } });
+    const vpc = mockVpc(stack);
+
+    // WHEN
+    expect(() => {
+      new autoscaling.AutoScalingGroup(stack, 'MyFleet', {
+        instanceType: ec2.InstanceType.of(ec2.InstanceClass.M4, ec2.InstanceSize.MICRO),
+        machineImage: new ec2.AmazonLinuxImage(),
+        vpc,
+        healthCheck: autoscaling.HealthCheck.ec2(),
+        healthChecks: autoscaling.HealthChecks.withAdditionalChecks({
+          gracePeriod: cdk.Duration.seconds(100),
+          additionalTypes: [
+            autoscaling.AdditionalHealthCheckType.EBS,
+          ],
+        }),
+      });
+    }).toThrow(/Cannot specify both 'healthCheck' and 'healthChecks'. Please use 'healthChecks' only./);
+  });
+
+  test('throws when additionalTypes array for additional health checks is empty', () => {
+    // GIVEN
+    const stack = new cdk.Stack(undefined, 'MyStack', { env: { region: 'us-east-1', account: '1234' } });
+    const vpc = mockVpc(stack);
+
+    // THEN
+    expect(() => {
+      new autoscaling.AutoScalingGroup(stack, 'MyFleet', {
+        instanceType: ec2.InstanceType.of(ec2.InstanceClass.M4, ec2.InstanceSize.MICRO),
+        machineImage: new ec2.AmazonLinuxImage(),
+        vpc,
+        healthChecks: autoscaling.HealthChecks.withAdditionalChecks({
+          gracePeriod: cdk.Duration.seconds(100),
+          additionalTypes: [],
+        }),
+      });
+    }).toThrow(/At least one health check type must be specified in 'additionalTypes' for 'healthChecks'/);
   });
 
   test('can add Security Group to Fleet', () => {
@@ -1071,7 +1171,7 @@ describe('auto scaling group', () => {
     }).toThrow(/maxInstanceLifetime must be between 1 and 365 days \(inclusive\)/);
   });
 
-  test.each([124, 1001])('throws if throughput is set less than 125 or more than 1000', (throughput) => {
+  test.each([124, 2001])('throws if throughput is set less than 125 or more than 2000', (throughput) => {
     const stack = new cdk.Stack();
     const vpc = mockVpc(stack);
 
@@ -1089,7 +1189,7 @@ describe('auto scaling group', () => {
           }),
         }],
       });
-    }).toThrow(/throughput property takes a minimum of 125 and a maximum of 1000/);
+    }).toThrow(/throughput property takes a minimum of 125 and a maximum of 2000/);
   });
 
   test.each([
@@ -1218,6 +1318,10 @@ describe('auto scaling group', () => {
   test('warning if iops without volumeType', () => {
     // GIVEN
     const stack = new cdk.Stack();
+    cdk.Validations.of(stack).acknowledge({
+      id: 'CloudFormation-Validate::W3671',
+      reason: 'We have our own warning',
+    });
     const vpc = mockVpc(stack);
 
     new autoscaling.AutoScalingGroup(stack, 'MyStack', {
@@ -1241,6 +1345,10 @@ describe('auto scaling group', () => {
   test('warning if iops and volumeType !== IO1', () => {
     // GIVEN
     const stack = new cdk.Stack();
+    cdk.Validations.of(stack).acknowledge({
+      id: 'CloudFormation-Validate::W3671',
+      reason: 'We have our own warning',
+    });
     const vpc = mockVpc(stack);
 
     new autoscaling.AutoScalingGroup(stack, 'MyStack', {
@@ -1589,7 +1697,6 @@ describe('auto scaling group', () => {
     Template.fromStack(stack).hasResourceProperties('AWS::AutoScaling::AutoScalingGroup', {
       CapacityRebalance: true,
     });
-
   });
 
   test('Can protect new instances from scale-in via constructor property', () => {
@@ -2303,7 +2410,6 @@ describe('auto scaling group', () => {
       vpc: mockVpc(stack),
       signals: autoscaling.Signals.waitForAll(),
     })).not.toThrow();
-
   });
 
   describe('multiple target groups', () => {
@@ -2480,7 +2586,6 @@ describe('auto scaling group', () => {
       });
     }).toThrow("Setting \'keyPair\' must not be set when \'launchTemplate\' or \'mixedInstancesPolicy\' is set");
   });
-
 });
 
 function mockVpc(stack: cdk.Stack) {
@@ -2797,6 +2902,27 @@ describe('InstanceMaintenancePolicy', () => {
     });
   });
 
+  test('can specify capacityDistributionStrategy', () => {
+    // GIVEN
+    const stack = new cdk.Stack();
+    const vpc = mockVpc(stack);
+
+    // WHEN
+    new autoscaling.AutoScalingGroup(stack, 'MyFleet', {
+      instanceType: ec2.InstanceType.of(ec2.InstanceClass.M4, ec2.InstanceSize.MICRO),
+      machineImage: new ec2.AmazonLinuxImage(),
+      vpc,
+      azCapacityDistributionStrategy: autoscaling.CapacityDistributionStrategy.BALANCED_ONLY,
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::AutoScaling::AutoScalingGroup', {
+      AvailabilityZoneDistribution: {
+        CapacityDistributionStrategy: 'balanced-only',
+      },
+    });
+  });
+
   test('throws if maxHealthyPercentage is greater than 200', () => {
     // GIVEN
     const stack = new cdk.Stack();
@@ -2947,6 +3073,67 @@ describe('InstanceMaintenancePolicy', () => {
       });
     }).toThrow(/The difference between minHealthyPercentage and maxHealthyPercentage cannot be greater than 100, got 200/);
   });
+
+  test('throws if requireImdsv2 set when launchTemplate is set', () => {
+    // GIVEN
+    const stack = new cdk.Stack();
+    stack.node.setContext(AUTOSCALING_GENERATE_LAUNCH_TEMPLATE, true);
+    const vpc = mockVpc(stack);
+    const lt = LaunchTemplate.fromLaunchTemplateAttributes(stack, 'imported-lt', {
+      launchTemplateId: 'test-lt-id',
+      versionNumber: '0',
+    });
+
+    // THEN
+    expect(() => {
+      new autoscaling.AutoScalingGroup(stack, 'MyFleet', {
+        vpc,
+        launchTemplate: lt,
+        requireImdsv2: true,
+      });
+    }).toThrow(/Setting \'requireImdsv2\' must not be set when \'launchTemplate\' or \'mixedInstancesPolicy\' is set/);
+  });
+});
+
+test('throws if updatePolicy is not set when migrateToLaunchTemplate is true', () => {
+  // GIVEN
+  const stack = new cdk.Stack();
+  stack.node.setContext(AUTOSCALING_GENERATE_LAUNCH_TEMPLATE, true);
+  const vpc = mockVpc(stack);
+  const lt = LaunchTemplate.fromLaunchTemplateAttributes(stack, 'imported-lt', {
+    launchTemplateId: 'test-lt-id',
+    versionNumber: '0',
+  });
+
+  // THEN
+  expect(() => {
+    new autoscaling.AutoScalingGroup(stack, 'MyFleet', {
+      vpc,
+      launchTemplate: lt,
+      migrateToLaunchTemplate: true,
+    });
+  }).toThrow(/When migrateToLaunchTemplate is true, you must use AutoScalingRollingUpdate to ensure instances are properly replaced during migration. This prevents instances from referencing a deleted IAM instance profile./);
+});
+
+test('throws if updatePolicy is set with AutoScalingReplacingUpdate when migrateToLaunchTemplate is true', () => {
+  // GIVEN
+  const stack = new cdk.Stack();
+  stack.node.setContext(AUTOSCALING_GENERATE_LAUNCH_TEMPLATE, true);
+  const vpc = mockVpc(stack);
+  const lt = LaunchTemplate.fromLaunchTemplateAttributes(stack, 'imported-lt', {
+    launchTemplateId: 'test-lt-id',
+    versionNumber: '0',
+  });
+
+  // THEN
+  expect(() => {
+    new autoscaling.AutoScalingGroup(stack, 'MyFleet', {
+      vpc,
+      launchTemplate: lt,
+      migrateToLaunchTemplate: true,
+      updatePolicy: autoscaling.UpdatePolicy.replacingUpdate(),
+    });
+  }).toThrow(/When migrateToLaunchTemplate is true, you must use AutoScalingRollingUpdate to ensure instances are properly replaced during migration. This prevents instances from referencing a deleted IAM instance profile./);
 });
 
 function mockSecurityGroup(stack: cdk.Stack) {
@@ -2956,3 +3143,54 @@ function mockSecurityGroup(stack: cdk.Stack) {
 function getTestStack(): cdk.Stack {
   return new cdk.Stack(undefined, 'TestStack', { env: { account: '1234', region: 'us-east-1' } });
 }
+
+test.each([
+  [autoscaling.TerminateHookAbandonAction.RETAIN, 'retain'],
+  [autoscaling.TerminateHookAbandonAction.TERMINATE, 'terminate'],
+  [undefined, Match.absent()],
+])('can configure instanceLifecyclePolicy with %s', (terminateHookAbandon, expectedValue) => {
+  const stack = new cdk.Stack();
+  const vpc = mockVpc(stack);
+
+  new autoscaling.AutoScalingGroup(stack, `MyASG-${expectedValue}`, {
+    instanceType: ec2.InstanceType.of(ec2.InstanceClass.M4, ec2.InstanceSize.MICRO),
+    machineImage: new ec2.AmazonLinuxImage(),
+    vpc,
+    instanceLifecyclePolicy: {
+      retentionTriggers: {
+        terminateHookAbandon,
+      },
+    },
+  });
+
+  Template.fromStack(stack).hasResourceProperties('AWS::AutoScaling::AutoScalingGroup', {
+    InstanceLifecyclePolicy: {
+      RetentionTriggers: {
+        TerminateHookAbandon: expectedValue,
+      },
+    },
+  });
+});
+
+test.each([
+  [autoscaling.DeletionProtection.NONE, 'none'],
+  [autoscaling.DeletionProtection.PREVENT_FORCE_DELETION, 'prevent-force-deletion'],
+  [autoscaling.DeletionProtection.PREVENT_ALL_DELETION, 'prevent-all-deletion'],
+])('can configure deletion protection with %s', (deletionProtection, expectedValue) => {
+  // GIVEN
+  const stack = new cdk.Stack();
+  const vpc = mockVpc(stack);
+
+  // WHEN
+  new autoscaling.AutoScalingGroup(stack, 'MyFleet', {
+    instanceType: ec2.InstanceType.of(ec2.InstanceClass.M4, ec2.InstanceSize.MICRO),
+    machineImage: new ec2.AmazonLinuxImage(),
+    vpc,
+    deletionProtection,
+  });
+
+  // THEN
+  Template.fromStack(stack).hasResourceProperties('AWS::AutoScaling::AutoScalingGroup', {
+    DeletionProtection: expectedValue,
+  });
+});

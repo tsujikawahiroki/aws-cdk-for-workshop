@@ -17,7 +17,12 @@ import { IntegTest } from '@aws-cdk/integ-tests-alpha';
  * -- aws stepfunctions start-execution --state-machine-arn <state-machine-arn-from-output> provides execution arn
  * -- aws stepfunctions describe-execution --execution-arn <state-machine-arn-from-output> returns a status of `Succeeded`
  */
-const app = new cdk.App();
+const app = new cdk.App({
+  postCliContext: {
+    '@aws-cdk/aws-lambda:useCdkManagedLogGroup': false,
+    '@aws-cdk/aws-lambda:createNewPoliciesWithAddToRolePolicy': false,
+  },
+});
 const stack = new cdk.Stack(app, 'aws-sfn-tasks-ecs-task');
 stack.node.setContext(EC2_RESTRICT_DEFAULT_SECURITY_GROUP, false);
 
@@ -39,28 +44,27 @@ const containerDefinition = taskDefinition.addContainer('Container', {
 const definition = new sfn.Pass(stack, 'Start', {
   result: sfn.Result.fromObject({ SomeKey: 'SomeValue' }),
 }).next(
-  new sfn.Task(stack, 'Run', {
-    task: new tasks.RunEcsEc2Task({
-      integrationPattern: sfn.ServiceIntegrationPattern.SYNC,
-      cluster,
-      taskDefinition,
-      containerOverrides: [
-        {
-          containerDefinition,
-          environment: [
-            {
-              name: 'SOME_KEY',
-              value: sfn.JsonPath.stringAt('$.SomeKey'),
-            },
-          ],
-        },
-      ],
-    }),
+  new tasks.EcsRunTask(stack, 'Run', {
+    integrationPattern: sfn.IntegrationPattern.RUN_JOB,
+    cluster,
+    taskDefinition,
+    containerOverrides: [
+      {
+        containerDefinition,
+        environment: [
+          {
+            name: 'SOME_KEY',
+            value: sfn.JsonPath.stringAt('$.SomeKey'),
+          },
+        ],
+      },
+    ],
+    launchTarget: new tasks.EcsEc2LaunchTarget(),
   }),
 );
 
 new sfn.StateMachine(stack, 'StateMachine', {
-  definition,
+  definitionBody: sfn.DefinitionBody.fromChainable(definition),
 });
 
 new IntegTest(app, 'SfnTasksEcsEc2TaskTest', {

@@ -1,13 +1,14 @@
 # unit tests for the s3 bucket deployment lambda handler
-import index
-import os
-import unittest
 import json
 import logging
+import os
 import tempfile
-from botocore.vendored import requests
-from botocore.exceptions import ClientError
+import unittest
 from unittest.mock import MagicMock, patch
+
+import index
+from botocore.exceptions import ClientError, WaiterError
+from botocore.vendored import requests
 
 # set TEST_AWSCLI_PATH to point to the "aws" stub we have here
 scriptdir=os.path.dirname(os.path.realpath(__file__))
@@ -36,6 +37,54 @@ class TestHandler(unittest.TestCase):
                 "Test": "random%0D%0A%5BINFO%5D%20hacking"
             }, expected_status="FAILED")
             error_logger_mock.assert_called_once_with('| cfn_error: b"missing request resource property \'SourceBucketNames\'. props: {\'Test\': \'random%0D%0A%5BINFO%5D%20hacking\'}"')
+
+    
+    def test_cloudfront_waiter_error_message(self):
+        
+        def mock_make_api_call(_self, operation_name, _kwarg):
+            if operation_name == 'CreateInvalidation':
+                return {'Invalidation': {'Id': '<invalidation-id>'}}
+            if operation_name == 'GetInvalidation':
+                raise WaiterError(
+                    name='invalidation_completed',
+                    reason='Max attempts exceeded',
+                    last_response={'Invalidation': {'Status': 'InProgress'}}
+                )
+            raise ClientError({'Error': {'Code': '500', 'Message': 'Unsupported operation'}}, operation_name)
+
+        with patch('botocore.client.BaseClient._make_api_call', new=mock_make_api_call):
+            resp = invoke_handler("Create", {
+                "SourceBucketNames": ["<source-bucket>"],
+                "SourceObjectKeys": ["<source-object-key>"],
+                "DestinationBucketName": "<dest-bucket-name>",
+                "DistributionId": "<cf-dist-id>",
+            }, expected_status="FAILED")
+
+        self.assertIn("Unable to confirm that cache invalidation was successful", resp["Reason"])
+        self.assertIn("CloudFront regression", resp["Reason"])
+
+    def test_cloudfront_no_wait_invalidation(self):
+        def mock_make_api_call(_self, operation_name, _kwarg):
+            if operation_name == 'CreateInvalidation':
+                return {'Invalidation': {'Id': '<invalidation-id>'}}
+            if operation_name == 'GetInvalidation':
+                raise RuntimeError('Waiting should be skipped in this test case.')
+            raise ClientError({'Error': {'Code': '500', 'Message': 'Unsupported operation'}}, operation_name)
+
+        with patch('botocore.client.BaseClient._make_api_call', new=mock_make_api_call):
+            resp = invoke_handler("Create", {
+                "SourceBucketNames": ["<source-bucket>"],
+                "SourceObjectKeys": ["<source-object-key>"],
+                "DestinationBucketName": "<dest-bucket-name>",
+                "DistributionId": "<cf-dist-id>",
+                "WaitForDistributionInvalidation": False
+            })
+
+    def test_sanitize_message(self):
+        sanitized = index.sanitize_message("twenty-one\r\n%0a%0aINFO:+User+logged+out%3dbadguy")
+        
+        # Expect the output sanitized string to remove newline characters and enforce double URL encoding
+        self.assertEqual(sanitized, 'twenty-one%250a%250aINFO%3A%2BUser%2Blogged%2Bout%253dbadguy')
 
     def test_create_update(self):
         invoke_handler("Create", {
@@ -640,17 +689,41 @@ class TestHandler(unittest.TestCase):
         )
     
     def test_replace_markers(self):
-        index.extract_and_replace_markers("test.zip", "/tmp/out", {
-            "_marker2_": "boom-marker2-replaced",
-            "_marker1_": "<<foo>>",
-        })
+        for json_aware_source_processing in [True, False]:
+            with self.subTest(json_aware_source_processing=json_aware_source_processing):
+                marker_config = {}
+                if json_aware_source_processing:
+                    marker_config = {"jsonEscape": "true"}
+                index.extract_and_replace_markers("test.zip", "/tmp/out", {
+                    "_marker3_": "value\"with\"quotes",
+                    "_marker2_": "boom-marker2-replaced",
+                    "_marker1_": "<<foo>>",
+                }, marker_config)
 
-        # assert that markers were replaced in the output
-        with open("/tmp/out/subfolder/boom.txt", "r") as file:
-            self.assertEqual(file.read().rstrip(), "Another <<foo>> file with boom-marker2-replaced hey!\nLine 2 with <<foo>> again :-)")
+                # assert that markers were replaced in the output
+                with open("/tmp/out/subfolder/boom.txt", "r") as file:
+                    self.assertEqual(file.read().rstrip(), "Another <<foo>> file with boom-marker2-replaced hey!\nLine 2 with <<foo>> again :-)")
 
-        with open("/tmp/out/test.txt") as file:
-            self.assertEqual(file.read().rstrip(), "Hello, <<foo>> world")
+                with open("/tmp/out/test.txt") as file:
+                    self.assertEqual(file.read().rstrip(), "Hello, <<foo>> world")
+
+                with open("/tmp/out/test.yaml") as file:
+                    import yaml
+                    content = file.read().rstrip()
+                    yamlObject = yaml.safe_load(content) # valid yaml
+                    if json_aware_source_processing:
+                        self.assertEqual(content, "root:\n    key_with_quote: prefixvalue\\\"with\\\"quotessuffix\n    key_without_quote: prefixboom-marker2-replacedsuffix")
+                    else:
+                        self.assertEqual(content, "root:\n    key_with_quote: prefixvalue\"with\"quotessuffix\n    key_without_quote: prefixboom-marker2-replacedsuffix")
+
+                with open("/tmp/out/test.json") as file:
+                    content = file.read().rstrip()
+                    if json_aware_source_processing:
+                        # self.assertEqual(content, '{"root": {"key_with_quote": "prefixvalue\\"with\\"quotessuffix", "key_without_quote": "prefixboom-marker2-replacedsuffix"}}')
+                        self.assertEqual(content, '{\n    "root": {\n        "key_with_quote": "prefixvalue\\"with\\"quotessuffix",\n        "key_without_quote": "prefixboom-marker2-replacedsuffix"\n    }\n}')
+                        jsonObject = json.loads(content) # valid json
+                    else:
+                        self.assertEqual(content, '{\n    "root": {\n        "key_with_quote": "prefixvalue"with"quotessuffix",\n        "key_without_quote": "prefixboom-marker2-replacedsuffix"\n    }\n}')
 
     def test_marker_substitution(self):
         outdir = tempfile.mkdtemp()

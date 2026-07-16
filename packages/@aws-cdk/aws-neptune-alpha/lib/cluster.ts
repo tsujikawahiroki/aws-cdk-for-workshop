@@ -1,15 +1,20 @@
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as iam from 'aws-cdk-lib/aws-iam';
-import * as kms from 'aws-cdk-lib/aws-kms';
+import type * as kms from 'aws-cdk-lib/aws-kms';
 import * as logs from 'aws-cdk-lib/aws-logs';
-import { Aws, Duration, IResource, Lazy, RemovalPolicy, Resource, Token } from 'aws-cdk-lib/core';
-import { Construct } from 'constructs';
+import { CfnDBCluster, CfnDBInstance } from 'aws-cdk-lib/aws-neptune';
+import type { Duration, IResource } from 'aws-cdk-lib/core';
+import { Aws, Lazy, RemovalPolicy, Resource, Token, ValidationError } from 'aws-cdk-lib/core';
+import { lit } from 'aws-cdk-lib/core/lib/helpers-internal';
+import { addConstructMetadata } from 'aws-cdk-lib/core/lib/metadata-resource';
+import { propertyInjectable } from 'aws-cdk-lib/core/lib/prop-injectable';
+import type { Construct } from 'constructs';
 import { Endpoint } from './endpoint';
 import { InstanceType } from './instance';
-import { CfnDBCluster, CfnDBInstance } from 'aws-cdk-lib/aws-neptune';
-import { IClusterParameterGroup, IParameterGroup } from './parameter-group';
-import { ISubnetGroup, SubnetGroup } from './subnet-group';
+import type { IClusterParameterGroup, IParameterGroup } from './parameter-group';
+import type { ISubnetGroup } from './subnet-group';
+import { SubnetGroup } from './subnet-group';
 
 /**
  * Possible Instances Types to use in Neptune cluster
@@ -77,6 +82,14 @@ export class EngineVersion {
    */
   public static readonly V1_2_1_0 = new EngineVersion('1.2.1.0');
   /**
+   * Neptune engine version 1.2.1.1
+   */
+  public static readonly V1_2_1_1 = new EngineVersion('1.2.1.1');
+  /**
+   * Neptune engine version 1.2.1.2
+   */
+  public static readonly V1_2_1_2 = new EngineVersion('1.2.1.2');
+  /**
    * Neptune engine version 1.3.0.0
    */
   public static readonly V1_3_0_0 = new EngineVersion('1.3.0.0');
@@ -84,7 +97,58 @@ export class EngineVersion {
    * Neptune engine version 1.3.1.0
    */
   public static readonly V1_3_1_0 = new EngineVersion('1.3.1.0');
-
+  /**
+   * Neptune engine version 1.3.2.0
+   */
+  public static readonly V1_3_2_0 = new EngineVersion('1.3.2.0');
+  /**
+   * Neptune engine version 1.3.2.1
+   */
+  public static readonly V1_3_2_1 = new EngineVersion('1.3.2.1');
+  /**
+   * Neptune engine version 1.3.3.0
+   */
+  public static readonly V1_3_3_0 = new EngineVersion('1.3.3.0');
+  /**
+   * Neptune engine version 1.3.4.0
+   */
+  public static readonly V1_3_4_0 = new EngineVersion('1.3.4.0');
+  /**
+   * Neptune engine version 1.4.0.0
+   */
+  public static readonly V1_4_0_0 = new EngineVersion('1.4.0.0');
+  /**
+   * Neptune engine version 1.4.1.0
+   */
+  public static readonly V1_4_1_0 = new EngineVersion('1.4.1.0');
+  /**
+   * Neptune engine version 1.4.2.0
+   */
+  public static readonly V1_4_2_0 = new EngineVersion('1.4.2.0');
+  /**
+   * Neptune engine version 1.4.3.0
+   */
+  public static readonly V1_4_3_0 = new EngineVersion('1.4.3.0');
+  /**
+   * Neptune engine version 1.4.4.0
+   */
+  public static readonly V1_4_4_0 = new EngineVersion('1.4.4.0');
+  /**
+   * Neptune engine version 1.4.5.0
+   */
+  public static readonly V1_4_5_0 = new EngineVersion('1.4.5.0');
+  /**
+   * Neptune engine version 1.4.5.1
+   */
+  public static readonly V1_4_5_1 = new EngineVersion('1.4.5.1');
+  /**
+   * Neptune engine version 1.4.6.0
+   */
+  public static readonly V1_4_6_0 = new EngineVersion('1.4.6.0');
+  /**
+   * Neptune engine version 1.4.6.1
+   */
+  public static readonly V1_4_6_1 = new EngineVersion('1.4.6.1');
   /**
    * Constructor for specifying a custom engine version
    * @param version the engine version of Neptune
@@ -159,7 +223,7 @@ export interface DatabaseClusterProps {
    *
    * @default - default master key.
    */
-  readonly kmsKey?: kms.IKey;
+  readonly kmsKey?: kms.IKeyRef;
 
   /**
    * Whether to enable storage encryption
@@ -332,6 +396,13 @@ export interface DatabaseClusterProps {
    * @default - false
    */
   readonly copyTagsToSnapshot?: boolean;
+
+  /**
+   * The port number on which the DB instances in the DB cluster accept connections.
+   *
+   * @default 8182
+   */
+  readonly port?: number;
 }
 
 /**
@@ -423,7 +494,6 @@ export interface DatabaseClusterAttributes {
  * A new or imported database cluster.
  */
 export abstract class DatabaseClusterBase extends Resource implements IDatabaseCluster {
-
   /**
    * Import an existing DatabaseCluster from properties
    */
@@ -471,9 +541,12 @@ export abstract class DatabaseClusterBase extends Resource implements IDatabaseC
 
   protected abstract enableIamAuthentication?: boolean;
 
+  /**
+   * [disable-awslint:no-grants]
+   */
   public grant(grantee: iam.IGrantable, ...actions: string[]): iam.Grant {
     if (this.enableIamAuthentication === false) {
-      throw new Error('Cannot grant permissions when IAM authentication is disabled');
+      throw new ValidationError(lit`IamAuthenticationDisabled`, 'Cannot grant permissions when IAM authentication is disabled', this);
     }
 
     this.enableIamAuthentication = true;
@@ -493,6 +566,9 @@ export abstract class DatabaseClusterBase extends Resource implements IDatabaseC
     });
   }
 
+  /**
+   * [disable-awslint:no-grants]
+   */
   public grantConnect(grantee: iam.IGrantable): iam.Grant {
     return this.grant(grantee, 'neptune-db:*');
   }
@@ -514,8 +590,10 @@ export abstract class DatabaseClusterBase extends Resource implements IDatabaseC
  *
  * @resource AWS::Neptune::DBCluster
  */
+@propertyInjectable
 export class DatabaseCluster extends DatabaseClusterBase implements IDatabaseCluster {
-
+  /** Uniquely identifies this class. */
+  public static readonly PROPERTY_INJECTION_ID: string = '@aws-cdk.aws-neptune-alpha.DatabaseCluster';
   /**
    * The default number of instances in the Neptune cluster if none are
    * specified
@@ -563,6 +641,8 @@ export class DatabaseCluster extends DatabaseClusterBase implements IDatabaseClu
 
   constructor(scope: Construct, id: string, props: DatabaseClusterProps) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     this.vpc = props.vpc;
     this.vpcSubnets = props.vpcSubnets ?? { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS };
@@ -572,7 +652,7 @@ export class DatabaseCluster extends DatabaseClusterBase implements IDatabaseClu
 
     // Cannot test whether the subnets are in different AZs, but at least we can test the amount.
     if (subnetIds.length < 2) {
-      throw new Error(`Cluster requires at least 2 subnets, got ${subnetIds.length}`);
+      throw new ValidationError(lit`InsufficientSubnets`, `Cluster requires at least 2 subnets, got ${subnetIds.length}`, this);
     }
 
     this.subnetGroup = props.subnetGroup ?? new SubnetGroup(this, 'Subnets', {
@@ -593,7 +673,7 @@ export class DatabaseCluster extends DatabaseClusterBase implements IDatabaseClu
     const storageEncrypted = props.storageEncrypted ?? true;
 
     if (props.kmsKey && !storageEncrypted) {
-      throw new Error('KMS key supplied but storageEncrypted is false');
+      throw new ValidationError(lit`KmsKeyWithoutEncryption`, 'KMS key supplied but storageEncrypted is false', this);
     }
 
     const deletionProtection = props.deletionProtection ?? (props.removalPolicy === RemovalPolicy.RETAIN ? true : undefined);
@@ -601,7 +681,7 @@ export class DatabaseCluster extends DatabaseClusterBase implements IDatabaseClu
     this.enableIamAuthentication = props.iamAuthentication;
 
     if (props.instanceType === InstanceType.SERVERLESS && !props.serverlessScalingConfiguration) {
-      throw new Error('You need to specify a serverless scaling configuration with a db.serverless instance type.');
+      throw new ValidationError(lit`ServerlessConfigurationRequired`, 'You need to specify a serverless scaling configuration with a db.serverless instance type.', this);
     }
 
     this.validateServerlessScalingConfiguration(props.serverlessScalingConfiguration);
@@ -617,12 +697,13 @@ export class DatabaseCluster extends DatabaseClusterBase implements IDatabaseClu
       deletionProtection: deletionProtection,
       associatedRoles: props.associatedRoles ? props.associatedRoles.map(role => ({ roleArn: role.roleArn })) : undefined,
       iamAuthEnabled: Lazy.any({ produce: () => this.enableIamAuthentication }),
+      dbPort: props.port,
       // Backup
       backupRetentionPeriod: props.backupRetention?.toDays(),
       preferredBackupWindow: props.preferredBackupWindow,
       preferredMaintenanceWindow: props.preferredMaintenanceWindow,
       // Encryption
-      kmsKeyId: props.kmsKey?.keyArn,
+      kmsKeyId: props.kmsKey?.keyRef.keyArn,
       // CloudWatch Logs exports
       enableCloudwatchLogsExports: props.cloudwatchLogsExports?.map(logType => logType.value),
       storageEncrypted,
@@ -657,7 +738,7 @@ export class DatabaseCluster extends DatabaseClusterBase implements IDatabaseClu
     // Create the instances
     const instanceCount = props.instances ?? DatabaseCluster.DEFAULT_NUM_INSTANCES;
     if (instanceCount < 1) {
-      throw new Error('At least one instance is required');
+      throw new ValidationError(lit`InsufficientInstances`, 'At least one instance is required', this);
     }
 
     for (let i = 0; i < instanceCount; i++) {
@@ -697,14 +778,14 @@ export class DatabaseCluster extends DatabaseClusterBase implements IDatabaseClu
   private validateServerlessScalingConfiguration(serverlessScalingConfiguration?: ServerlessScalingConfiguration) {
     if (!serverlessScalingConfiguration) return;
     if (serverlessScalingConfiguration.minCapacity < 1) {
-      throw new Error(`ServerlessScalingConfiguration minCapacity must be greater or equal than 1, received ${serverlessScalingConfiguration.minCapacity}`);
+      throw new ValidationError(lit`InvalidMinCapacity`, `ServerlessScalingConfiguration minCapacity must be greater or equal than 1, received ${serverlessScalingConfiguration.minCapacity}`, this);
     }
     if (serverlessScalingConfiguration.maxCapacity < 2.5 || serverlessScalingConfiguration.maxCapacity > 128) {
-      throw new Error(`ServerlessScalingConfiguration maxCapacity must be between 2.5 and 128, reveived ${serverlessScalingConfiguration.maxCapacity}`);
+      throw new ValidationError(lit`InvalidMaxCapacity`, `ServerlessScalingConfiguration maxCapacity must be between 2.5 and 128, received ${serverlessScalingConfiguration.maxCapacity}`, this);
     }
     if (serverlessScalingConfiguration.minCapacity >= serverlessScalingConfiguration.maxCapacity) {
-      throw new Error(`ServerlessScalingConfiguration minCapacity ${serverlessScalingConfiguration.minCapacity} ` +
-        `must be less than serverlessScalingConfiguration maxCapacity ${serverlessScalingConfiguration.maxCapacity}`);
+      throw new ValidationError(lit`InvalidCapacityRange`, `ServerlessScalingConfiguration minCapacity ${serverlessScalingConfiguration.minCapacity} ` +
+        `must be less than serverlessScalingConfiguration maxCapacity ${serverlessScalingConfiguration.maxCapacity}`, this);
     }
   }
 }

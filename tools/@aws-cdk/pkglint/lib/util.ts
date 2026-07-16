@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { PackageJson, PKGLINT_IGNORES } from './packagejson';
+import type { PackageJson } from './packagejson';
+import { PKGLINT_IGNORES } from './packagejson';
 
 /**
  * Expect a particular JSON key to be a given value
@@ -8,13 +9,13 @@ import { PackageJson, PKGLINT_IGNORES } from './packagejson';
 export function expectJSON(
   ruleName: string,
   pkg: PackageJson,
-  jsonPath: string,
+  jsonPath: string | string[],
   expected: any,
   ignore?: RegExp,
   caseInsensitive: boolean = false,
   regexMatch: boolean = false,
 ) {
-  const parts = jsonPath.split('.');
+  const parts = Array.isArray(jsonPath) ? jsonPath : jsonPath.split('.');
   const actual = deepGet(pkg.json, parts);
   if (checkEquality()) {
     pkg.report({
@@ -105,7 +106,8 @@ export function fileShouldBeginWith(ruleName: string, pkg: PackageJson, fileName
  */
 export function expectDevDependency(ruleName: string, pkg: PackageJson, packageName: string, version: string) {
   const actualVersion = pkg.getDevDependency(packageName);
-  if (version !== actualVersion) {
+  const ok = (version === actualVersion) || (version === '*' && actualVersion !== undefined);
+  if (!ok) {
     pkg.report({
       ruleName,
       message: `Missing devDependency: ${packageName} @ ${version}`,

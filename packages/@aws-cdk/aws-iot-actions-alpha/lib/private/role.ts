@@ -1,6 +1,6 @@
 import * as iam from 'aws-cdk-lib/aws-iam';
 import { PhysicalName } from 'aws-cdk-lib/core';
-import { Construct, IConstruct } from 'constructs';
+import type { Construct, IConstruct } from 'constructs';
 
 /**
  * Obtain the Role for the TopicRule
@@ -14,7 +14,7 @@ export function singletonActionRole(scope: IConstruct): iam.IRole {
   const existing = scope.node.tryFindChild(id) as iam.IRole;
   if (existing) {
     return existing;
-  };
+  }
 
   const role = new iam.Role(scope as Construct, id, {
     roleName: PhysicalName.GENERATE_IF_NEEDED,

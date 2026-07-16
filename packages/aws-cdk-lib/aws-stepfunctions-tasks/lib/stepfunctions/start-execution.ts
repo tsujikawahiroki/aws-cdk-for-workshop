@@ -1,17 +1,16 @@
-import { Construct } from 'constructs';
+import type { Construct } from 'constructs';
 import * as iam from '../../../aws-iam';
 import * as sfn from '../../../aws-stepfunctions';
-import { ArnFormat, Stack } from '../../../core';
+import { ArnFormat, Stack, ValidationError } from '../../../core';
+import { lit } from '../../../core/lib/private/literal-string';
+import type { IStateMachineRef } from '../../../interfaces/generated/aws-stepfunctions-interfaces.generated';
 import { integrationResourceArn, validatePatternSupported } from '../private/task-utils';
 
-/**
- * Properties for StartExecution
- */
-export interface StepFunctionsStartExecutionProps extends sfn.TaskStateBaseProps {
+interface StepFunctionsStartExecutionOptions {
   /**
    * The Step Functions state machine to start the execution on.
    */
-  readonly stateMachine: sfn.IStateMachine;
+  readonly stateMachine: IStateMachineRef;
 
   /**
    * The JSON input for the execution, same as that of StartExecution.
@@ -45,11 +44,47 @@ export interface StepFunctionsStartExecutionProps extends sfn.TaskStateBaseProps
 }
 
 /**
+ * Properties for StartExecution using JSONPath
+ */
+export interface StepFunctionsStartExecutionJsonPathProps extends sfn.TaskStateJsonPathBaseProps, StepFunctionsStartExecutionOptions {}
+
+/**
+ * Properties for StartExecution using JSONata
+ */
+export interface StepFunctionsStartExecutionJsonataProps extends sfn.TaskStateJsonataBaseProps, StepFunctionsStartExecutionOptions {}
+
+/**
+ * Properties for StartExecution
+ */
+export interface StepFunctionsStartExecutionProps extends sfn.TaskStateBaseProps, StepFunctionsStartExecutionOptions {}
+
+/**
  * A Step Functions Task to call StartExecution on another state machine.
  *
  * It supports three service integration patterns: REQUEST_RESPONSE, RUN_JOB, and WAIT_FOR_TASK_TOKEN.
  */
 export class StepFunctionsStartExecution extends sfn.TaskStateBase {
+  /**
+   * A Step Functions Task using JSONPath to call StartExecution on another state machine.
+   *
+   * It supports three service integration patterns: REQUEST_RESPONSE, RUN_JOB, and WAIT_FOR_TASK_TOKEN.
+   */
+  public static jsonPath(scope: Construct, id: string, props: StepFunctionsStartExecutionJsonPathProps) {
+    return new StepFunctionsStartExecution(scope, id, props);
+  }
+
+  /**
+   * A Step Functions Task using JSONata to call StartExecution on another state machine.
+   *
+   * It supports three service integration patterns: REQUEST_RESPONSE, RUN_JOB, and WAIT_FOR_TASK_TOKEN.
+   */
+  public static jsonata(scope: Construct, id: string, props: StepFunctionsStartExecutionJsonataProps) {
+    return new StepFunctionsStartExecution(scope, id, {
+      ...props,
+      queryLanguage: sfn.QueryLanguage.JSONATA,
+    });
+  }
+
   private static readonly SUPPORTED_INTEGRATION_PATTERNS = [
     sfn.IntegrationPattern.REQUEST_RESPONSE,
     sfn.IntegrationPattern.RUN_JOB,
@@ -68,11 +103,11 @@ export class StepFunctionsStartExecution extends sfn.TaskStateBase {
     validatePatternSupported(this.integrationPattern, StepFunctionsStartExecution.SUPPORTED_INTEGRATION_PATTERNS);
 
     if (this.integrationPattern === sfn.IntegrationPattern.WAIT_FOR_TASK_TOKEN && !sfn.FieldUtils.containsTaskToken(props.input)) {
-      throw new Error('Task Token is required in `input` for callback. Use JsonPath.taskToken to set the token.');
+      throw new ValidationError(lit`IsRequiredTaskTokenRequired`, 'Task Token is required in `input` for callback. Use JsonPath.taskToken to set the token.', scope);
     }
 
     if (this.props.associateWithParent && props.input && props.input.type !== sfn.InputType.OBJECT) {
-      throw new Error('Could not enable `associateWithParent` because `input` is taken directly from a JSON path. Use `sfn.TaskInput.fromObject` instead.');
+      throw new ValidationError(lit`CouldEnableBecauseTaken`, 'Could not enable `associateWithParent` because `input` is taken directly from a JSON path. Use `sfn.TaskInput.fromObject` instead.', scope);
     }
 
     this.taskPolicies = this.createScopedAccessPolicy();
@@ -81,7 +116,8 @@ export class StepFunctionsStartExecution extends sfn.TaskStateBase {
   /**
    * @internal
    */
-  protected _renderTask(): any {
+  protected _renderTask(topLevelQueryLanguage?: sfn.QueryLanguage): any {
+    const queryLanguage = sfn._getActualQueryLanguage(topLevelQueryLanguage, this.props.queryLanguage);
     // suffix of ':2' indicates that the output of the nested state machine should be JSON
     // suffix is only applicable when waiting for a nested state machine to complete (RUN_JOB)
     // https://docs.aws.amazon.com/step-functions/latest/dg/connect-stepfunctions.html
@@ -89,7 +125,9 @@ export class StepFunctionsStartExecution extends sfn.TaskStateBase {
     let input: any;
     if (this.props.associateWithParent) {
       const associateWithParentEntry = {
-        AWS_STEP_FUNCTIONS_STARTED_BY_EXECUTION_ID: sfn.JsonPath.stringAt('$$.Execution.Id'),
+        AWS_STEP_FUNCTIONS_STARTED_BY_EXECUTION_ID: queryLanguage === sfn.QueryLanguage.JSONATA
+          ? '{% $states.context.Execution.Id %}'
+          : sfn.JsonPath.stringAt('$$.Execution.Id'),
       };
       input = this.props.input ? { ...this.props.input.value, ...associateWithParentEntry } : associateWithParentEntry;
     } else {
@@ -98,11 +136,11 @@ export class StepFunctionsStartExecution extends sfn.TaskStateBase {
 
     return {
       Resource: `${integrationResourceArn('states', 'startExecution', this.integrationPattern)}${suffix}`,
-      Parameters: sfn.FieldUtils.renderObject({
+      ...this._renderParametersOrArguments({
         Input: input,
-        StateMachineArn: this.props.stateMachine.stateMachineArn,
+        StateMachineArn: this.props.stateMachine.stateMachineRef.stateMachineArn,
         Name: this.props.name,
-      }),
+      }, queryLanguage),
     };
   }
 
@@ -119,7 +157,7 @@ export class StepFunctionsStartExecution extends sfn.TaskStateBase {
     const policyStatements = [
       new iam.PolicyStatement({
         actions: ['states:StartExecution'],
-        resources: [this.props.stateMachine.stateMachineArn],
+        resources: [this.props.stateMachine.stateMachineRef.stateMachineArn],
       }),
     ];
 
@@ -134,7 +172,7 @@ export class StepFunctionsStartExecution extends sfn.TaskStateBase {
               service: 'states',
               resource: 'execution',
               arnFormat: ArnFormat.COLON_RESOURCE_NAME,
-              resourceName: `${stack.splitArn(this.props.stateMachine.stateMachineArn, ArnFormat.COLON_RESOURCE_NAME).resourceName}*`,
+              resourceName: `${stack.splitArn(this.props.stateMachine.stateMachineRef.stateMachineArn, ArnFormat.COLON_RESOURCE_NAME).resourceName}*`,
             }),
           ],
         }),

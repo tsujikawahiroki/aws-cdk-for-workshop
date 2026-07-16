@@ -1,7 +1,10 @@
 import * as iam from '../../../aws-iam';
+import { UnscopedValidationError } from '../../../core';
+import { lit } from '../../../core/lib/private/literal-string';
 import { CachePolicy } from '../cache-policy';
-import { CfnDistribution } from '../cloudfront.generated';
-import { AddBehaviorOptions, EdgeLambda, LambdaEdgeEventType, ViewerProtocolPolicy } from '../distribution';
+import type { CfnDistribution } from '../cloudfront.generated';
+import type { AddBehaviorOptions, EdgeLambda } from '../distribution';
+import { AllowedMethods, LambdaEdgeEventType, ViewerProtocolPolicy } from '../distribution';
 
 /**
  * Properties for specifying custom behaviors for origins.
@@ -27,6 +30,15 @@ export class CacheBehavior {
   constructor(originId: string, private readonly props: CacheBehaviorProps) {
     this.originId = originId;
 
+    if (props.enableGrpc) {
+      if (props.allowedMethods !== AllowedMethods.ALLOW_ALL) {
+        throw new UnscopedValidationError(lit`AllowedMethodsOnlyAllowAllIfGrpcEnabled`, '\'allowedMethods\' can only be AllowedMethods.ALLOW_ALL if \'enableGrpc\' is true');
+      }
+      if (props.edgeLambdas !== undefined && props.edgeLambdas.length > 0) {
+        throw new UnscopedValidationError(lit`EdgeLambdasCannotBeSpecifiedIfGrpcEnabled`, '\'edgeLambdas\' cannot be specified if \'enableGrpc\' is true');
+      }
+    }
+
     this.validateEdgeLambdas(props.edgeLambdas);
     this.grantEdgeLambdaFunctionExecutionRole(props.edgeLambdas);
   }
@@ -45,15 +57,15 @@ export class CacheBehavior {
       targetOriginId: this.originId,
       allowedMethods: this.props.allowedMethods?.methods,
       cachedMethods: this.props.cachedMethods?.methods,
-      cachePolicyId: (this.props.cachePolicy ?? CachePolicy.CACHING_OPTIMIZED).cachePolicyId,
+      cachePolicyId: (this.props.cachePolicy?.cachePolicyRef ?? CachePolicy.CACHING_OPTIMIZED).cachePolicyId,
       compress: this.props.compress ?? true,
-      originRequestPolicyId: this.props.originRequestPolicy?.originRequestPolicyId,
-      realtimeLogConfigArn: this.props?.realtimeLogConfig?.realtimeLogConfigArn,
-      responseHeadersPolicyId: this.props.responseHeadersPolicy?.responseHeadersPolicyId,
+      originRequestPolicyId: this.props.originRequestPolicy?.originRequestPolicyRef.originRequestPolicyId,
+      realtimeLogConfigArn: this.props?.realtimeLogConfig?.realtimeLogConfigRef.realtimeLogConfigArn,
+      responseHeadersPolicyId: this.props.responseHeadersPolicy?.responseHeadersPolicyRef.responseHeadersPolicyId,
       smoothStreaming: this.props.smoothStreaming,
       viewerProtocolPolicy: this.props.viewerProtocolPolicy ?? ViewerProtocolPolicy.ALLOW_ALL,
       functionAssociations: this.props.functionAssociations?.map(association => ({
-        functionArn: association.function.functionArn,
+        functionArn: association.function.functionRef.functionArn,
         eventType: association.eventType.toString(),
       })),
       lambdaFunctionAssociations: this.props.edgeLambdas?.map(edgeLambda => ({
@@ -61,14 +73,19 @@ export class CacheBehavior {
         eventType: edgeLambda.eventType.toString(),
         includeBody: edgeLambda.includeBody,
       })),
-      trustedKeyGroups: this.props.trustedKeyGroups?.map(keyGroup => keyGroup.keyGroupId),
+      trustedKeyGroups: this.props.trustedKeyGroups?.map(keyGroup => keyGroup.keyGroupRef.keyGroupId),
+      grpcConfig: this.props.enableGrpc !== undefined
+        ? {
+          enabled: this.props.enableGrpc,
+        }
+        : undefined,
     };
   }
 
   private validateEdgeLambdas(edgeLambdas?: EdgeLambda[]) {
     const includeBodyEventTypes = [LambdaEdgeEventType.ORIGIN_REQUEST, LambdaEdgeEventType.VIEWER_REQUEST];
     if (edgeLambdas && edgeLambdas.some(lambda => lambda.includeBody && !includeBodyEventTypes.includes(lambda.eventType))) {
-      throw new Error('\'includeBody\' can only be true for ORIGIN_REQUEST or VIEWER_REQUEST event types.');
+      throw new UnscopedValidationError(lit`IncludeBodyOnlyTrueForRequestEventTypes`, '\'includeBody\' can only be true for ORIGIN_REQUEST or VIEWER_REQUEST event types.');
     }
   }
 

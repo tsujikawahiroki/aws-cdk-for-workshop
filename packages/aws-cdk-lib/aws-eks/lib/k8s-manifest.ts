@@ -1,8 +1,10 @@
 import { Construct, Node } from 'constructs';
 import { AlbScheme } from './alb-controller';
-import { ICluster } from './cluster';
+import type { ICluster } from './cluster';
 import { KubectlProvider } from './kubectl-provider';
+import type { RemovalPolicy } from '../../core';
 import { CustomResource, Stack } from '../../core';
+import { propertyInjectable } from '../../core/lib/prop-injectable';
 
 const PRUNE_LABEL_PREFIX = 'aws.cdk.eks/prune-';
 
@@ -57,6 +59,20 @@ export interface KubernetesManifestOptions {
    * @default AlbScheme.INTERNAL
    */
   readonly ingressAlbScheme?: AlbScheme;
+
+  /**
+   * The removal policy applied to the custom resource that manages the Kubernetes manifest.
+   *
+   * The removal policy controls what happens to the resource if it stops being managed by CloudFormation.
+   * This can happen in one of three situations:
+   *
+   * - The resource is removed from the template, so CloudFormation stops managing it
+   * - A change to the resource is made that requires it to be replaced, so CloudFormation stops managing it
+   * - The stack is deleted, so CloudFormation stops managing all resources in it
+   *
+   * @default RemovalPolicy.DESTROY
+   */
+  readonly removalPolicy?: RemovalPolicy;
 
 }
 
@@ -114,9 +130,15 @@ export interface KubernetesManifestProps extends KubernetesManifestOptions {
  *
  * Applies/deletes the manifest using `kubectl`.
  */
+@propertyInjectable
 export class KubernetesManifest extends Construct {
   /**
-   * The CloudFormation reosurce type.
+   * Uniquely identifies this class.
+   */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-eks.KubernetesManifest';
+
+  /**
+   * The CloudFormation resource type.
    */
   public static readonly RESOURCE_TYPE = 'Custom::AWSCDK-EKS-KubernetesResource';
 
@@ -138,6 +160,7 @@ export class KubernetesManifest extends Construct {
     const customResource = new CustomResource(this, 'Resource', {
       serviceToken: provider.serviceToken,
       resourceType: KubernetesManifest.RESOURCE_TYPE,
+      removalPolicy: props.removalPolicy,
       properties: {
         // `toJsonString` enables embedding CDK tokens in the manifest and will
         // render a CloudFormation-compatible JSON string (similar to
@@ -189,14 +212,12 @@ export class KubernetesManifest extends Construct {
   }
 
   /**
-   * Inject the necessary ingress annontations if possible (and requested).
+   * Inject the necessary ingress annotations if possible (and requested).
    *
    * @see https://kubernetes-sigs.github.io/aws-load-balancer-controller/v2.2/guide/ingress/annotations/
    */
   private injectIngressAlbAnnotations(manifest: Record<string, any>[], scheme: AlbScheme) {
-
     for (const resource of manifest) {
-
       // skip resource if it's not an object or if it does not have a "kind"
       if (typeof(resource) !== 'object' || !resource.kind) {
         continue;
@@ -210,6 +231,5 @@ export class KubernetesManifest extends Construct {
         };
       }
     }
-
   }
 }

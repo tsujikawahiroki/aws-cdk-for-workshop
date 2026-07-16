@@ -25,21 +25,12 @@ export function* enumerate<A>(xs: Iterable<A>): IterableIterator<[number, A]> {
   }
 }
 
-export function expectProp<A extends object, B extends keyof A>(obj: A, key: B): NonNullable<A[B]> {
-  if (!obj[key]) { throw new Error(`Expecting '${String(key)}' to be set!`); }
-  return obj[key] as any;
-}
-
 export function* flatten<A>(xs: Iterable<A[]>): IterableIterator<A> {
   for (const x of xs) {
     for (const y of x) {
       yield y;
     }
   }
-}
-
-export function filterEmpty(xs: Array<string | undefined>): string[] {
-  return xs.filter(x => x) as any;
 }
 
 export function mapValues<A, B>(xs: Record<string, A>, fn: (x: A) => B): Record<string, B> {

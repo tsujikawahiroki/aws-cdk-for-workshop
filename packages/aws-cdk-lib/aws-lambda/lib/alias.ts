@@ -1,17 +1,25 @@
-import { Construct } from 'constructs';
-import { Architecture } from './architecture';
-import { EventInvokeConfigOptions } from './event-invoke-config';
-import { IFunction, QualifiedFunctionBase } from './function-base';
-import { extractQualifierFromArn, IVersion } from './lambda-version';
+import type { Construct } from 'constructs';
+import type { Architecture } from './architecture';
+import type { EventInvokeConfigOptions } from './event-invoke-config';
+import type { IFunction } from './function-base';
+import { QualifiedFunctionBase } from './function-base';
+import type { IVersion } from './lambda-version';
+import { extractQualifierFromArn } from './lambda-version';
+import type { AliasReference, IAliasRef } from './lambda.generated';
 import { CfnAlias } from './lambda.generated';
 import { ScalableFunctionAttribute } from './private/scalable-function-attribute';
-import { AutoScalingOptions, IScalableFunctionAttribute } from './scalable-attribute-api';
+import type { AutoScalingOptions, IScalableFunctionAttribute } from './scalable-attribute-api';
 import * as appscaling from '../../aws-applicationautoscaling';
-import * as cloudwatch from '../../aws-cloudwatch';
+import type * as cloudwatch from '../../aws-cloudwatch';
 import * as iam from '../../aws-iam';
-import { ArnFormat } from '../../core';
+import { ArnFormat, Token } from '../../core';
+import { ValidationError } from '../../core/lib/errors';
+import { memoizedGetter } from '../../core/lib/helpers-internal';
+import { addConstructMetadata, MethodMetadata } from '../../core/lib/metadata-resource';
+import { lit } from '../../core/lib/private/literal-string';
+import { propertyInjectable } from '../../core/lib/prop-injectable';
 
-export interface IAlias extends IFunction {
+export interface IAlias extends IFunction, IAliasRef {
   /**
    * Name of this alias.
    *
@@ -88,7 +96,11 @@ export interface AliasAttributes {
 /**
  * A new alias to a particular version of a Lambda function.
  */
+@propertyInjectable
 export class Alias extends QualifiedFunctionBase implements IAlias {
+  /** Uniquely identifies this class. */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-lambda.Alias';
+
   public static fromAliasAttributes(scope: Construct, id: string, attrs: AliasAttributes): IAlias {
     class Imported extends QualifiedFunctionBase implements IAlias {
       public readonly aliasName = attrs.aliasName;
@@ -102,6 +114,12 @@ export class Alias extends QualifiedFunctionBase implements IAlias {
 
       protected readonly canCreatePermissions = this._isStackAccount();
       protected readonly qualifier = attrs.aliasName;
+
+      public get aliasRef(): AliasReference {
+        return {
+          aliasArn: this.functionArn,
+        };
+      }
     }
     return new Imported(scope, id);
   }
@@ -112,13 +130,8 @@ export class Alias extends QualifiedFunctionBase implements IAlias {
    * @attribute
    */
   public readonly aliasName: string;
-  /**
-   * ARN of this alias
-   *
-   * Used to be able to use Alias in place of a regular Lambda. Lambda accepts
-   * ARNs everywhere it accepts function names.
-   */
-  public readonly functionName: string;
+
+  private readonly alias: CfnAlias;
 
   public readonly lambda: IFunction;
 
@@ -132,7 +145,29 @@ export class Alias extends QualifiedFunctionBase implements IAlias {
    * Used to be able to use Alias in place of a regular Lambda. Lambda accepts
    * ARNs everywhere it accepts function names.
    */
-  public readonly functionArn: string;
+  @memoizedGetter
+  public get functionArn(): string {
+    return this.getResourceArnAttribute(this.alias.ref, {
+      service: 'lambda',
+      resource: 'function',
+      resourceName: `${this.lambda.functionName}:${this.physicalName}`,
+      arnFormat: ArnFormat.COLON_RESOURCE_NAME,
+    });
+  }
+
+  /**
+   * ARN of this alias
+   *
+   * Used to be able to use Alias in place of a regular Lambda. Lambda accepts
+   * ARNs everywhere it accepts function names.
+   */
+  @memoizedGetter
+  public get functionName(): string {
+    // ARN parsing splits on `:`, so we can only get the function's name from the ARN as resourceName...
+    // And we're parsing it out (instead of using the underlying function directly) in order to have use of it incur
+    // an implicit dependency on the resource.
+    return `${this.stack.splitArn(this.functionArn, ArnFormat.COLON_RESOURCE_NAME).resourceName!}:${this.aliasName}`;
+  }
 
   protected readonly qualifier: string;
 
@@ -145,13 +180,19 @@ export class Alias extends QualifiedFunctionBase implements IAlias {
     super(scope, id, {
       physicalName: props.aliasName,
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     this.lambda = props.version.lambda;
     this.aliasName = this.physicalName;
     this.version = props.version;
     this.architecture = this.lambda.architecture;
 
-    const alias = new CfnAlias(this, 'Resource', {
+    if (props.provisionedConcurrentExecutions && this.version.lambda.tenancyConfig?.tenancyConfigProperty?.tenantIsolationMode !== undefined) {
+      throw new ValidationError(lit`ProvisionedConcurrencySupportedFunctionsTenant`, 'Provisioned Concurrency is not supported for functions with tenant isolation mode', this);
+    }
+
+    this.alias = new CfnAlias(this, 'Resource', {
       name: this.aliasName,
       description: props.description,
       functionName: this.version.lambda.functionName,
@@ -169,14 +210,7 @@ export class Alias extends QualifiedFunctionBase implements IAlias {
       resourceName: 'AWSServiceRoleForApplicationAutoScaling_LambdaConcurrency',
     }));
 
-    this.functionArn = this.getResourceArnAttribute(alias.ref, {
-      service: 'lambda',
-      resource: 'function',
-      resourceName: `${this.lambda.functionName}:${this.physicalName}`,
-      arnFormat: ArnFormat.COLON_RESOURCE_NAME,
-    });
-
-    this.qualifier = extractQualifierFromArn(alias.ref);
+    this.qualifier = extractQualifierFromArn(this.alias.ref);
 
     if (props.onFailure || props.onSuccess || props.maxEventAge || props.retryAttempts !== undefined) {
       this.configureAsyncInvoke({
@@ -186,11 +220,12 @@ export class Alias extends QualifiedFunctionBase implements IAlias {
         retryAttempts: props.retryAttempts,
       });
     }
+  }
 
-    // ARN parsing splits on `:`, so we can only get the function's name from the ARN as resourceName...
-    // And we're parsing it out (instead of using the underlying function directly) in order to have use of it incur
-    // an implicit dependency on the resource.
-    this.functionName = `${this.stack.splitArn(this.functionArn, ArnFormat.COLON_RESOURCE_NAME).resourceName!}:${this.aliasName}`;
+  public get aliasRef(): AliasReference {
+    return {
+      aliasArn: this.functionArn,
+    };
   }
 
   public get grantPrincipal() {
@@ -201,6 +236,7 @@ export class Alias extends QualifiedFunctionBase implements IAlias {
     return this.version.role;
   }
 
+  @MethodMetadata()
   public metric(metricName: string, props: cloudwatch.MetricOptions = {}): cloudwatch.Metric {
     // Metrics on Aliases need the "bare" function name, and the alias' ARN, this differs from the base behavior.
     return super.metric(metricName, {
@@ -221,9 +257,10 @@ export class Alias extends QualifiedFunctionBase implements IAlias {
    *
    * @param options Autoscaling options
    */
+  @MethodMetadata()
   public addAutoScaling(options: AutoScalingOptions): IScalableFunctionAttribute {
     if (this.scalableAlias) {
-      throw new Error('AutoScaling already enabled for this alias');
+      throw new ValidationError(lit`AutoScalingAlreadyEnabledAlias`, 'AutoScaling already enabled for this alias', this);
     }
     return this.scalableAlias = new ScalableFunctionAttribute(this, 'AliasScaling', {
       minCapacity: options.minCapacity ?? 1,
@@ -262,12 +299,12 @@ export class Alias extends QualifiedFunctionBase implements IAlias {
    */
   private validateAdditionalWeights(weights: VersionWeight[]) {
     const total = weights.map(w => {
-      if (w.weight < 0 || w.weight > 1) { throw new Error(`Additional version weight must be between 0 and 1, got: ${w.weight}`); }
+      if (w.weight < 0 || w.weight > 1) { throw new ValidationError(lit`AdditionalVersionWeight`, `Additional version weight must be between 0 and 1, got: ${w.weight}`, this); }
       return w.weight;
     }).reduce((a, x) => a + x);
 
     if (total > 1) {
-      throw new Error(`Sum of additional version weights must not exceed 1, got: ${total}`);
+      throw new ValidationError(lit`SumAdditionalVersionWeightsExceed`, `Sum of additional version weights must not exceed 1, got: ${total}`, this);
     }
   }
 
@@ -281,8 +318,8 @@ export class Alias extends QualifiedFunctionBase implements IAlias {
       return undefined;
     }
 
-    if (props.provisionedConcurrentExecutions <= 0) {
-      throw new Error('provisionedConcurrentExecutions must have value greater than or equal to 1');
+    if (!Token.isUnresolved(props.provisionedConcurrentExecutions) && props.provisionedConcurrentExecutions <= 0) {
+      throw new ValidationError(lit`ProvisionedConcurrentExecutionsValueGreater`, 'provisionedConcurrentExecutions must have value greater than or equal to 1', this);
     }
 
     return { provisionedConcurrentExecutions: props.provisionedConcurrentExecutions };

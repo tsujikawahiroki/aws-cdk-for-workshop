@@ -1,6 +1,7 @@
 import { Match, Template } from '../../assertions';
 import { Duration, Stack, Token, Aws } from '../../core';
-import { Alarm, GraphWidget, IWidget, MathExpression, Metric } from '../lib';
+import type { IWidget } from '../lib';
+import { Alarm, GraphWidget, MathExpression, Metric } from '../lib';
 
 const a = new Metric({ namespace: 'Test', metricName: 'ACount' });
 
@@ -29,7 +30,6 @@ describe('cross environment', () => {
       graphMetricsAre(stack1, graph, [
         ['Test', 'ACount'],
       ]);
-
     });
 
     test('metric attached to stack1 will render region and account in stack2', () => {
@@ -44,7 +44,6 @@ describe('cross environment', () => {
       graphMetricsAre(stack2, graph, [
         ['Test', 'ACount', { region: 'pluto', accountId: '1234' }],
       ]);
-
     });
 
     test('metric with explicit account and region will render in environment agnostic stack', () => {
@@ -59,7 +58,20 @@ describe('cross environment', () => {
       graphMetricsAre(new Stack(), graph, [
         ['Test', 'ACount', { accountId: '1234', region: 'us-north-5' }],
       ]);
+    });
 
+    test('metric with explicit account and region that match stack will render as-is', () => {
+      // GIVEN
+      const graph = new GraphWidget({
+        left: [
+          a.with({ account: '1234', region: 'us-north-5' }),
+        ],
+      });
+
+      // THEN
+      graphMetricsAre(new Stack(undefined, undefined, { env: { region: 'us-north-5', account: '1234' } }), graph, [
+        ['Test', 'ACount', { accountId: '1234', region: 'us-north-5' }],
+      ]);
     });
 
     test('metric attached to agnostic stack will not render in agnostic stack', () => {
@@ -74,7 +86,6 @@ describe('cross environment', () => {
       graphMetricsAre(new Stack(), graph, [
         ['Test', 'ACount'],
       ]);
-
     });
 
     test('math expressions with explicit account and region will render in environment agnostic stack', () => {
@@ -138,7 +149,7 @@ describe('cross environment', () => {
     });
 
     test('metric attached to stack3 will render in stack1', () => {
-      //Cross-account metrics are supported in Alarms
+      // Cross-account metrics are supported in Alarms
 
       // GIVEN
       new Alarm(stack1, 'Alarm', {

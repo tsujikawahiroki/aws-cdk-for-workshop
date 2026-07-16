@@ -1,6 +1,7 @@
-import { Construct } from 'constructs';
+import type { Construct } from 'constructs';
 import * as s3_assets from '../../aws-s3-assets';
 import * as cdk from '../../core';
+import { lit } from '../../core/lib/private/literal-string';
 
 /**
  * Result of binding `Code` into a `Function`.
@@ -35,7 +36,7 @@ export abstract class Code {
   /**
    * Inline code for AppSync function
    * @returns `InlineCode` with inline code.
-   * @param code The actual handler code (limited to 4KiB)
+   * @param code The actual handler code (the resulting zip file cannot exceed 4MB)
    */
   public static fromInline(code: string): InlineCode {
     return new InlineCode(code);
@@ -68,8 +69,8 @@ export class AssetCode extends Code {
         ...this.options,
       });
     } else if (cdk.Stack.of(this.asset) !== cdk.Stack.of(scope)) {
-      throw new Error(`Asset is already associated with another stack '${cdk.Stack.of(this.asset).stackName}'. ` +
-        'Create a new Code instance for every stack.');
+      throw new cdk.ValidationError(lit`AssetAlreadyAssociated`, `Asset is already associated with another stack '${cdk.Stack.of(this.asset).stackName}'. ` +
+        'Create a new Code instance for every stack.', scope);
     }
 
     return {
@@ -86,7 +87,7 @@ export class InlineCode extends Code {
     super();
 
     if (code.length === 0) {
-      throw new Error('AppSync Inline code cannot be empty');
+      throw new cdk.UnscopedValidationError(lit`InlineCodeEmpty`, 'AppSync Inline code cannot be empty');
     }
   }
 

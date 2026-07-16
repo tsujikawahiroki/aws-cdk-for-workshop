@@ -48,14 +48,15 @@
         ]
       }
     },
-    "projectReferences": true,
     "metadata": {
       "jsii": {
         "rosetta": {
           "strict": true
         }
       }
-    }
+    },
+    "tsconfig": "tsconfig.json",
+    "validateTsconfig": "minimal"
   },
   "scripts": {
     "build": "yarn gen && cdk-build --skip-lint",
@@ -84,7 +85,7 @@
     "@aws-cdk/pkglint": "0.0.0",
     "aws-cdk-lib": "0.0.0",
     "@types/fs-extra": "^9.0.13",
-    "@types/jest": "^29.5.12",
+    "@types/jest": "^29.5.14",
     "fs-extra": "^9.1.0"
   },
   "repository": {
@@ -98,7 +99,7 @@
   ],
   "homepage": "https://github.com/aws/aws-cdk",
   "engines": {
-    "node": ">= 14.15.0"
+    "node": ">= 20.0.0"
   },
   "stability": "stable",
   "maturity": "stable",
@@ -112,5 +113,12 @@
   },
   "publishConfig": {
     "tag": "latest"
+  },
+  "awslint": {
+    "exclude": [
+      "docs-public-apis:@aws-cdk/region-info.Fact.regions",
+      "docs-public-apis:@aws-cdk/region-info.RegionInfo.regions",
+      "docs-public-apis:@aws-cdk/region-info.RegionInfo.name"
+    ]
   }
 }

@@ -393,7 +393,7 @@
      "S3Bucket": {
       "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
      },
-     "S3Key": "e978ad4ad0dca7e1c6be5f49cbbd1c5a150ee050c24052fedfe5a42f835d55da.zip"
+     "S3Key": "55549d0bfa9628b306c349544b7d95017221e259e17875f3d38f2a3d2da5043f.zip"
     },
     "Timeout": 900,
     "MemorySize": 128,
@@ -404,7 +404,7 @@
       "Arn"
      ]
     },
-    "Runtime": "nodejs18.x",
+    "Runtime": "nodejs24.x",
     "Description": "Lambda function for removing all inbound/outbound rules from the VPC default security group"
    },
    "DependsOn": [
@@ -479,14 +479,23 @@
     "ReplicationConfiguration": {
      "Destinations": [
       {
-       "AvailabilityZoneName": "us-east-1a",
+       "AvailabilityZoneName": {
+        "Fn::Select": [
+         0,
+         {
+          "Fn::GetAZs": ""
+         }
+        ]
+       },
        "KmsKeyId": {
         "Fn::GetAtt": [
          "Key961B73FD",
          "Arn"
         ]
        },
-       "Region": "us-east-1"
+       "Region": {
+        "Ref": "AWS::Region"
+       }
       }
      ]
     }

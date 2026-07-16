@@ -44,7 +44,7 @@
       "Arn"
      ]
     },
-    "Runtime": "nodejs18.x"
+    "Runtime": "nodejs24.x"
    },
    "DependsOn": [
     "preTokenGenerationLambdaServiceRole0C3B4FA0"
@@ -85,6 +85,7 @@
     "UserPoolAddOns": {
      "AdvancedSecurityMode": "ENFORCED"
     },
+    "UserPoolTier": "PLUS",
     "VerificationMessageTemplate": {
      "DefaultEmailOption": "CONFIRM_WITH_CODE",
      "EmailMessage": "The verification code to your new account is {####}",

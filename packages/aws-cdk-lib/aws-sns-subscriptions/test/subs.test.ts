@@ -7,7 +7,7 @@ import { App, CfnParameter, Duration, RemovalPolicy, Stack, Token } from '../../
 import * as cxapi from '../../cx-api';
 import * as subs from '../lib';
 
-/* eslint-disable quote-props */
+/* eslint-disable @stylistic/quote-props */
 const restrictSqsDescryption = { [cxapi.SNS_SUBSCRIPTIONS_SQS_DECRYPTION_POLICY]: true };
 let stack: Stack;
 let topic: sns.Topic;
@@ -226,14 +226,14 @@ test('url subscription (double unresolved url with protocol)', () => {
 
 test('url subscription (unknown protocol)', () => {
   expect(() => topic.addSubscription(new subs.UrlSubscription('some-protocol://foobar.com/')))
-    .toThrowError(/URL must start with either http:\/\/ or https:\/\//);
+    .toThrow(/URL must start with either http:\/\/ or https:\/\//);
 });
 
 test('url subscription (unresolved url without protocol)', () => {
   const urlToken = Token.asString({ Ref: 'my-url-1' });
 
   expect(() => topic.addSubscription(new subs.UrlSubscription(urlToken)))
-    .toThrowError(/Must provide protocol if url is unresolved/);
+    .toThrow(/Must provide protocol if url is unresolved/);
 });
 
 test('queue subscription', () => {
@@ -1201,7 +1201,7 @@ test('throws an error when a queue is encrypted by AWS managed KMS kye for queue
 
   // THEN
   expect(() => topic.addSubscription(new subs.SqsSubscription(queue)))
-    .toThrowError(/SQS queue encrypted by AWS managed KMS key cannot be used as SNS subscription/);
+    .toThrow(/SQS queue encrypted by AWS managed KMS key cannot be used as SNS subscription/);
 });
 
 test('throws an error when a dead-letter queue is encrypted by AWS managed KMS kye for queue subscription', () => {
@@ -1215,7 +1215,7 @@ test('throws an error when a dead-letter queue is encrypted by AWS managed KMS k
   expect(() => topic.addSubscription(new subs.SqsSubscription(queue, {
     deadLetterQueue: dlq,
   })))
-    .toThrowError(/SQS queue encrypted by AWS managed KMS key cannot be used as dead-letter queue/);
+    .toThrow(/SQS queue encrypted by AWS managed KMS key cannot be used as dead-letter queue/);
 });
 
 test('importing SQS queue and specify this as subscription', () => {
@@ -1295,7 +1295,7 @@ test('lambda subscription', () => {
               'Arn',
             ],
           },
-          'Runtime': lambda.Runtime.NODEJS_LATEST.name,
+          'Runtime': 'nodejs24.x',
         },
         'DependsOn': [
           'MyFuncServiceRole54065130',
@@ -1399,7 +1399,7 @@ test('lambda subscription, cross region env agnostic', () => {
             ],
           },
           'Handler': 'index.handler',
-          'Runtime': lambda.Runtime.NODEJS_LATEST.name,
+          'Runtime': 'nodejs24.x',
         },
         'DependsOn': [
           'MyFuncServiceRole54065130',
@@ -1862,7 +1862,7 @@ test('multiple subscriptions', () => {
               'Arn',
             ],
           },
-          'Runtime': lambda.Runtime.NODEJS_LATEST.name,
+          'Runtime': 'nodejs24.x',
         },
         'DependsOn': [
           'MyFuncServiceRole54065130',
@@ -1909,7 +1909,7 @@ test('throws with mutliple subscriptions of the same subscriber', () => {
   topic.addSubscription(new subs.SqsSubscription(queue));
 
   expect(() => topic.addSubscription(new subs.SqsSubscription(queue)))
-    .toThrowError(/A subscription with id \"MyTopic\" already exists under the scope Default\/MyQueue/);
+    .toThrow(/A subscription with id \"MyTopic\" already exists under the scope Default\/MyQueue/);
 });
 
 test('with filter policy', () => {

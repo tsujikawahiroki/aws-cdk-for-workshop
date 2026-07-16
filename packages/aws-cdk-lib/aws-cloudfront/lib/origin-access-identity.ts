@@ -1,7 +1,16 @@
-import { Construct } from 'constructs';
-import { CfnCloudFrontOriginAccessIdentity } from './cloudfront.generated';
+import type { Construct } from 'constructs';
+import type {
+  CloudFrontOriginAccessIdentityReference,
+  ICloudFrontOriginAccessIdentityRef,
+} from './cloudfront.generated';
+import {
+  CfnCloudFrontOriginAccessIdentity,
+} from './cloudfront.generated';
 import * as iam from '../../aws-iam';
 import * as cdk from '../../core';
+import { memoizedGetter } from '../../core/lib/helpers-internal';
+import { addConstructMetadata } from '../../core/lib/metadata-resource';
+import { propertyInjectable } from '../../core/lib/prop-injectable';
 
 /**
  * Properties of CloudFront OriginAccessIdentity
@@ -18,7 +27,7 @@ export interface OriginAccessIdentityProps {
 /**
  * Interface for CloudFront OriginAccessIdentity
  */
-export interface IOriginAccessIdentity extends cdk.IResource, iam.IGrantable {
+export interface IOriginAccessIdentity extends cdk.IResource, iam.IGrantable, ICloudFrontOriginAccessIdentityRef {
   /**
    * The Origin Access Identity Id (physical id)
    * It is misnamed and superseded by the correctly named originAccessIdentityId
@@ -77,7 +86,11 @@ abstract class OriginAccessIdentityBase extends cdk.Resource {
  *
  * @resource AWS::CloudFront::CloudFrontOriginAccessIdentity
  */
+@propertyInjectable
 export class OriginAccessIdentity extends OriginAccessIdentityBase implements IOriginAccessIdentity {
+  /** Uniquely identifies this class. */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-cloudfront.OriginAccessIdentity';
+
   /**
    * Creates a OriginAccessIdentity by providing the OriginAccessIdentityId.
    * It is misnamed and superseded by the correctly named fromOriginAccessIdentityId.
@@ -98,11 +111,13 @@ export class OriginAccessIdentity extends OriginAccessIdentityBase implements IO
     scope: Construct,
     id: string,
     originAccessIdentityId: string): IOriginAccessIdentity {
-
     class Import extends OriginAccessIdentityBase {
       public readonly originAccessIdentityId = originAccessIdentityId;
       public readonly originAccessIdentityName = originAccessIdentityId;
       public readonly grantPrincipal = new iam.ArnPrincipal(this.arn());
+      public readonly cloudFrontOriginAccessIdentityRef = {
+        cloudFrontOriginAccessIdentityId: originAccessIdentityId,
+      };
       constructor(s: Construct, i: string) {
         super(s, i, { physicalName: originAccessIdentityId });
       }
@@ -142,7 +157,12 @@ export class OriginAccessIdentity extends OriginAccessIdentityBase implements IO
    *
    * @attribute
    */
-  public readonly originAccessIdentityId: string;
+  @memoizedGetter
+  public get originAccessIdentityId(): string {
+    return this.getResourceNameAttribute(this.resource.ref);
+  }
+
+  public readonly cloudFrontOriginAccessIdentityRef: CloudFrontOriginAccessIdentityReference;
 
   /**
    * CDK L1 resource
@@ -151,14 +171,15 @@ export class OriginAccessIdentity extends OriginAccessIdentityBase implements IO
 
   constructor(scope: Construct, id: string, props?: OriginAccessIdentityProps) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     // Comment has a max length of 128.
     const comment = (props?.comment ?? 'Allows CloudFront to reach the bucket').slice(0, 128);
     this.resource = new CfnCloudFrontOriginAccessIdentity(this, 'Resource', {
       cloudFrontOriginAccessIdentityConfig: { comment },
     });
-    // physical id - OAI Id
-    this.originAccessIdentityId = this.getResourceNameAttribute(this.resource.ref);
+    this.cloudFrontOriginAccessIdentityRef = this.resource.cloudFrontOriginAccessIdentityRef;
 
     // Canonical user to grant access to in the S3 Bucket Policy
     this.cloudFrontOriginAccessIdentityS3CanonicalUserId = this.resource.attrS3CanonicalUserId;

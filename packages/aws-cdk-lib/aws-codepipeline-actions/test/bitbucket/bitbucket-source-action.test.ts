@@ -5,7 +5,7 @@ import * as codepipeline from '../../../aws-codepipeline';
 import { Stack } from '../../../core';
 import * as cpactions from '../../lib';
 
-/* eslint-disable quote-props */
+/* eslint-disable @stylistic/quote-props */
 
 describeDeprecated('BitBucket source Action', () => {
   describe('BitBucket source Action', () => {
@@ -45,7 +45,6 @@ describeDeprecated('BitBucket source Action', () => {
           },
         ],
       });
-
     });
   });
 
@@ -78,7 +77,6 @@ describeDeprecated('BitBucket source Action', () => {
         ],
       },
     });
-
   });
   test('grant s3 putObjectACL to the following CodeBuild Project', () => {
     const stack = new Stack();
@@ -112,7 +110,6 @@ describeDeprecated('BitBucket source Action', () => {
         ]),
       },
     });
-
   });
   test('setting triggerOnPush=false reflects in the configuration', () => {
     const stack = new Stack();
@@ -151,7 +148,6 @@ describeDeprecated('BitBucket source Action', () => {
         },
       ],
     });
-
   });
 });
 

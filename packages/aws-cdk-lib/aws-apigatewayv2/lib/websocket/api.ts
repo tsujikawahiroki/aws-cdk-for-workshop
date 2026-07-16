@@ -1,32 +1,51 @@
-import { Construct } from 'constructs';
-import { WebSocketRoute, WebSocketRouteOptions } from './route';
+import type { Construct } from 'constructs';
+import type { WebSocketRouteOptions } from './route';
+import { WebSocketRoute } from './route';
 import { CfnApi } from '.././index';
-import { Grant, IGrantable } from '../../../aws-iam';
+import type { IGrantable } from '../../../aws-iam';
+import { Grant } from '../../../aws-iam';
 import { ArnFormat, Stack, Token } from '../../../core';
-import { IApi } from '../common/api';
+import { UnscopedValidationError, ValidationError } from '../../../core/lib/errors';
+import { addConstructMetadata, MethodMetadata } from '../../../core/lib/metadata-resource';
+import { lit } from '../../../core/lib/private/literal-string';
+import { propertyInjectable } from '../../../core/lib/prop-injectable';
+import type { ApiReference, IApiRef } from '../apigatewayv2.generated';
+import type { IApi, IpAddressType } from '../common/api';
 import { ApiBase } from '../common/base';
+
+/**
+ * Represents a reference to an HTTP API
+ */
+export interface IWebSocketApiRef extends IApiRef {
+  /**
+   * Indicates that this is a WebSocket API
+   *
+   * Will always return true, but is necessary to prevent accidental structural
+   * equality in TypeScript.
+   */
+  readonly isWebsocketApi: boolean;
+}
 
 /**
  * Represents a WebSocket API
  */
-export interface IWebSocketApi extends IApi {
+export interface IWebSocketApi extends IApi, IWebSocketApiRef {
 }
 
 /**
  * Represents the currently available API Key Selection Expressions
  */
 export class WebSocketApiKeySelectionExpression {
-
   /**
    * The API will extract the key value from the `x-api-key` header in the user request.
    */
   public static readonly HEADER_X_API_KEY = new WebSocketApiKeySelectionExpression('$request.header.x-api-key');
 
   /**
-    * The API will extract the key value from the `usageIdentifierKey` attribute in the `context` map,
-    * returned by the Lambda Authorizer.
-    * See https://docs.aws.amazon.com/apigateway/latest/developerguide/api-gateway-lambda-authorizer-output.html
-    */
+   * The API will extract the key value from the `usageIdentifierKey` attribute in the `context` map,
+   * returned by the Lambda Authorizer.
+   * See https://docs.aws.amazon.com/apigateway/latest/developerguide/api-gateway-lambda-authorizer-output.html
+   */
   public static readonly AUTHORIZER_USAGE_IDENTIFIER_KEY = new WebSocketApiKeySelectionExpression('$context.authorizer.usageIdentifierKey');
 
   /**
@@ -83,6 +102,22 @@ export interface WebSocketApiProps {
    * @default - no '$default' route configured
    */
   readonly defaultRouteOptions?: WebSocketRouteOptions;
+
+  /**
+   * The IP address types that can invoke the API.
+   *
+   * @see https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-ip-address-type.html
+   *
+   * @default undefined - AWS default is IPV4
+   */
+  readonly ipAddressType?: IpAddressType;
+
+  /**
+   * Avoid validating models when creating a deployment.
+   *
+   * @default false
+   */
+  readonly disableSchemaValidation?: boolean;
 }
 
 /**
@@ -105,19 +140,24 @@ export interface WebSocketApiAttributes {
  * Create a new API Gateway WebSocket API endpoint.
  * @resource AWS::ApiGatewayV2::Api
  */
+@propertyInjectable
 export class WebSocketApi extends ApiBase implements IWebSocketApi {
+  /** Uniquely identifies this class. */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-apigatewayv2.WebSocketApi';
+
   /**
    * Import an existing WebSocket API into this CDK app.
    */
   public static fromWebSocketApiAttributes(scope: Construct, id: string, attrs: WebSocketApiAttributes): IWebSocketApi {
     class Import extends ApiBase {
+      public readonly isWebsocketApi = true;
       public readonly apiId = attrs.webSocketId;
       public readonly websocketApiId = attrs.webSocketId;
       private readonly _apiEndpoint = attrs.apiEndpoint;
 
       public get apiEndpoint(): string {
         if (!this._apiEndpoint) {
-          throw new Error('apiEndpoint is not configured on the imported WebSocketApi.');
+          throw new ValidationError(lit`ApiEndpointConfiguredImportedWeb`, 'apiEndpoint is not configured on the imported WebSocketApi.', scope);
         }
         return this._apiEndpoint;
       }
@@ -125,6 +165,7 @@ export class WebSocketApi extends ApiBase implements IWebSocketApi {
     return new Import(scope, id);
   }
 
+  public readonly isWebsocketApi = true;
   public readonly apiId: string;
   public readonly apiEndpoint: string;
 
@@ -135,6 +176,8 @@ export class WebSocketApi extends ApiBase implements IWebSocketApi {
 
   constructor(scope: Construct, id: string, props?: WebSocketApiProps) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     this.webSocketApiName = props?.apiName ?? id;
 
@@ -144,6 +187,8 @@ export class WebSocketApi extends ApiBase implements IWebSocketApi {
       protocolType: 'WEBSOCKET',
       description: props?.description,
       routeSelectionExpression: props?.routeSelectionExpression ?? '$request.body.action',
+      ipAddressType: props?.ipAddressType,
+      disableSchemaValidation: props?.disableSchemaValidation,
     });
     this.apiId = resource.ref;
     this.apiEndpoint = resource.attrApiEndpoint;
@@ -162,6 +207,7 @@ export class WebSocketApi extends ApiBase implements IWebSocketApi {
   /**
    * Add a new route
    */
+  @MethodMetadata()
   public addRoute(routeKey: string, options: WebSocketRouteOptions) {
     return new WebSocketRoute(this, `${routeKey}-Route`, {
       webSocketApi: this,
@@ -173,9 +219,11 @@ export class WebSocketApi extends ApiBase implements IWebSocketApi {
   /**
    * Grant access to the API Gateway management API for this WebSocket API to an IAM
    * principal (Role/Group/User).
+   * [disable-awslint:no-grants]
    *
    * @param identity The principal
    */
+  @MethodMetadata()
   public grantManageConnections(identity: IGrantable): Grant {
     const arn = Stack.of(this).formatArn({
       service: 'execute-api',
@@ -191,17 +239,13 @@ export class WebSocketApi extends ApiBase implements IWebSocketApi {
 
   /**
    * Get the "execute-api" ARN.
-   * When 'ANY' is passed to the method, an ARN with the method set to '*' is obtained.
    *
-   * @default - The default behavior applies when no specific method, path, or stage is provided.
-   * In this case, the ARN will cover all methods, all resources, and all stages of this API.
-   * Specifically, if 'method' is not specified, it defaults to '*', representing all methods.
-   * If 'path' is not specified, it defaults to '/*', representing all paths.
-   * If 'stage' is not specified, it also defaults to '*', representing all stages.
+   * @deprecated Use `arnForExecuteApiV2()` instead.
    */
+  @MethodMetadata()
   public arnForExecuteApi(method?: string, path?: string, stage?: string): string {
     if (path && !Token.isUnresolved(path) && !path.startsWith('/')) {
-      throw new Error(`Path must start with '/': ${path}`);
+      throw new UnscopedValidationError(lit`PathStart`, `Path must start with '/': ${path}`);
     }
 
     if (method && method.toUpperCase() === 'ANY') {
@@ -214,5 +258,27 @@ export class WebSocketApi extends ApiBase implements IWebSocketApi {
       arnFormat: ArnFormat.SLASH_RESOURCE_NAME,
       resourceName: `${stage ?? '*'}/${method ?? '*'}${path ?? '/*'}`,
     });
+  }
+
+  /**
+   * Get the "execute-api" ARN.
+   *
+   * @default - The default behavior applies when no specific route, or stage is provided.
+   * In this case, the ARN will cover all routes, and all stages of this API.
+   * Specifically, if 'route' is not specified, it defaults to '*', representing all routes.
+   * If 'stage' is not specified, it also defaults to '*', representing all stages.
+   */
+  @MethodMetadata()
+  public arnForExecuteApiV2(route?: string, stage?: string): string {
+    return Stack.of(this).formatArn({
+      service: 'execute-api',
+      resource: this.apiId,
+      arnFormat: ArnFormat.SLASH_RESOURCE_NAME,
+      resourceName: `${stage ?? '*'}/${route ?? '*'}`,
+    });
+  }
+
+  public get apiRef(): ApiReference {
+    return { apiId: this.apiId };
   }
 }

@@ -1,6 +1,6 @@
-import { IAlarm } from './alarm-base';
-import { AlarmState } from './alarm-rule';
+import type { AlarmState } from './alarm-rule';
 import { ConcreteWidget } from './widget';
+import type { IAlarmRef } from '../../interfaces/generated/aws-cloudwatch-interfaces.generated';
 
 /**
  * The sort possibilities for AlarmStatusWidgets
@@ -34,7 +34,7 @@ export interface AlarmStatusWidgetProps {
   /**
    * CloudWatch Alarms to show in widget
    */
-  readonly alarms: IAlarm[];
+  readonly alarms: IAlarmRef[];
   /**
    * The title of the widget
    *
@@ -66,7 +66,7 @@ export interface AlarmStatusWidgetProps {
    * You can specify one or more alarm states in the value for this field.
    * The alarm states that you can specify are ALARM, INSUFFICIENT_DATA, and OK.
    *
-   * If you omit this field or specify an empty array, all the alarms specifed in alarms are displayed.
+   * If you omit this field or specify an empty array, all the alarms specified in alarms are displayed.
    *
    * @default -  all the alarms specified in alarms are displayed.
    */
@@ -99,7 +99,7 @@ export class AlarmStatusWidget extends ConcreteWidget {
         y: this.y,
         properties: {
           title: this.props.title ? this.props.title : 'Alarm Status',
-          alarms: this.props.alarms.map((alarm) => alarm.alarmArn),
+          alarms: this.props.alarms.map((alarm) => alarm.alarmRef.alarmArn),
           states: this.props.states,
           sortBy: this.props.sortBy,
         },

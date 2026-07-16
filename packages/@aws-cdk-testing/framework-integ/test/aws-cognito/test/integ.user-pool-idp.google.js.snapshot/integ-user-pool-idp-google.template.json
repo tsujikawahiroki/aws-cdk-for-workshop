@@ -34,9 +34,6 @@
   "poolclient2623294C": {
    "Type": "AWS::Cognito::UserPoolClient",
    "Properties": {
-    "UserPoolId": {
-     "Ref": "pool056F3F7E"
-    },
     "AllowedOAuthFlows": [
      "implicit",
      "code"
@@ -57,13 +54,16 @@
       "Ref": "googleDB2C5242"
      },
      "COGNITO"
-    ]
+    ],
+    "UserPoolId": {
+     "Ref": "pool056F3F7E"
+    }
    }
   },
   "pooldomain430FA744": {
    "Type": "AWS::Cognito::UserPoolDomain",
    "Properties": {
-    "Domain": "nija-test-pool",
+    "Domain": "nija-test-pool-google",
     "UserPoolId": {
      "Ref": "pool056F3F7E"
     }
@@ -84,17 +84,12 @@
   "googleDB2C5242": {
    "Type": "AWS::Cognito::UserPoolIdentityProvider",
    "Properties": {
-    "ProviderName": "Google",
-    "ProviderType": "Google",
-    "UserPoolId": {
-     "Ref": "pool056F3F7E"
-    },
     "AttributeMapping": {
      "given_name": "given_name",
      "family_name": "family_name",
      "email": "email",
-     "gender": "gender",
-     "names": "names"
+     "email_verified": "email_verified",
+     "gender": "gender"
     },
     "ProviderDetails": {
      "client_id": "google-client-id",
@@ -111,6 +106,11 @@
       ]
      },
      "authorize_scopes": "profile"
+    },
+    "ProviderName": "Google",
+    "ProviderType": "Google",
+    "UserPoolId": {
+     "Ref": "pool056F3F7E"
     }
    }
   }

@@ -1,17 +1,16 @@
-import { Construct } from 'constructs';
-import { IContainerDefinition } from './base-types';
+import type { Construct } from 'constructs';
+import type { IContainerDefinition } from './base-types';
 import * as ec2 from '../../../aws-ec2';
 import * as iam from '../../../aws-iam';
 import * as sfn from '../../../aws-stepfunctions';
 import * as cdk from '../../../core';
-import { integrationResourceArn, validatePatternSupported } from '../private/task-utils';
+import type { IArrayBox } from '../../../core/lib/helpers-internal';
+import { Box } from '../../../core/lib/helpers-internal';
+import { noBoxStackTraces } from '../../../core/lib/no-box-stack-traces';
+import { propertyInjectable } from '../../../core/lib/prop-injectable';
+import { integrationResourceArn, isJsonPathOrJsonataExpression, validatePatternSupported } from '../private/task-utils';
 
-/**
- * Properties for creating an Amazon SageMaker model
- *
- * @see https://docs.aws.amazon.com/step-functions/latest/dg/connect-sagemaker.html
- */
-export interface SageMakerCreateModelProps extends sfn.TaskStateBaseProps {
+interface SageMakerCreateModelOptions {
   /**
    * An execution role that you can pass in a CreateModel API request
    *
@@ -65,11 +64,59 @@ export interface SageMakerCreateModelProps extends sfn.TaskStateBaseProps {
 }
 
 /**
+ * Properties for creating an Amazon SageMaker model using JSONPath
+ *
+ * @see https://docs.aws.amazon.com/step-functions/latest/dg/connect-sagemaker.html
+ */
+export interface SageMakerCreateModelJsonPathProps extends sfn.TaskStateJsonPathBaseProps, SageMakerCreateModelOptions {}
+
+/**
+ * Properties for creating an Amazon SageMaker model using JSONata
+ *
+ * @see https://docs.aws.amazon.com/step-functions/latest/dg/connect-sagemaker.html
+ */
+export interface SageMakerCreateModelJsonataProps extends sfn.TaskStateJsonataBaseProps, SageMakerCreateModelOptions {}
+
+/**
+ * Properties for creating an Amazon SageMaker model
+ *
+ * @see https://docs.aws.amazon.com/step-functions/latest/dg/connect-sagemaker.html
+ */
+export interface SageMakerCreateModelProps extends sfn.TaskStateBaseProps, SageMakerCreateModelOptions {}
+
+/**
  * A Step Functions Task to create a SageMaker model
  *
  * @see https://docs.aws.amazon.com/step-functions/latest/dg/connect-sagemaker.html
  */
+@propertyInjectable
+@noBoxStackTraces
 export class SageMakerCreateModel extends sfn.TaskStateBase implements iam.IGrantable, ec2.IConnectable {
+  /**
+   * Uniquely identifies this class.
+   */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-stepfunctions-tasks.SageMakerCreateModel';
+
+  /**
+   * A Step Functions Task using JSONPath to create a SageMaker model
+   *
+   * @see https://docs.aws.amazon.com/step-functions/latest/dg/connect-sagemaker.html
+   */
+  public static jsonPath(scope: Construct, id: string, props: SageMakerCreateModelJsonPathProps) {
+    return new SageMakerCreateModel(scope, id, props);
+  }
+
+  /**
+   * A Step Functions Task using JSONata to create a SageMaker model
+   *
+   * @see https://docs.aws.amazon.com/step-functions/latest/dg/connect-sagemaker.html
+   */
+  public static jsonata(scope: Construct, id: string, props: SageMakerCreateModelJsonataProps) {
+    return new SageMakerCreateModel(scope, id, {
+      ...props,
+      queryLanguage: sfn.QueryLanguage.JSONATA,
+    });
+  }
   private static readonly SUPPORTED_INTEGRATION_PATTERNS: sfn.IntegrationPattern[] = [
     sfn.IntegrationPattern.REQUEST_RESPONSE,
   ];
@@ -86,12 +133,15 @@ export class SageMakerCreateModel extends sfn.TaskStateBase implements iam.IGran
   protected readonly taskPolicies?: iam.PolicyStatement[];
   private readonly vpc?: ec2.IVpc;
   private securityGroup?: ec2.ISecurityGroup;
-  private readonly securityGroups: ec2.ISecurityGroup[] = [];
+  private readonly _securityGroups: IArrayBox<ec2.ISecurityGroup>;
   private readonly subnets?: string[];
   private readonly integrationPattern: sfn.IntegrationPattern;
 
   constructor(scope: Construct, id: string, private readonly props: SageMakerCreateModelProps) {
     super(scope, id, props);
+
+    this._securityGroups = Box.fromArray([], { omitEmpty: false });
+
     this.integrationPattern = props.integrationPattern || sfn.IntegrationPattern.REQUEST_RESPONSE;
     validatePatternSupported(this.integrationPattern, SageMakerCreateModel.SUPPORTED_INTEGRATION_PATTERNS);
 
@@ -113,16 +163,17 @@ export class SageMakerCreateModel extends sfn.TaskStateBase implements iam.IGran
    * @param securityGroup: The security group to add
    */
   public addSecurityGroup(securityGroup: ec2.ISecurityGroup): void {
-    this.securityGroups.push(securityGroup);
+    this._securityGroups.push(securityGroup);
   }
 
   /**
    * @internal
    */
-  protected _renderTask(): any {
+  protected _renderTask(topLevelQueryLanguage?: sfn.QueryLanguage): any {
+    const queryLanguage = sfn._getActualQueryLanguage(topLevelQueryLanguage, this.props.queryLanguage);
     return {
       Resource: integrationResourceArn('sagemaker', 'createModel', this.integrationPattern),
-      Parameters: sfn.FieldUtils.renderObject(this.renderParameters()),
+      ...this._renderParametersOrArguments(this.renderParameters(), queryLanguage),
     };
   }
 
@@ -149,7 +200,7 @@ export class SageMakerCreateModel extends sfn.TaskStateBase implements iam.IGran
             resource: 'model',
             // If the model name comes from input, we cannot target the policy to a particular ARN prefix reliably.
             // SageMaker uses lowercase for resource name in the arn
-            resourceName: sfn.JsonPath.isEncodedJsonPath(this.props.modelName) ? '*' : `${this.props.modelName.toLowerCase()}*`,
+            resourceName: isJsonPathOrJsonataExpression(this.props.modelName) ? '*' : `${this.props.modelName.toLowerCase()}*`,
           }),
         ],
       }),
@@ -222,12 +273,12 @@ export class SageMakerCreateModel extends sfn.TaskStateBase implements iam.IGran
         vpc: this.vpc,
       });
       this.connections.addSecurityGroup(this.securityGroup);
-      this.securityGroups.push(this.securityGroup);
+      this._securityGroups.push(this.securityGroup);
     }
     return this.vpc
       ? {
         VpcConfig: {
-          SecurityGroupIds: cdk.Lazy.list({ produce: () => this.securityGroups.map((sg) => sg.securityGroupId) }),
+          SecurityGroupIds: cdk.Token.asList(this._securityGroups.map((sg) => sg.securityGroupId), { displayHint: 'SecurityGroupIds' }),
           Subnets: this.subnets,
         },
       }

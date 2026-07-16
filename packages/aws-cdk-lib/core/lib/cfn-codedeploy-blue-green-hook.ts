@@ -1,7 +1,9 @@
-import { Construct } from 'constructs';
+import type { Construct } from 'constructs';
 import { CfnHook } from './cfn-hook';
-import { CfnResource } from './cfn-resource';
-import { FromCloudFormationOptions } from './helpers-internal';
+import type { CfnResource } from './cfn-resource';
+import { UnscopedValidationError } from './errors';
+import type { FromCloudFormationOptions } from './helpers-internal';
+import { lit } from './private/literal-string';
 import { undefinedIfAllValuesAreEmpty } from './util';
 
 /**
@@ -298,7 +300,6 @@ export class CfnCodeDeployBlueGreenHook extends CfnHook {
    */
   public static _fromCloudFormation(scope: Construct, id: string, hookAttributes: any,
     options: FromCloudFormationOptions): CfnCodeDeployBlueGreenHook {
-
     hookAttributes = hookAttributes || {};
     const hookProperties = options.parser.parseValue(hookAttributes.Properties);
     return new CfnCodeDeployBlueGreenHook(scope, id, {
@@ -367,7 +368,7 @@ export class CfnCodeDeployBlueGreenHook extends CfnHook {
       }
       const ret = options.parser.finder.findResource(logicalId);
       if (!ret) {
-        throw new Error(`Hook '${id}' references resource '${logicalId}' that was not found in the template`);
+        throw new UnscopedValidationError(lit`HookReferencesResourceFound`, `Hook '${id}' references resource '${logicalId}' that was not found in the template`);
       }
       return ret;
     }

@@ -39,6 +39,18 @@ new elbv2.ApplicationLoadBalancer(stack, 'DesyncMitigationModeStrictest', {
   desyncMitigationMode: elbv2.DesyncMitigationMode.STRICTEST,
 });
 
+new elbv2.ApplicationLoadBalancer(stack, 'Http2EnabledTrue', {
+  vpc,
+  internetFacing: true,
+  http2Enabled: true,
+});
+
+new elbv2.ApplicationLoadBalancer(stack, 'DropInvalidHeaderFieldsFalse', {
+  vpc,
+  internetFacing: true,
+  dropInvalidHeaderFields: false,
+});
+
 new integ.IntegTest(app, 'Elbv2Test', {
   testCases: [stack],
 });

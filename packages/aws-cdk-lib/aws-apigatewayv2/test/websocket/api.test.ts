@@ -1,13 +1,16 @@
 import { Match, Template } from '../../../assertions';
 import { User } from '../../../aws-iam';
 import { Stack } from '../../../core';
+import type {
+  WebSocketRouteIntegrationBindOptions,
+  WebSocketRouteIntegrationConfig,
+} from '../../lib';
 import {
   WebSocketRouteIntegration,
   WebSocketApi,
   WebSocketApiKeySelectionExpression,
   WebSocketIntegrationType,
-  WebSocketRouteIntegrationBindOptions,
-  WebSocketRouteIntegrationConfig,
+  IpAddressType,
 } from '../../lib';
 
 describe('WebSocketApi', () => {
@@ -213,6 +216,44 @@ describe('WebSocketApi', () => {
       .toThrow("Path must start with '/': path");
   });
 
+  test('get arnForExecuteApiV2', () => {
+    const stack = new Stack();
+    const api = new WebSocketApi(stack, 'api');
+
+    expect(stack.resolve(api.arnForExecuteApiV2('route', 'stage'))).toEqual({
+      'Fn::Join': ['', [
+        'arn:',
+        { Ref: 'AWS::Partition' },
+        ':execute-api:',
+        { Ref: 'AWS::Region' },
+        ':',
+        { Ref: 'AWS::AccountId' },
+        ':',
+        stack.resolve(api.apiId),
+        '/stage/route',
+      ]],
+    });
+  });
+
+  test('get arnForExecuteApiV2 with default values', () => {
+    const stack = new Stack();
+    const api = new WebSocketApi(stack, 'api');
+
+    expect(stack.resolve(api.arnForExecuteApiV2())).toEqual({
+      'Fn::Join': ['', [
+        'arn:',
+        { Ref: 'AWS::Partition' },
+        ':execute-api:',
+        { Ref: 'AWS::Region' },
+        ':',
+        { Ref: 'AWS::AccountId' },
+        ':',
+        stack.resolve(api.apiId),
+        '/*/*',
+      ]],
+    });
+  });
+
   describe('grantManageConnections', () => {
     test('adds an IAM policy to the principal', () => {
       // GIVEN
@@ -253,6 +294,34 @@ describe('WebSocketApi', () => {
           }]),
         },
       });
+    });
+  });
+
+  test.each([IpAddressType.IPV4, IpAddressType.DUAL_STACK])('ipAddressType is set', (ipAddressType) => {
+    const stack = new Stack();
+    new WebSocketApi(stack, 'api', {
+      ipAddressType,
+    });
+
+    Template.fromStack(stack).hasResourceProperties('AWS::ApiGatewayV2::Api', {
+      Name: 'api',
+      ProtocolType: 'WEBSOCKET',
+      IpAddressType: ipAddressType,
+    });
+  });
+
+  test.each([true, false, undefined])('disableSchemaValidation is set to %s', (disableSchemaValidation) => {
+    const stack = new Stack();
+    new WebSocketApi(stack, 'api', {
+      disableSchemaValidation,
+    });
+
+    const value = disableSchemaValidation !== undefined ? disableSchemaValidation : Match.absent();
+
+    Template.fromStack(stack).hasResourceProperties('AWS::ApiGatewayV2::Api', {
+      Name: 'api',
+      ProtocolType: 'WEBSOCKET',
+      DisableSchemaValidation: value,
     });
   });
 });

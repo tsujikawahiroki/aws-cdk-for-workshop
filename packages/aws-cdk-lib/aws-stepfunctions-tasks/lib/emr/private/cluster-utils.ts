@@ -1,11 +1,11 @@
 import * as cdk from '../../../../core';
+import { UnscopedValidationError } from '../../../../core';
+import { lit } from '../../../../core/lib/private/literal-string';
 import { EmrCreateCluster } from '../emr-create-cluster';
-import { EmrModifyInstanceGroupByName } from '../emr-modify-instance-group-by-name';
+import type { EmrModifyInstanceGroupByName } from '../emr-modify-instance-group-by-name';
 
 /**
  * Render the KerberosAttributesProperty as JSON
- *
- * @param property
  */
 export function KerberosAttributesPropertyToJson(property: EmrCreateCluster.KerberosAttributesProperty) {
   return {
@@ -19,8 +19,6 @@ export function KerberosAttributesPropertyToJson(property: EmrCreateCluster.Kerb
 
 /**
  * Render the InstancesConfigProperty to JSON
- *
- * @param property
  */
 export function InstancesConfigPropertyToJson(property: EmrCreateCluster.InstancesConfigProperty) {
   return {
@@ -46,8 +44,6 @@ export function InstancesConfigPropertyToJson(property: EmrCreateCluster.Instanc
 
 /**
  * Render the ApplicationConfigProperty as JSON
- *
- * @param property
  */
 export function ApplicationConfigPropertyToJson(property: EmrCreateCluster.ApplicationConfigProperty) {
   return {
@@ -60,8 +56,6 @@ export function ApplicationConfigPropertyToJson(property: EmrCreateCluster.Appli
 
 /**
  * Render the ConfigurationProperty as JSON
- *
- * @param property
  */
 export function ConfigurationPropertyToJson(property: EmrCreateCluster.ConfigurationProperty) {
   return {
@@ -73,8 +67,6 @@ export function ConfigurationPropertyToJson(property: EmrCreateCluster.Configura
 
 /**
  * Render the EbsBlockDeviceConfigProperty as JSON
- *
- * @param property
  */
 export function EbsBlockDeviceConfigPropertyToJson(property: EmrCreateCluster.EbsBlockDeviceConfigProperty) {
   return {
@@ -89,8 +81,6 @@ export function EbsBlockDeviceConfigPropertyToJson(property: EmrCreateCluster.Eb
 
 /**
  * Render the EbsConfigurationProperty to JSON
- *
- * @param property
  */
 export function EbsConfigurationPropertyToJson(property: EmrCreateCluster.EbsConfigurationProperty) {
   return {
@@ -101,12 +91,20 @@ export function EbsConfigurationPropertyToJson(property: EmrCreateCluster.EbsCon
 
 /**
  * Render the InstanceTypeConfigProperty to JSON]
- *
- * @param property
  */
 export function InstanceTypeConfigPropertyToJson(property: EmrCreateCluster.InstanceTypeConfigProperty) {
   if (property.bidPrice && property.bidPriceAsPercentageOfOnDemandPrice) {
-    throw new Error('Cannot specify both bidPrice and bidPriceAsPercentageOfOnDemandPrice');
+    throw new UnscopedValidationError(lit`CannotSpecifyBothBidPriceOptions`, 'Cannot specify both bidPrice and bidPriceAsPercentageOfOnDemandPrice');
+  }
+
+  if (property.priority !== undefined && !cdk.Token.isUnresolved(property.priority)) {
+    if (property.priority < 0) {
+      throw new UnscopedValidationError(
+        lit`PriorityMustBeNonNegative`,
+        `priority must be a non-negative number, got ${property.priority}. ` +
+        'Priority values start at 0 (highest priority) and are used with OnDemandAllocationStrategy.PRIORITIZED.',
+      );
+    }
   }
 
   return {
@@ -115,14 +113,13 @@ export function InstanceTypeConfigPropertyToJson(property: EmrCreateCluster.Inst
     Configurations: cdk.listMapper(ConfigurationPropertyToJson)(property.configurations),
     EbsConfiguration: property.ebsConfiguration === undefined ? property.ebsConfiguration : EbsConfigurationPropertyToJson(property.ebsConfiguration),
     InstanceType: cdk.stringToCloudFormation(property.instanceType?.valueOf()),
+    Priority: cdk.numberToCloudFormation(property.priority),
     WeightedCapacity: cdk.numberToCloudFormation(property.weightedCapacity),
   };
 }
 
 /**
  * Render the InstanceFleetProvisioningSpecificationsProperty to JSON
- *
- * @param property
  */
 export function InstanceFleetProvisioningSpecificationsPropertyToJson(property: EmrCreateCluster.InstanceFleetProvisioningSpecificationsProperty) {
   return {
@@ -152,11 +149,11 @@ function SpotProvisioningSpecificationPropertyToJson(property?: EmrCreateCluster
   }
 
   if ((property.timeout && property.timeoutDurationMinutes) || (!property.timeout && !property.timeoutDurationMinutes)) {
-    throw new Error('one of timeout and timeoutDurationMinutes must be specified');
+    throw new UnscopedValidationError(lit`TimeoutOrTimeoutDurationMinutesRequired`, 'one of timeout and timeoutDurationMinutes must be specified');
   }
   const timeout = property.timeout?.toMinutes() ?? property.timeoutDurationMinutes;
   if (timeout !== undefined && !cdk.Token.isUnresolved(timeout) && (timeout < 5 || timeout > 1440)) {
-    throw new Error(`timeout must be between 5 and 1440 minutes, got ${timeout} minutes.`);
+    throw new UnscopedValidationError(lit`TimeoutMustBeBetween5And1440Minutes`, `timeout must be between 5 and 1440 minutes, got ${timeout} minutes.`);
   }
 
   return {
@@ -169,24 +166,47 @@ function SpotProvisioningSpecificationPropertyToJson(property?: EmrCreateCluster
 
 /**
  * Render the InstanceFleetConfigProperty as JSON
- *
- * @param property
  */
 export function InstanceFleetConfigPropertyToJson(property: EmrCreateCluster.InstanceFleetConfigProperty) {
   if (!property.targetSpotCapacity && !property.targetOnDemandCapacity) {
-    throw new Error('At least one of targetSpotCapacity and targetOnDemandCapacity should be greater than 0');
+    throw new UnscopedValidationError(lit`AtLeastOneTargetCapacityRequired`, 'At least one of targetSpotCapacity and targetOnDemandCapacity should be greater than 0');
   }
   if (property.instanceFleetType === EmrCreateCluster.InstanceRoleType.MASTER) {
     if (property.targetSpotCapacity && property.targetOnDemandCapacity) {
-      throw new Error('For a master instance fleet, only one of targetSpotCapacity and targetOnDemandCapacity can be specified');
+      throw new UnscopedValidationError(lit`MasterInstanceFleetOnlyOneCapacityType`, 'For a master instance fleet, only one of targetSpotCapacity and targetOnDemandCapacity can be specified');
     }
     if (property.targetSpotCapacity && property.targetSpotCapacity !== 1) {
-      throw new Error(`For a master instance fleet, targetSpotCapacity cannot be a number other than 1, got ${property.targetSpotCapacity}`);
+      throw new UnscopedValidationError(lit`MasterInstanceFleetSpotCapacityMustBeOne`, `For a master instance fleet, targetSpotCapacity cannot be a number other than 1, got ${property.targetSpotCapacity}`);
     }
     if (property.targetOnDemandCapacity && property.targetOnDemandCapacity !== 1) {
-      throw new Error(`For a master instance fleet, targetOnDemandCapacity cannot be a number other than 1, got ${property.targetOnDemandCapacity}`);
+      throw new UnscopedValidationError(lit`MasterInstanceFleetOnDemandCapacityMustBeOne`, `For a master instance fleet, targetOnDemandCapacity cannot be a number other than 1, got ${property.targetOnDemandCapacity}`);
     }
   }
+
+  const onDemandStrategy = property.launchSpecifications?.onDemandSpecification?.allocationStrategy
+    ?? EmrCreateCluster.OnDemandAllocationStrategy.LOWEST_PRICE;
+  const isPrioritized = !cdk.Token.isUnresolved(onDemandStrategy)
+    && onDemandStrategy === EmrCreateCluster.OnDemandAllocationStrategy.PRIORITIZED;
+  const hasPriority = property.instanceTypeConfigs?.some(
+    config => config.priority !== undefined && !cdk.Token.isUnresolved(config.priority),
+  );
+
+  if (hasPriority && !isPrioritized) {
+    throw new UnscopedValidationError(
+      lit`PriorityRequiresPrioritizedStrategy`,
+      `Priority values are set on instance type configs, but allocation strategy is '${onDemandStrategy}'. ` +
+      'Priority values only take effect with OnDemandAllocationStrategy.PRIORITIZED.',
+    );
+  }
+
+  if (isPrioritized && !hasPriority && property.instanceTypeConfigs?.length) {
+    throw new UnscopedValidationError(
+      lit`PrioritizedStrategyRequiresPriorityValues`,
+      'OnDemandAllocationStrategy.PRIORITIZED requires at least one instance type config to have a priority value set. ' +
+      'See https://docs.aws.amazon.com/emr/latest/ManagementGuide/emr-instance-fleet.html',
+    );
+  }
+
   return {
     InstanceFleetType: cdk.stringToCloudFormation(property.instanceFleetType?.valueOf()),
     InstanceTypeConfigs: cdk.listMapper(InstanceTypeConfigPropertyToJson)(property.instanceTypeConfigs),
@@ -202,8 +222,6 @@ export function InstanceFleetConfigPropertyToJson(property: EmrCreateCluster.Ins
 
 /**
  * Render the MetricDimensionProperty as JSON
- *
- * @param property
  */
 export function MetricDimensionPropertyToJson(property: EmrCreateCluster.MetricDimensionProperty) {
   return {
@@ -214,8 +232,6 @@ export function MetricDimensionPropertyToJson(property: EmrCreateCluster.MetricD
 
 /**
  * Render the ScalingTriggerProperty to JSON
- *
- * @param property
  */
 export function ScalingTriggerPropertyToJson(property: EmrCreateCluster.ScalingTriggerProperty) {
   return {
@@ -235,8 +251,6 @@ export function ScalingTriggerPropertyToJson(property: EmrCreateCluster.ScalingT
 
 /**
  * Render the ScalingActionProperty to JSON
- *
- * @param property
  */
 export function ScalingActionPropertyToJson(property: EmrCreateCluster.ScalingActionProperty) {
   return {
@@ -251,8 +265,6 @@ export function ScalingActionPropertyToJson(property: EmrCreateCluster.ScalingAc
 
 /**
  * Render the ScalingRuleProperty to JSON
- *
- * @param property
  */
 export function ScalingRulePropertyToJson(property: EmrCreateCluster.ScalingRuleProperty) {
   return {
@@ -265,8 +277,6 @@ export function ScalingRulePropertyToJson(property: EmrCreateCluster.ScalingRule
 
 /**
  * Render the AutoScalingPolicyProperty to JSON
- *
- * @param property
  */
 export function AutoScalingPolicyPropertyToJson(property: EmrCreateCluster.AutoScalingPolicyProperty) {
   return {
@@ -280,8 +290,6 @@ export function AutoScalingPolicyPropertyToJson(property: EmrCreateCluster.AutoS
 
 /**
  * Render the InstanceGroupConfigProperty to JSON
- *
- * @param property
  */
 export function InstanceGroupConfigPropertyToJson(property: EmrCreateCluster.InstanceGroupConfigProperty) {
   return {
@@ -300,8 +308,6 @@ export function InstanceGroupConfigPropertyToJson(property: EmrCreateCluster.Ins
 
 /**
  * Render the PlacementTypeProperty to JSON
- *
- * @param property
  */
 export function PlacementTypePropertyToJson(property: EmrCreateCluster.PlacementTypeProperty) {
   return {
@@ -312,8 +318,6 @@ export function PlacementTypePropertyToJson(property: EmrCreateCluster.Placement
 
 /**
  * Render the BootstrapActionProperty as JSON
- *
- * @param property
  */
 export function BootstrapActionConfigToJson(property: EmrCreateCluster.BootstrapActionConfigProperty) {
   return {
@@ -327,8 +331,6 @@ export function BootstrapActionConfigToJson(property: EmrCreateCluster.Bootstrap
 
 /**
  * Render the InstanceGroupModifyConfigProperty to JSON
- *
- * @param property
  */
 export function InstanceGroupModifyConfigPropertyToJson(property: EmrModifyInstanceGroupByName.InstanceGroupModifyConfigProperty) {
   return {
@@ -341,8 +343,6 @@ export function InstanceGroupModifyConfigPropertyToJson(property: EmrModifyInsta
 
 /**
  * Render the ShrinkPolicyProperty to JSON
- *
- * @param property
  */
 function ShrinkPolicyPropertyToJson(property: EmrModifyInstanceGroupByName.ShrinkPolicyProperty) {
   return {
@@ -353,13 +353,35 @@ function ShrinkPolicyPropertyToJson(property: EmrModifyInstanceGroupByName.Shrin
 
 /**
  * Render the InstanceResizePolicyProperty to JSON
- *
- * @param property
  */
 function InstanceResizePolicyPropertyToJson(property: EmrModifyInstanceGroupByName.InstanceResizePolicyProperty) {
   return {
     InstancesToProtect: cdk.listMapper(cdk.stringToCloudFormation)(property.instancesToProtect),
     InstancesToTerminate: cdk.listMapper(cdk.stringToCloudFormation)(property.instancesToTerminate),
     InstanceTerminationTimeout: cdk.numberToCloudFormation(property.instanceTerminationTimeout?.toSeconds()),
+  };
+}
+
+/**
+ * Render the ManagedScalingPolicyProperty to JSON
+ */
+export function ManagedScalingPolicyPropertyToJson(property: EmrCreateCluster.ManagedScalingPolicyProperty) {
+  return {
+    ComputeLimits: property.computeLimits
+      ? ManagedScalingComputeLimitsPropertyToJson(property.computeLimits)
+      : undefined,
+  };
+}
+
+/**
+ * Render the ManagedScalingComputeLimitsProperty to JSON
+ */
+export function ManagedScalingComputeLimitsPropertyToJson(property: EmrCreateCluster.ManagedScalingComputeLimitsProperty) {
+  return {
+    UnitType: property.unitType,
+    MinimumCapacityUnits: cdk.numberToCloudFormation(property.minimumCapacityUnits),
+    MaximumCapacityUnits: cdk.numberToCloudFormation(property.maximumCapacityUnits),
+    MaximumOnDemandCapacityUnits: cdk.numberToCloudFormation(property.maximumOnDemandCapacityUnits),
+    MaximumCoreCapacityUnits: cdk.numberToCloudFormation(property.maximumCoreCapacityUnits),
   };
 }

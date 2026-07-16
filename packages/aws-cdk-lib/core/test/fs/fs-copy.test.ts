@@ -1,13 +1,19 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { FileSystem, SymlinkFollowMode } from '../../lib/fs';
+import { FileSystem, IgnoreMode, SymlinkFollowMode } from '../../lib/fs';
 
 describe('fs copy', () => {
-  test('Default: copies all files and subdirectories, with default follow mode is "External"', () => {
-    // GIVEN
-    const outdir = fs.mkdtempSync(path.join(os.tmpdir(), 'copy-tests'));
+  let outdir: string;
+  beforeEach(() => {
+    outdir = fs.mkdtempSync(path.join(os.tmpdir(), 'copy-tests'));
+  });
 
+  afterEach(() => {
+    fs.rmSync(outdir, { force: true, recursive: true });
+  });
+
+  test('Default: copies all files and subdirectories, with default follow mode is "External"', () => {
     // WHEN
     FileSystem.copyDirectory(path.join(__dirname, 'fixtures', 'test1'), outdir);
 
@@ -24,13 +30,9 @@ describe('fs copy', () => {
       '    subdir3 (D)',
       '        file3.txt',
     ]);
-
   });
 
   test('Always: follow all symlinks', () => {
-    // GIVEN
-    const outdir = fs.mkdtempSync(path.join(os.tmpdir(), 'copy-tests'));
-
     // WHEN
     FileSystem.copyDirectory(path.join(__dirname, 'fixtures', 'symlinks'), outdir, {
       follow: SymlinkFollowMode.ALWAYS,
@@ -49,13 +51,9 @@ describe('fs copy', () => {
       '    file-in-subdir.txt',
       'normal-file.txt',
     ]);
-
   });
 
   test('Never: do not follow all symlinks', () => {
-    // GIVEN
-    const outdir = fs.mkdtempSync(path.join(os.tmpdir(), 'copy-tests'));
-
     // WHEN
     FileSystem.copyDirectory(path.join(__dirname, 'fixtures', 'symlinks'), outdir, {
       follow: SymlinkFollowMode.NEVER,
@@ -72,13 +70,9 @@ describe('fs copy', () => {
       '    file-in-subdir.txt',
       'normal-file.txt',
     ]);
-
   });
 
   test('External: follow only external symlinks', () => {
-    // GIVEN
-    const outdir = fs.mkdtempSync(path.join(os.tmpdir(), 'copy-tests'));
-
     // WHEN
     FileSystem.copyDirectory(path.join(__dirname, 'fixtures', 'symlinks'), outdir, {
       follow: SymlinkFollowMode.EXTERNAL,
@@ -96,13 +90,9 @@ describe('fs copy', () => {
       '    file-in-subdir.txt',
       'normal-file.txt',
     ]);
-
   });
 
   test('exclude', () => {
-    // GIVEN
-    const outdir = fs.mkdtempSync(path.join(os.tmpdir(), 'copy-tests'));
-
     // WHEN
     FileSystem.copyDirectory(path.join(__dirname, 'fixtures', 'test1'), outdir, {
       exclude: [
@@ -120,7 +110,47 @@ describe('fs copy', () => {
       '    subdir3 (D)',
       '        file3.txt',
     ]);
+  });
 
+  test('nested exclude with docker ignore mode', () => {
+    // WHEN
+    FileSystem.copyDirectory(path.join(__dirname, 'fixtures', 'test1'), outdir, {
+      exclude: [
+        '**',
+        '!subdir2/subdir3/*.txt',
+        '!subdir/file2.txt',
+        'subdir',
+        '!local-link.txt',
+      ],
+      ignoreMode: IgnoreMode.DOCKER,
+    });
+
+    // THEN
+    expect(tree(outdir)).toEqual([
+      'local-link.txt => file1.txt',
+      'subdir2 (D)',
+      '    subdir3 (D)',
+      '        file3.txt',
+    ]);
+  });
+
+  test('negated pattern inside subdirectory with git ignore mode', () => {
+    // WHEN
+    FileSystem.copyDirectory(path.join(__dirname, 'fixtures', 'test1'), outdir, {
+      exclude: [
+        '*',
+        '!.hidden',
+        '!*/',
+      ],
+      ignoreMode: IgnoreMode.GIT,
+    });
+
+    // THEN
+    expect(tree(outdir)).toEqual([
+      'subdir2 (D)',
+      '    empty-subdir (D)',
+      '        .hidden',
+    ]);
   });
 });
 

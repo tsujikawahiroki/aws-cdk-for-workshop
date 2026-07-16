@@ -1,6 +1,6 @@
 {
  "Resources": {
-  "AwsApiCallS3listObjectsda40203e2d2431b9ecea6a43ee9ce159": {
+  "AwsApiCallS3listObjectsff1d4b1d734c97686b42fbd3effaa429": {
    "Type": "Custom::DeployAssert@SdkCallS3listObjects",
    "Properties": {
     "ServiceToken": {
@@ -19,7 +19,7 @@
        [
         "\"",
         {
-         "Fn::ImportValue": "test-bucket-deployments-2:ExportsOutputRefDestination52A57FAA3531B2DE2"
+         "Fn::ImportValue": "test-bucket-deployments:ExportsOutputRefBucketWithAddSource40ADF545A70352A0"
         },
         "\""
        ]
@@ -27,7 +27,7 @@
      }
     },
     "flattenResponse": "false",
-    "salt": "1711662221802"
+    "salt": "1780567327023"
    },
    "UpdateReplacePolicy": "Delete",
    "DeletionPolicy": "Delete"
@@ -76,6 +76,15 @@
          "Resource": [
           "*"
          ]
+        },
+        {
+         "Action": [
+          "cloudformation:DescribeStacks"
+         ],
+         "Effect": "Allow",
+         "Resource": [
+          "*"
+         ]
         }
        ]
       }
@@ -86,12 +95,12 @@
   "SingletonFunction1488541a7b23466481b69b4408076b81HandlerCD40AE9F": {
    "Type": "AWS::Lambda::Function",
    "Properties": {
-    "Runtime": "nodejs18.x",
+    "Runtime": "nodejs24.x",
     "Code": {
      "S3Bucket": {
       "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
      },
-     "S3Key": "310f432b946edeef3316f39f32b344b6bdc401a3b438433db42adadab1bf5e17.zip"
+     "S3Key": "6611813c56ee5ec64f812f46caf03748d8b30fea6e344cc7ac25035891a6dfe8.zip"
     },
     "Timeout": 120,
     "Handler": "index.handler",
@@ -100,15 +109,53 @@
       "SingletonFunction1488541a7b23466481b69b4408076b81Role37ABCE73",
       "Arn"
      ]
+    },
+    "LoggingConfig": {
+     "LogFormat": "JSON",
+     "ApplicationLogLevel": "FATAL"
     }
    }
+  },
+  "AwsApiCallCloudFormationdescribeStacks710fee3716a4f13f0780ff50d5639a00": {
+   "Type": "Custom::DeployAssert@SdkCallCloudFormationdescribeStacks",
+   "Properties": {
+    "ServiceToken": {
+     "Fn::GetAtt": [
+      "SingletonFunction1488541a7b23466481b69b4408076b81HandlerCD40AE9F",
+      "Arn"
+     ]
+    },
+    "service": "CloudFormation",
+    "api": "describeStacks",
+    "expected": "{\"$StringLike\":\"Object Keys are ([0-9a-f])+\\\\.zip(,([0-9a-f])+\\\\.zip)*\"}",
+    "actualPath": "Stacks.0.Outputs.0.OutputValue",
+    "parameters": {
+     "StackName": "\"test-bucket-deployments\""
+    },
+    "flattenResponse": "true",
+    "outputPaths": [
+     "Stacks.0.Outputs.0.OutputKey",
+     "Stacks.0.Outputs.0.OutputValue"
+    ],
+    "salt": "1780567327025"
+   },
+   "UpdateReplacePolicy": "Delete",
+   "DeletionPolicy": "Delete"
   }
  },
  "Outputs": {
-  "AssertionResultsAwsApiCallS3listObjectsda40203e2d2431b9ecea6a43ee9ce159": {
+  "AssertionResultsAwsApiCallS3listObjectsff1d4b1d734c97686b42fbd3effaa429": {
    "Value": {
     "Fn::GetAtt": [
-     "AwsApiCallS3listObjectsda40203e2d2431b9ecea6a43ee9ce159",
+     "AwsApiCallS3listObjectsff1d4b1d734c97686b42fbd3effaa429",
+     "assertion"
+    ]
+   }
+  },
+  "AssertionResultsAwsApiCallCloudFormationdescribeStacks710fee3716a4f13f0780ff50d5639a00": {
+   "Value": {
+    "Fn::GetAtt": [
+     "AwsApiCallCloudFormationdescribeStacks710fee3716a4f13f0780ff50d5639a00",
      "assertion"
     ]
    }

@@ -1,13 +1,23 @@
-import { Construct } from 'constructs';
+import type { Construct } from 'constructs';
+import { CustomerManagedEncryptionConfiguration } from './customer-managed-key-encryption-configuration';
+import type { EncryptionConfiguration } from './encryption-configuration';
+import { buildEncryptionConfiguration } from './private/util';
 import { StateGraph } from './state-graph';
+import { StateMachineGrants } from './state-machine-grants';
 import { StatesMetrics } from './stepfunctions-canned-metrics.generated';
+import type { IStateMachineRef, StateMachineReference } from './stepfunctions.generated';
 import { CfnStateMachine } from './stepfunctions.generated';
-import { IChainable } from './types';
+import type { IChainable, QueryLanguage } from './types';
 import * as cloudwatch from '../../aws-cloudwatch';
 import * as iam from '../../aws-iam';
-import * as logs from '../../aws-logs';
+import type * as logs from '../../aws-logs';
 import * as s3_assets from '../../aws-s3-assets';
-import { Arn, ArnFormat, Duration, IResource, RemovalPolicy, Resource, Stack, Token } from '../../core';
+import type { Duration, IResource } from '../../core';
+import { ArnFormat, RemovalPolicy, Resource, Stack, Token, ValidationError } from '../../core';
+import { memoizedGetter } from '../../core/lib/helpers-internal';
+import { addConstructMetadata, MethodMetadata } from '../../core/lib/metadata-resource';
+import { lit } from '../../core/lib/private/literal-string';
+import { propertyInjectable } from '../../core/lib/prop-injectable';
 
 /**
  * Two types of state machines are available in AWS Step Functions: EXPRESS AND STANDARD.
@@ -60,8 +70,10 @@ export enum LogLevel {
 export interface LogOptions {
   /**
    * The log group where the execution history events will be logged.
+   *
+   * @default No log group. Required if your log level is not set to OFF.
    */
-  readonly destination: logs.ILogGroup;
+  readonly destination?: logs.ILogGroupRef;
 
   /**
    * Determines whether execution data is included in your log.
@@ -127,6 +139,15 @@ export interface StateMachineProps {
   readonly comment?: string;
 
   /**
+   * The name of the query language used by the state machine.
+   * If the state does not contain a `queryLanguage` field,
+   * then it will use the query language specified in this `queryLanguage` field.
+   *
+   * @default - JSON_PATH
+   */
+  readonly queryLanguage?: QueryLanguage;
+
+  /**
    * Type of the state machine
    *
    * @default StateMachineType.STANDARD
@@ -153,6 +174,13 @@ export interface StateMachineProps {
    * @default RemovalPolicy.DESTROY
    */
   readonly removalPolicy?: RemovalPolicy;
+
+  /**
+   * Configures server-side encryption of the state machine definition and execution history.
+   *
+   * @default - data is transparently encrypted using an AWS owned key
+   */
+  readonly encryptionConfiguration?: EncryptionConfiguration;
 }
 
 /**
@@ -193,97 +221,95 @@ abstract class StateMachineBase extends Resource implements IStateMachine {
   public abstract readonly grantPrincipal: iam.IPrincipal;
 
   /**
+   * Collection of grant methods for a StateMachine
+   */
+  public grants = StateMachineGrants.fromStateMachine(this);
+
+  public get stateMachineRef(): StateMachineReference {
+    return {
+      stateMachineArn: this.stateMachineArn,
+    };
+  }
+
+  /**
    * Grant the given identity permissions to start an execution of this state
    * machine.
+   *
+   *
+   * The use of this method is discouraged. Please use `grants.startExecution()` instead.
+   *
+   * [disable-awslint:no-grants]
    */
   public grantStartExecution(identity: iam.IGrantable): iam.Grant {
-    return iam.Grant.addToPrincipal({
-      grantee: identity,
-      actions: ['states:StartExecution'],
-      resourceArns: [this.stateMachineArn],
-    });
+    return this.grants.startExecution(identity);
   }
 
   /**
    * Grant the given identity permissions to start a synchronous execution of
    * this state machine.
+   *
+   *
+   * The use of this method is discouraged. Please use `grants.startSyncExecution()` instead.
+   *
+   * [disable-awslint:no-grants]
    */
   public grantStartSyncExecution(identity: iam.IGrantable): iam.Grant {
-    return iam.Grant.addToPrincipal({
-      grantee: identity,
-      actions: ['states:StartSyncExecution'],
-      resourceArns: [this.stateMachineArn],
-    });
+    return this.grants.startSyncExecution(identity);
   }
 
   /**
    * Grant the given identity permissions to read results from state
    * machine.
+   *
+   * The use of this method is discouraged. Please use `grants.read()` instead.
+   *
+   * [disable-awslint:no-grants]
    */
   public grantRead(identity: iam.IGrantable): iam.Grant {
-    iam.Grant.addToPrincipal({
-      grantee: identity,
-      actions: [
-        'states:ListExecutions',
-        'states:ListStateMachines',
-      ],
-      resourceArns: [this.stateMachineArn],
-    });
-    iam.Grant.addToPrincipal({
-      grantee: identity,
-      actions: [
-        'states:DescribeExecution',
-        'states:DescribeStateMachineForExecution',
-        'states:GetExecutionHistory',
-      ],
-      resourceArns: [`${this.executionArn()}:*`],
-    });
-    return iam.Grant.addToPrincipal({
-      grantee: identity,
-      actions: [
-        'states:ListActivities',
-        'states:DescribeStateMachine',
-        'states:DescribeActivity',
-      ],
-      resourceArns: ['*'],
-    });
+    return this.grants.read(identity);
   }
 
   /**
    * Grant the given identity task response permissions on a state machine
+   *
+   * The use of this method is discouraged. Please use `grants.taskResponse()` instead.
+   *
+   * [disable-awslint:no-grants]
    */
   public grantTaskResponse(identity: iam.IGrantable): iam.Grant {
-    return iam.Grant.addToPrincipal({
-      grantee: identity,
-      actions: [
-        'states:SendTaskSuccess',
-        'states:SendTaskFailure',
-        'states:SendTaskHeartbeat',
-      ],
-      resourceArns: [this.stateMachineArn],
-    });
+    return this.grants.taskResponse(identity);
   }
 
   /**
    * Grant the given identity permissions on all executions of the state machine
+   *
+   * The use of this method is discouraged. Please use `grants.execution()` instead.
+   *
+   * [disable-awslint:no-grants]
    */
   public grantExecution(identity: iam.IGrantable, ...actions: string[]) {
-    return iam.Grant.addToPrincipal({
-      grantee: identity,
-      actions,
-      resourceArns: [`${this.executionArn()}:*`],
-    });
+    return this.grants.execution(identity, ...actions);
+  }
+
+  /**
+   * Grant the given identity permission to redrive the execution of the state machine
+   *
+   *
+   * The use of this method is discouraged. Please use `grants.redriveExecution()` instead.
+   *
+   * [disable-awslint:no-grants]
+   */
+  public grantRedriveExecution(identity: iam.IGrantable): iam.Grant {
+    return this.grantExecution(identity, 'states:RedriveExecution');
   }
 
   /**
    * Grant the given identity custom permissions
+   *
+   * [disable-awslint:no-grants]
    */
   public grant(identity: iam.IGrantable, ...actions: string[]): iam.Grant {
-    return iam.Grant.addToPrincipal({
-      grantee: identity,
-      actions,
-      resourceArns: [this.stateMachineArn],
-    });
+    return this.grants.actions(identity, ...actions);
   }
 
   /**
@@ -365,18 +391,6 @@ abstract class StateMachineBase extends Resource implements IStateMachine {
     return this.cannedMetric(StatesMetrics.executionTimeAverage, props);
   }
 
-  /**
-   * Returns the pattern for the execution ARN's of the state machine
-   */
-  private executionArn(): string {
-    return Stack.of(this).formatArn({
-      resource: 'execution',
-      service: 'states',
-      resourceName: Arn.split(this.stateMachineArn, ArnFormat.COLON_RESOURCE_NAME).resourceName,
-      arnFormat: ArnFormat.COLON_RESOURCE_NAME,
-    });
-  }
-
   private cannedMetric(
     fn: (dims: { StateMachineArn: string }) => cloudwatch.MetricProps,
     props?: cloudwatch.MetricOptions): cloudwatch.Metric {
@@ -390,7 +404,13 @@ abstract class StateMachineBase extends Resource implements IStateMachine {
 /**
  * Define a StepFunctions State Machine
  */
+@propertyInjectable
 export class StateMachine extends StateMachineBase {
+  /**
+   * Uniquely identifies this class.
+   */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-stepfunctions.StateMachine';
+
   /**
    * Execution role of this state machine
    */
@@ -400,12 +420,23 @@ export class StateMachine extends StateMachineBase {
    * The name of the state machine
    * @attribute
    */
-  public readonly stateMachineName: string;
+  @memoizedGetter
+  public get stateMachineName(): string {
+    return this.getResourceNameAttribute(this.resource.attrName);
+  }
 
   /**
    * The ARN of the state machine
    */
-  public readonly stateMachineArn: string;
+  @memoizedGetter
+  public get stateMachineArn(): string {
+    return this.getResourceArnAttribute(this.resource.ref, {
+      service: 'states',
+      resource: 'stateMachine',
+      resourceName: this.physicalName,
+      arnFormat: ArnFormat.COLON_RESOURCE_NAME,
+    });
+  }
 
   /**
    * Type of the state machine
@@ -419,20 +450,27 @@ export class StateMachine extends StateMachineBase {
    */
   public readonly stateMachineRevisionId: string;
 
+  private readonly resource: CfnStateMachine;
+
   constructor(scope: Construct, id: string, props: StateMachineProps) {
     super(scope, id, {
       physicalName: props.stateMachineName,
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     if (props.definition && props.definitionBody) {
-      throw new Error('Cannot specify definition and definitionBody at the same time');
+      throw new ValidationError(lit`ConflictingDefinitionProperties`, 'Cannot specify definition and definitionBody at the same time', this);
     }
     if (!props.definition && !props.definitionBody) {
-      throw new Error('You need to specify either definition or definitionBody');
+      throw new ValidationError(lit`MissingDefinition`, 'You need to specify either definition or definitionBody', this);
     }
 
     if (props.stateMachineName !== undefined) {
       this.validateStateMachineName(props.stateMachineName);
+    }
+    if (props.logs) {
+      this.validateLogOptions(props.logs);
     }
 
     this.role = props.role || new iam.Role(this, 'Role', {
@@ -452,26 +490,64 @@ export class StateMachine extends StateMachineBase {
       }
     }
 
+    if (props.encryptionConfiguration instanceof CustomerManagedEncryptionConfiguration) {
+      this.role.addToPrincipalPolicy(new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
+          'kms:Decrypt', 'kms:GenerateDataKey',
+        ],
+        resources: [`${props.encryptionConfiguration.kmsKey.keyArn}`],
+        conditions: {
+          StringEquals: {
+            'kms:EncryptionContext:aws:states:stateMachineArn': Stack.of(this).formatArn({
+              service: 'states',
+              resource: 'stateMachine',
+              sep: ':',
+              resourceName: this.physicalName,
+            }),
+          },
+        },
+      }));
+
+      if (props.logs && props.logs.level !== LogLevel.OFF) {
+        this.role.addToPrincipalPolicy(new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: [
+            'kms:GenerateDataKey',
+          ],
+          resources: [`${props.encryptionConfiguration.kmsKey.keyArn}`],
+          conditions: {
+            StringEquals: {
+              'kms:EncryptionContext:SourceArn': Stack.of(this).formatArn({
+                service: 'logs',
+                resource: '*',
+                sep: ':',
+              }),
+            },
+          },
+        }));
+        props.encryptionConfiguration.kmsKey.addToResourcePolicy(new iam.PolicyStatement({
+          resources: ['*'],
+          actions: ['kms:Decrypt*'],
+          principals: [new iam.ServicePrincipal('delivery.logs.amazonaws.com')],
+        }));
+      }
+    }
+
     const resource = new CfnStateMachine(this, 'Resource', {
       stateMachineName: this.physicalName,
       stateMachineType: props.stateMachineType ?? undefined,
       roleArn: this.role.roleArn,
       loggingConfiguration: props.logs ? this.buildLoggingConfiguration(props.logs) : undefined,
-      tracingConfiguration: props.tracingEnabled ? this.buildTracingConfiguration() : undefined,
+      tracingConfiguration: this.buildTracingConfiguration(props.tracingEnabled),
       ...definitionBody.bind(this, this.role, props, graph),
       definitionSubstitutions: props.definitionSubstitutions,
+      encryptionConfiguration: buildEncryptionConfiguration(props.encryptionConfiguration),
     });
     resource.applyRemovalPolicy(props.removalPolicy, { default: RemovalPolicy.DESTROY });
 
     resource.node.addDependency(this.role);
-
-    this.stateMachineName = this.getResourceNameAttribute(resource.attrName);
-    this.stateMachineArn = this.getResourceArnAttribute(resource.ref, {
-      service: 'states',
-      resource: 'stateMachine',
-      resourceName: this.physicalName,
-      arnFormat: ArnFormat.COLON_RESOURCE_NAME,
-    });
+    this.resource = resource;
 
     if (definitionBody instanceof ChainDefinitionBody) {
       graph!.bind(this);
@@ -490,6 +566,7 @@ export class StateMachine extends StateMachineBase {
   /**
    * Add the given statement to the role's policy
    */
+  @MethodMetadata()
   public addToRolePolicy(statement: iam.PolicyStatement) {
     this.role.addToPrincipalPolicy(statement);
   }
@@ -497,56 +574,73 @@ export class StateMachine extends StateMachineBase {
   private validateStateMachineName(stateMachineName: string) {
     if (!Token.isUnresolved(stateMachineName)) {
       if (stateMachineName.length < 1 || stateMachineName.length > 80) {
-        throw new Error(`State Machine name must be between 1 and 80 characters. Received: ${stateMachineName}`);
+        throw new ValidationError(lit`InvalidStateMachineNameLength`, `State Machine name must be between 1 and 80 characters. Received: ${stateMachineName}`, this);
       }
 
       if (!stateMachineName.match(/^[a-z0-9\+\!\@\.\(\)\-\=\_\']+$/i)) {
-        throw new Error(`State Machine name must match "^[a-z0-9+!@.()-=_']+$/i". Received: ${stateMachineName}`);
+        throw new ValidationError(lit`InvalidStateMachineNamePattern`, `State Machine name must match "^[a-z0-9+!@.()-=_']+$/i". Received: ${stateMachineName}`, this);
       }
     }
   }
 
+  private validateLogOptions(logOptions: LogOptions) {
+    if (logOptions.level !== LogLevel.OFF && !logOptions.destination) {
+      throw new ValidationError(lit`LogsDestinationRequired`, 'Logs destination is required when level is not OFF.', this);
+    }
+  }
+
   private buildLoggingConfiguration(logOptions: LogOptions): CfnStateMachine.LoggingConfigurationProperty {
-    // https://docs.aws.amazon.com/step-functions/latest/dg/cw-logs.html#cloudwatch-iam-policy
-    this.addToRolePolicy(new iam.PolicyStatement({
-      effect: iam.Effect.ALLOW,
-      actions: [
-        'logs:CreateLogDelivery',
-        'logs:GetLogDelivery',
-        'logs:UpdateLogDelivery',
-        'logs:DeleteLogDelivery',
-        'logs:ListLogDeliveries',
-        'logs:PutResourcePolicy',
-        'logs:DescribeResourcePolicies',
-        'logs:DescribeLogGroups',
-      ],
-      resources: ['*'],
-    }));
+    let destinations;
+
+    if (logOptions.destination) {
+      // https://docs.aws.amazon.com/step-functions/latest/dg/cw-logs.html#cloudwatch-iam-policy
+      this.addToRolePolicy(new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
+          'logs:CreateLogDelivery',
+          'logs:GetLogDelivery',
+          'logs:UpdateLogDelivery',
+          'logs:DeleteLogDelivery',
+          'logs:ListLogDeliveries',
+          'logs:PutResourcePolicy',
+          'logs:DescribeResourcePolicies',
+          'logs:DescribeLogGroups',
+        ],
+        resources: ['*'],
+      }));
+      destinations = [{
+        cloudWatchLogsLogGroup: { logGroupArn: logOptions.destination.logGroupRef.logGroupArn },
+      }];
+    }
 
     return {
-      destinations: [{
-        cloudWatchLogsLogGroup: { logGroupArn: logOptions.destination.logGroupArn },
-      }],
+      destinations,
       includeExecutionData: logOptions.includeExecutionData,
       level: logOptions.level || 'ERROR',
     };
   }
 
-  private buildTracingConfiguration(): CfnStateMachine.TracingConfigurationProperty {
-    this.addToRolePolicy(new iam.PolicyStatement({
-      // https://docs.aws.amazon.com/xray/latest/devguide/security_iam_id-based-policy-examples.html#xray-permissions-resources
-      // https://docs.aws.amazon.com/step-functions/latest/dg/xray-iam.html
-      actions: [
-        'xray:PutTraceSegments',
-        'xray:PutTelemetryRecords',
-        'xray:GetSamplingRules',
-        'xray:GetSamplingTargets',
-      ],
-      resources: ['*'],
-    }));
+  private buildTracingConfiguration(isTracing?: boolean): CfnStateMachine.TracingConfigurationProperty | undefined {
+    if (isTracing === undefined) {
+      return undefined;
+    }
+
+    if (isTracing) {
+      this.addToRolePolicy(new iam.PolicyStatement({
+        // https://docs.aws.amazon.com/xray/latest/devguide/security_iam_id-based-policy-examples.html#xray-permissions-resources
+        // https://docs.aws.amazon.com/step-functions/latest/dg/xray-iam.html
+        actions: [
+          'xray:PutTraceSegments',
+          'xray:PutTelemetryRecords',
+          'xray:GetSamplingRules',
+          'xray:GetSamplingTargets',
+        ],
+        resources: ['*'],
+      }));
+    }
 
     return {
-      enabled: true,
+      enabled: isTracing,
     };
   }
 }
@@ -554,7 +648,7 @@ export class StateMachine extends StateMachineBase {
 /**
  * A State Machine
  */
-export interface IStateMachine extends IResource, iam.IGrantable {
+export interface IStateMachine extends IResource, iam.IGrantable, IStateMachineRef {
   /**
    * The ARN of the state machine
    * @attribute
@@ -598,6 +692,13 @@ export interface IStateMachine extends IResource, iam.IGrantable {
    * @param actions The list of desired actions
    */
   grantExecution(identity: iam.IGrantable, ...actions: string[]): iam.Grant;
+
+  /**
+   * Grant the given identity permission to redrive the execution of the state machine
+   *
+   * @param identity The principal
+   */
+  grantRedriveExecution(identity: iam.IGrantable): iam.Grant;
 
   /**
    * Grant the given identity custom permissions
@@ -726,9 +827,13 @@ export class ChainDefinitionBody extends DefinitionBody {
   }
 
   public bind(scope: Construct, _sfnPrincipal: iam.IPrincipal, sfnProps: StateMachineProps, graph?: StateGraph): DefinitionConfig {
-    const graphJson = graph!.toGraphJson();
+    const graphJson = graph!.toGraphJson(sfnProps.queryLanguage);
     return {
-      definitionString: Stack.of(scope).toJsonString({ ...graphJson, Comment: sfnProps.comment }),
+      definitionString: Stack.of(scope).toJsonString({
+        ...graphJson,
+        Comment: sfnProps.comment,
+        QueryLanguage: sfnProps.queryLanguage,
+      }),
     };
   }
 }

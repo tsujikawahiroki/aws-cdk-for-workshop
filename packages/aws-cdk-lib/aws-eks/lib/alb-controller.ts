@@ -1,14 +1,17 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { Construct } from 'constructs';
-import { Cluster } from './cluster';
+import type { Cluster } from './cluster';
+import { AuthenticationMode } from './cluster';
 import { HelmChart } from './helm-chart';
 import { ServiceAccount } from './service-account';
 import * as iam from '../../aws-iam';
 
 // v2 - keep this import as a separate section to reduce merge conflict when forward merging with the v2 branch.
-// eslint-disable-next-line
-import { Aws, Duration, Names, Stack } from '../../core';
+
+import type { RemovalPolicy } from '../../core';
+import { Aws, Duration, Names, Stack, ValidationError } from '../../core';
+import { lit } from '../../core/lib/private/literal-string';
 
 /**
  * Controller version.
@@ -16,7 +19,6 @@ import { Aws, Duration, Names, Stack } from '../../core';
  * Corresponds to the image tag of 'amazon/aws-load-balancer-controller' image.
  */
 export class AlbControllerVersion {
-
   /**
    * v2.0.0
    */
@@ -158,6 +160,156 @@ export class AlbControllerVersion {
   public static readonly V2_6_2 = new AlbControllerVersion('v2.6.2', '1.6.2', false);
 
   /**
+   * v2.7.0
+   */
+  public static readonly V2_7_0 = new AlbControllerVersion('v2.7.0', '1.7.0', false);
+
+  /**
+   * v2.7.1
+   */
+  public static readonly V2_7_1 = new AlbControllerVersion('v2.7.1', '1.7.1', false);
+
+  /**
+   * v2.7.2
+   */
+  public static readonly V2_7_2 = new AlbControllerVersion('v2.7.2', '1.7.2', false);
+
+  /**
+   * v2.8.0
+   */
+  public static readonly V2_8_0 = new AlbControllerVersion('v2.8.0', '1.8.0', false);
+
+  /**
+   * v2.8.1
+   */
+  public static readonly V2_8_1 = new AlbControllerVersion('v2.8.1', '1.8.1', false);
+
+  /**
+   * v2.8.2
+   */
+  public static readonly V2_8_2 = new AlbControllerVersion('v2.8.2', '1.8.2', false);
+
+  /**
+   * v2.8.3
+   */
+  public static readonly V2_8_3 = new AlbControllerVersion('v2.8.3', '1.8.4', false);
+
+  /**
+   * v2.9.0
+   */
+  public static readonly V2_9_0 = new AlbControllerVersion('v2.9.0', '1.9.0', false);
+
+  /**
+   * v2.9.1
+   */
+  public static readonly V2_9_1 = new AlbControllerVersion('v2.9.1', '1.9.1', false);
+
+  /**
+   * v2.9.2
+   */
+  public static readonly V2_9_2 = new AlbControllerVersion('v2.9.2', '1.9.2', false);
+
+  /**
+   * v2.10.0
+   */
+  public static readonly V2_10_0 = new AlbControllerVersion('v2.10.0', '1.10.0', false);
+
+  /**
+   * v2.10.1
+   */
+  public static readonly V2_10_1 = new AlbControllerVersion('v2.10.1', '1.10.1', false);
+
+  /**
+   * v2.11.0
+   */
+  public static readonly V2_11_0 = new AlbControllerVersion('v2.11.0', '1.11.0', false);
+
+  /**
+   * v2.12.0
+   */
+  public static readonly V2_12_0 = new AlbControllerVersion('v2.12.0', '1.12.0', false);
+
+  /**
+   * v2.13.0
+   */
+  public static readonly V2_13_0 = new AlbControllerVersion('v2.13.0', '1.13.0', false);
+
+  /**
+   * v2.13.1
+   */
+  public static readonly V2_13_1 = new AlbControllerVersion('v2.13.1', '1.13.1', false);
+
+  /**
+   * v2.13.2
+   */
+  public static readonly V2_13_2 = new AlbControllerVersion('v2.13.2', '1.13.2', false);
+
+  /**
+   * v2.13.3
+   */
+  public static readonly V2_13_3 = new AlbControllerVersion('v2.13.3', '1.13.3', false);
+
+  /**
+   * v2.13.4
+   */
+  public static readonly V2_13_4 = new AlbControllerVersion('v2.13.4', '1.13.4', false);
+
+  /**
+   * v2.14.0
+   */
+  public static readonly V2_14_0 = new AlbControllerVersion('v2.14.0', '1.14.0', false);
+
+  /**
+   * v2.14.1
+   */
+  public static readonly V2_14_1 = new AlbControllerVersion('v2.14.1', '1.14.1', false);
+
+  /**
+   * v2.15.0
+   */
+  public static readonly V2_15_0 = new AlbControllerVersion('v2.15.0', '1.15.0', false);
+
+  /**
+   * v2.16.0
+   */
+  public static readonly V2_16_0 = new AlbControllerVersion('v2.16.0', '1.16.0', false);
+
+  /**
+   * v2.17.0
+   */
+  public static readonly V2_17_0 = new AlbControllerVersion('v2.17.0', '1.17.0', false);
+
+  /**
+   * v2.17.1
+   */
+  public static readonly V2_17_1 = new AlbControllerVersion('v2.17.1', '1.17.1', false);
+
+  /**
+   * v3.0.0
+   */
+  public static readonly V3_0_0 = new AlbControllerVersion('v3.0.0', '3.0.0', false);
+
+  /**
+   * v3.1.0
+   */
+  public static readonly V3_1_0 = new AlbControllerVersion('v3.1.0', '3.1.0', false);
+
+  /**
+   * v3.2.0
+   */
+  public static readonly V3_2_0 = new AlbControllerVersion('v3.2.0', '3.2.0', false);
+
+  /**
+   * v3.2.1
+   */
+  public static readonly V3_2_1 = new AlbControllerVersion('v3.2.1', '3.2.1', false);
+
+  /**
+   * v3.2.2
+   */
+  public static readonly V3_2_2 = new AlbControllerVersion('v3.2.2', '3.2.2', false);
+
+  /**
    * Specify a custom version and an associated helm chart version.
    * Use this if the version you need is not available in one of the predefined versions.
    * Note that in this case, you will also need to provide an IAM policy in the controller options.
@@ -210,6 +362,28 @@ export enum AlbScheme {
 }
 
 /**
+ * Helm chart options that can be set for AlbControllerChart
+ * To add any new supported values refer
+ * https://github.com/kubernetes-sigs/aws-load-balancer-controller/blob/main/helm/aws-load-balancer-controller/values.yaml
+ */
+export interface AlbControllerHelmChartOptions {
+
+  /**
+   * Enable or disable AWS WAFv2 on the ALB ingress controller.
+   *
+   * @default - no value defined for this helm chart option, so it will not be set in the helm chart values
+   */
+  readonly enableWafv2?: boolean;
+
+  /**
+   * Enable or disable AWS WAF on the ALB ingress controller.
+   *
+   * @default - no value defined for this helm chart option, so it will not be set in the helm chart values
+   */
+  readonly enableWaf?: boolean;
+}
+
+/**
  * Options for `AlbController`.
  */
 export interface AlbControllerOptions {
@@ -241,6 +415,38 @@ export interface AlbControllerOptions {
    * @default - Corresponds to the predefined version.
    */
   readonly policy?: any;
+
+  /**
+   * Additional helm chart values for ALB controller
+   *
+   * @default - no additional helm chart values
+   */
+  readonly additionalHelmChartValues?: AlbControllerHelmChartOptions;
+
+  /**
+   * Overwrite any existing ALB controller service account.
+   *
+   * If this is set, we will use `kubectl apply` instead of `kubectl create`
+   * when the ALB controller service account is created. Otherwise, if there is already a service account
+   * named 'aws-load-balancer-controller' in the kube-system namespace, the operation will fail.
+   *
+   * @default false
+   */
+  readonly overwriteServiceAccount?: boolean;
+
+  /**
+   * The removal policy applied to the ALB controller resources.
+   *
+   * The removal policy controls what happens to the resources if they stop being managed by CloudFormation.
+   * This can happen in one of three situations:
+   *
+   * - The resource is removed from the template, so CloudFormation stops managing it
+   * - A change to the resource is made that requires it to be replaced, so CloudFormation stops managing it
+   * - The stack is deleted, so CloudFormation stops managing all resources in it
+   *
+   * @default RemovalPolicy.DESTROY
+   */
+  readonly removalPolicy?: RemovalPolicy;
 }
 
 /**
@@ -283,10 +489,16 @@ export class AlbController extends Construct {
     super(scope, id);
 
     const namespace = 'kube-system';
-    const serviceAccount = new ServiceAccount(this, 'alb-sa', { namespace, name: 'aws-load-balancer-controller', cluster: props.cluster });
+    const serviceAccount = new ServiceAccount(this, 'alb-sa', {
+      namespace,
+      name: 'aws-load-balancer-controller',
+      cluster: props.cluster,
+      overwriteServiceAccount: props.overwriteServiceAccount,
+      removalPolicy: props.removalPolicy,
+    });
 
     if (props.version.custom && !props.policy) {
-      throw new Error("'albControllerOptions.policy' is required when using a custom controller version");
+      throw new ValidationError(lit`AlbControllerOptionsPolicyRequired`, "'albControllerOptions.policy' is required when using a custom controller version", this);
     }
 
     // https://kubernetes-sigs.github.io/aws-load-balancer-controller/v2.2/deploy/installation/#iam-permissions
@@ -308,7 +520,6 @@ export class AlbController extends Construct {
       namespace,
       release: 'aws-load-balancer-controller',
       version: props.version.helmChartVersion,
-
       wait: true,
       timeout: Duration.minutes(15),
       values: {
@@ -323,20 +534,25 @@ export class AlbController extends Construct {
           repository: props.repository ?? '602401143452.dkr.ecr.us-west-2.amazonaws.com/amazon/aws-load-balancer-controller',
           tag: props.version.version,
         },
+        ...props.additionalHelmChartValues, // additional helm chart options for ALB controller chart
       },
+      removalPolicy: props.removalPolicy,
     });
 
     // the controller relies on permissions deployed using these resources.
     chart.node.addDependency(serviceAccount);
     chart.node.addDependency(props.cluster.openIdConnectProvider);
-    chart.node.addDependency(props.cluster.awsAuth);
+    if (props.cluster.authenticationMode != AuthenticationMode.API) {
+      // ensure the dependency only when ConfigMap is supported
+      chart.node.addDependency(props.cluster.awsAuth);
+    }
   }
 
   private rewritePolicyResources(resources: string | string[] | undefined): string | string[] | undefined {
     // This is safe to disable because we're actually replacing the literal partition with a reference to
     // the stack partition (which is hardcoded into the JSON files) to prevent issues such as
     // aws/aws-cdk#22520.
-    // eslint-disable-next-line @aws-cdk/no-literal-partition
+    // eslint-disable-next-line @cdklabs/no-literal-partition
     const rewriteResource = (s: string) => s.replace('arn:aws:', `arn:${Aws.PARTITION}:`);
 
     if (!resources) {

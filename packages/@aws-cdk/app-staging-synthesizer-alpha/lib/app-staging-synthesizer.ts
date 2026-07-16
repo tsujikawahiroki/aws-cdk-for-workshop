@@ -1,6 +1,4 @@
-import {
-  AssetManifestBuilder,
-  BOOTSTRAP_QUALIFIER_CONTEXT,
+import type {
   DockerImageAssetLocation,
   DockerImageAssetSource,
   FileAssetLocation,
@@ -9,16 +7,22 @@ import {
   IReusableStackSynthesizer,
   ISynthesisSession,
   Stack,
+} from 'aws-cdk-lib/core';
+import {
+  AssetManifestBuilder,
+  BOOTSTRAP_QUALIFIER_CONTEXT,
   StackSynthesizer,
   Token,
 } from 'aws-cdk-lib/core';
 import { StringSpecializer, translateCfnTokenToAssetToken } from 'aws-cdk-lib/core/lib/helpers-internal';
-import { BootstrapRole, BootstrapRoles, DeploymentIdentities } from './bootstrap-roles';
-import { DefaultStagingStack, DefaultStagingStackOptions } from './default-staging-stack';
+import type { BootstrapRole, BootstrapRoles } from './bootstrap-roles';
+import { DeploymentIdentities } from './bootstrap-roles';
+import type { DefaultStagingStackOptions } from './default-staging-stack';
+import { DefaultStagingStack } from './default-staging-stack';
 import { PerEnvironmentStagingFactory as PerEnvironmentStagingFactory } from './per-env-staging-factory';
 import { AppScopedGlobal } from './private/app-global';
 import { validateNoTokens } from './private/no-tokens';
-import { IStagingResources, IStagingResourcesFactory, ObtainStagingResourcesContext } from './staging-stack';
+import type { IStagingResources, IStagingResourcesFactory, ObtainStagingResourcesContext } from './staging-stack';
 
 const AGNOSTIC_STACKS = new AppScopedGlobal(() => new Set<Stack>());
 const ENV_AWARE_STACKS = new AppScopedGlobal(() => new Set<Stack>());
@@ -251,7 +255,6 @@ export class AppStagingSynthesizer extends StackSynthesizer implements IReusable
 
     (isAgnostic ? agnosticStacks : envAwareStacks).add(stack);
     if (agnosticStacks.size > 0 && envAwareStacks.size > 0) {
-
       const describeStacks = (xs: Set<Stack>) => Array.from(xs).map(s => s.node.path).join(', ');
 
       throw new Error([
@@ -342,6 +345,8 @@ class BoundAppStagingSynthesizer extends StackSynthesizer implements IBoundAppSt
       bucketName: translateCfnTokenToAssetToken(bucketName),
       bucketPrefix: prefix,
       role: assumeRoleArn ? { assumeRoleArn: translateCfnTokenToAssetToken(assumeRoleArn) } : undefined,
+    }, {
+      displayName: asset.displayName,
     });
 
     if (dependencyStack) {
@@ -360,6 +365,8 @@ class BoundAppStagingSynthesizer extends StackSynthesizer implements IBoundAppSt
     const location = this.assetManifest.defaultAddDockerImageAsset(this.boundStack, asset, {
       repositoryName: translateCfnTokenToAssetToken(repoName),
       role: assumeRoleArn ? { assumeRoleArn: translateCfnTokenToAssetToken(assumeRoleArn) } : undefined,
+    }, {
+      displayName: asset.displayName,
     });
 
     if (dependencyStack) {

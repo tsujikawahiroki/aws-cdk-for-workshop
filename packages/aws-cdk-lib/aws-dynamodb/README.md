@@ -17,9 +17,13 @@ By default, `TableV2` will create a single table in the main deployment region r
 ```ts
 const table = new dynamodb.TableV2(this, 'Table', {
   partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
-  contributorInsights: true,
+  contributorInsightsSpecification: {
+    enabled: true,
+  },
   tableClass: dynamodb.TableClass.STANDARD_INFREQUENT_ACCESS,
-  pointInTimeRecovery: true,
+  pointInTimeRecoverySpecification: {
+    pointInTimeRecoveryEnabled: true,
+  },
 });
 ```
 
@@ -64,12 +68,12 @@ globalTable.addReplica({ region: 'us-east-2', deletionProtection: true });
 ```
 
 The following properties are configurable on a per-replica basis, but will be inherited from the `TableV2` properties if not specified:
-* contributorInsights
+* contributorInsightsSpecification
 * deletionProtection
-* pointInTimeRecovery
+* pointInTimeRecoverySpecification
 * tableClass
 * readCapacity (only configurable if the `TableV2` billing mode is `PROVISIONED`)
-* globalSecondaryIndexes (only `contributorInsights` and `readCapacity`)
+* globalSecondaryIndexes (only `contributorInsightsSpecification` and `readCapacity`)
 
 The following example shows how to define properties on a per-replica basis:
 
@@ -81,17 +85,25 @@ const stack = new cdk.Stack(app, 'Stack', { env: { region: 'us-west-2' } });
 
 const globalTable = new dynamodb.TableV2(stack, 'GlobalTable', {
   partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
-  contributorInsights: true,
-  pointInTimeRecovery: true,
+  contributorInsightsSpecification: {
+    enabled: true,
+  },
+  pointInTimeRecoverySpecification: {
+      pointInTimeRecoveryEnabled: true,
+  },
   replicas: [
     {
       region: 'us-east-1',
       tableClass: dynamodb.TableClass.STANDARD_INFREQUENT_ACCESS,
-      pointInTimeRecovery: false,
+      pointInTimeRecoverySpecification: {
+        pointInTimeRecoveryEnabled: false,
+      },
     },
     {
       region: 'us-east-2',
-      contributorInsights: false,
+      contributorInsightsSpecification: {
+        enabled: false,
+      },
     },
   ],
 });
@@ -136,7 +148,7 @@ class BarStack extends cdk.Stack {
 const app = new cdk.App();
 
 const fooStack = new FooStack(app, 'FooStack', { env: { region: 'us-west-2' } });
-const barStack = new BarStack(app, 'BarStack', { 
+const barStack = new BarStack(app, 'BarStack', {
   replicaTable: fooStack.globalTable.replica('us-east-1'),
   env: { region: 'us-east-1' },
 });
@@ -144,10 +156,181 @@ const barStack = new BarStack(app, 'BarStack', {
 
 Note: You can create an instance of the `TableV2` construct with as many `replicas` as needed as long as there is only one replica per region. After table creation you can add or remove `replicas`, but you can only add or remove a single replica in each update.
 
+### Multi-Account Global Tables
+
+Multi-account global tables extend DynamoDB replication across AWS accounts, providing enhanced security, governance, and fault isolation. Each replica resides in a separate AWS account, enabling account-level isolation and alignment with organizational structures.
+
+#### Creating Multi-Account Replicas
+
+For tables defined in the same CDK application, use the `TableV2MultiAccountReplica` construct:
+
+```ts
+import * as cdk from 'aws-cdk-lib';
+
+const app = new cdk.App();
+
+// Source table in Account A
+const sourceStack = new cdk.Stack(app, 'SourceStack', {
+  env: { region: 'us-east-2', account: '111111111111' },
+});
+
+const sourceTable = new dynamodb.TableV2(sourceStack, 'SourceTable', {
+  tableName: 'MyMultiAccountTable',
+  partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
+  globalTableSettingsReplicationMode: dynamodb.GlobalTableSettingsReplicationMode.ALL,
+});
+
+// Replica stack in Account B
+const replicaStack = new cdk.Stack(app, 'ReplicaStack', {
+  env: { region: 'us-east-1', account: '222222222222' },
+});
+
+// Create replica - permissions are automatically configured
+const replica = new dynamodb.TableV2MultiAccountReplica(replicaStack, 'ReplicaTable', {
+  tableName: 'MyMultiAccountTable',
+  replicaSourceTable: sourceTable,
+  globalTableSettingsReplicationMode: dynamodb.GlobalTableSettingsReplicationMode.ALL,
+});
+```
+
+The `TableV2MultiAccountReplica` construct:
+* Creates the replica table with the correct source ARN
+* Copies the key schema from the source table
+* Automatically adds resource policies to both source and replica tables
+* Validates that the replica is in a different account and region
+
+**Note**: Permissions are automatically configured when both tables are in the same CDK app. For imported source tables, see "Working with Imported Tables" below.
+
+#### Adding Replicas to Existing Tables
+
+If the source table already exists in AWS, you cannot use automatic cross-stack references. The replica will issue a warning, and you must manually configure permissions:
+
+```ts
+import * as cdk from 'aws-cdk-lib';
+
+const app = new cdk.App();
+
+// Source table in Account A
+const sourceStack = new cdk.Stack(app, 'SourceStack', {
+  env: { region: 'us-east-1', account: '111111111111' },
+});
+
+// Region us-west-2
+const sourceTable = new dynamodb.TableV2(sourceStack, 'SourceTable', {
+  tableName: 'MyMultiAccountTable',
+  partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
+  globalTableSettingsReplicationMode: dynamodb.GlobalTableSettingsReplicationMode.ALL,
+});
+// After replica is deployed, update source stack with the ARN
+sourceTable.grants.multiAccountReplicationTo('arn:aws:dynamodb:us-east-1:222222222222:table/MyMultiAccountTable');
+```
+
+#### Working with Imported Tables
+
+When importing a source table, the replica will issue a warning since it cannot automatically configure permissions on the imported table:
+
+```ts
+import * as cdk from 'aws-cdk-lib';
+
+const app = new cdk.App();
+
+const replicaStack = new cdk.Stack(app, 'ReplicaStack', {
+  env: { region: 'us-east-1', account: '222222222222' },
+});
+
+// Import source table
+const importedSource = dynamodb.TableV2.fromTableArn(
+  replicaStack,
+  'ImportedSource',
+  'arn:aws:dynamodb:us-east-2:111111111111:table/MyMultiAccountTable',
+);
+
+// Create replica - will issue a warning about missing source permissions
+const replica = new dynamodb.TableV2MultiAccountReplica(replicaStack, 'ReplicaTable', {
+  tableName: 'MyMultiAccountTable',
+  replicaSourceTable: importedSource,
+  globalTableSettingsReplicationMode: dynamodb.GlobalTableSettingsReplicationMode.ALL,
+});
+```
+
+**Warning**: The replica will emit a warning indicating that you must manually configure permissions on the actual source table.
+
+Then configure permissions on the actual source table using the replica ARN as shown in "Adding Replicas to Existing Tables" above.
+
+#### Key Considerations
+
+* Multi-account replicas can only be created using the `TableV2MultiAccountReplica` construct
+* Each replica must be in a separate AWS account and region
+* Only Multi-Region Eventual Consistency (MREC) is supported
+* Resource-based policies must be configured on both source and replica tables before replication begins
+
+## Multi-Region Strong Consistency (MRSC)
+
+By default, DynamoDB global tables provide eventual consistency across regions. For applications requiring strong consistency across regions, you can configure Multi-Region Strong Consistency (MRSC) using the `multiRegionConsistency` property.
+
+MRSC global tables can be configured in two ways:
+* **Three replicas**: Deploy your table across three regions within the same region set
+* **Two replicas + one witness**: Deploy your table across two regions with a witness region for consensus
+
+### Region Sets
+
+MRSC global tables must be deployed within the same region set. The supported region sets are:
+
+* **US Region set**: `us-east-1`, `us-east-2`, `us-west-2`
+* **EU Region set**: `eu-west-1`, `eu-west-2`, `eu-west-3`, `eu-central-1`  
+* **AP Region set**: `ap-northeast-1`, `ap-northeast-2`, `ap-northeast-3`
+
+### Three Replicas Configuration
+
+```ts
+import * as cdk from 'aws-cdk-lib';
+
+const app = new cdk.App();
+const stack = new cdk.Stack(app, 'Stack', { env: { region: 'us-west-2' } });
+
+const mrscTable = new dynamodb.TableV2(stack, 'MRSCTable', {
+  partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
+  multiRegionConsistency: dynamodb.MultiRegionConsistency.STRONG,
+  replicas: [
+    { region: 'us-east-1' },
+    { region: 'us-east-2' },
+  ],
+});
+```
+
+### Two Replicas + Witness Configuration
+
+```ts
+import * as cdk from 'aws-cdk-lib';
+
+const app = new cdk.App();
+const stack = new cdk.Stack(app, 'Stack', { env: { region: 'us-west-2' } });
+
+const mrscTable = new dynamodb.TableV2(stack, 'MRSCTable', {
+  partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
+  multiRegionConsistency: dynamodb.MultiRegionConsistency.STRONG,
+  replicas: [
+    { region: 'us-east-1' },
+  ],
+  witnessRegion: 'us-east-2',
+});
+```
+
+### Important Considerations
+
+* **Witness regions** can only be used with `MultiRegionConsistency.STRONG`. Attempting to specify a witness region with eventual consistency will result in a validation error.
+* **Region validation**: All regions (primary, replicas, and witness) must be within the same region set.
+* **Replica count**: When using a witness region, you must have exactly 2 replicas (including the primary). Without a witness region, you must have exactly 3 replicas.
+* **Performance**: MRSC provides strong consistency but may have higher latency compared to eventual consistency.
+
+Further reading:
+https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/V2globaltables_HowItWorks.html#V2globaltables_HowItWorks.consistency-modes-mrsc
+
 ## Billing
 
 The `TableV2` construct can be configured with on-demand or provisioned billing:
 * On-demand - The default option. This is a flexible billing option capable of serving requests without capacity planning. The billing mode will be `PAY_PER_REQUEST`.
+* You can optionally specify the `maxReadRequestUnits` or `maxWriteRequestUnits` on individual tables and associated global secondary indexes (GSIs). When you configure maximum throughput for an on-demand table, throughput requests that exceed the maximum amount specified will be throttled.
 * Provisioned - Specify the `readCapacity` and `writeCapacity` that you need for your application. The billing mode will be `PROVISIONED`. Capacity can be configured using one of the following modes:
   * Fixed - provisioned throughput capacity is configured with a fixed number of I/O operations per second.
   * Autoscaled - provisioned throughput capacity is dynamically adjusted on your behalf in response to actual traffic patterns.
@@ -160,6 +343,18 @@ The following example shows how to configure `TableV2` with on-demand billing:
 const table = new dynamodb.TableV2(this, 'Table', {
   partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
   billing: dynamodb.Billing.onDemand(),
+})
+```
+
+The following example shows how to configure `TableV2` with on-demand billing with optional maximum throughput configured:
+
+```ts
+const table = new dynamodb.TableV2(this, 'Table', {
+  partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
+  billing: dynamodb.Billing.onDemand({
+    maxReadRequestUnits: 100,
+    maxWriteRequestUnits: 115,
+  }),
 })
 ```
 
@@ -215,6 +410,25 @@ const globalTable = new dynamodb.TableV2(this, 'Table', {
 
 Further reading:
 https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/HowItWorks.ReadWriteCapacityMode.html
+
+## Warm Throughput
+Warm throughput refers to the number of read and write operations your DynamoDB table can instantaneously support.
+
+This optional configuration allows you to pre-warm your table or index to handle anticipated throughput, ensuring optimal performance under expected load.
+
+The Warm Throughput configuration settings are automatically replicated across all Global Table replicas.
+
+```ts
+const table = new dynamodb.TableV2(this, 'Table', {
+  partitionKey: { name: 'id', type: dynamodb.AttributeType.STRING },
+  warmThroughput: {
+      readUnitsPerSecond: 15000,
+      writeUnitsPerSecond: 20000,
+    },
+});
+```
+Further reading:
+https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/warm-throughput.html
 
 ## Encryption
 
@@ -275,7 +489,7 @@ https://docs.aws.amazon.com/kms/latest/developerguide/concepts.html#key-mgmt
 
 Secondary indexes allow efficient access to data with attributes other than the `primaryKey`. DynamoDB supports two types of secondary indexes:
 
-* Global secondary index - An index with a `partitionKey` and a `sortKey` that can be different from those on the base table. A `globalSecondaryIndex` is considered "global" because queries on the index can span all of the data in the base table, across all partitions. A `globalSecondaryIndex` is stored in its own partition space away from the base table and scales separately from the base table.
+* Global secondary index - An index with partition key(s) and optional sort key(s) that can be different from those on the base table. A `globalSecondaryIndex` is considered "global" because queries on the index can span all of the data in the base table, across all partitions. A `globalSecondaryIndex` is stored in its own partition space away from the base table and scales separately from the base table.
 
 * Local secondary index - An index that has the same `partitionKey` as the base table, but a different `sortKey`. A `localSecondaryIndex` is "local" in the sense that every partition of a `localSecondaryIndex` is scoped to a base table partition that has the same `partitionKey` value.
 
@@ -298,7 +512,41 @@ const table = new dynamodb.TableV2(this, 'Table', {
 });
 ```
 
-Alternatively, you can add a `globalSecondaryIndex` using the `addGlobalSecondaryIndex` method:
+#### Multi-attribute Keys
+
+Global secondary indexes support multi-attribute keys, allowing you to specify multiple partition keys and/or multiple sort keys. This enables more flexible query patterns for complex data models.
+
+**Key Constraints:**
+- You can specify up to **4 partition keys** per global secondary index
+- You can specify up to **4 sort keys** per global secondary index
+- Use **either** `partitionKey` (singular) **or** `partitionKeys` (plural), but not both
+- Use **either** `sortKey` (singular) **or** `sortKeys` (plural), but not both
+- At least one partition key must be specified (either `partitionKey` or `partitionKeys`)
+- For multiple keys, you **must** use the plural parameters (`partitionKeys` and/or `sortKeys`)
+- **Keys cannot be added or modified after index creation** - attempting to add additional keys to an existing index will result in an error
+
+**Example with multi-attribute partition and sort keys:**
+
+```ts
+const table = new dynamodb.TableV2(this, 'Table', {
+  partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
+  globalSecondaryIndexes: [
+    {
+      indexName: 'multi-attribute-gsi',
+      partitionKeys: [
+        { name: 'gsi_pk1', type: dynamodb.AttributeType.STRING },
+        { name: 'gsi_pk2', type: dynamodb.AttributeType.NUMBER },
+      ],
+      sortKeys: [
+        { name: 'gsi_sk1', type: dynamodb.AttributeType.STRING },
+        { name: 'gsi_sk2', type: dynamodb.AttributeType.BINARY },
+      ],
+    },
+  ],
+});
+```
+
+You can also add a `globalSecondaryIndex` using the `addGlobalSecondaryIndex` method:
 
 ```ts
 const table = new dynamodb.TableV2(this, 'Table', {
@@ -314,6 +562,16 @@ const table = new dynamodb.TableV2(this, 'Table', {
 table.addGlobalSecondaryIndex({
   indexName: 'gsi2',
   partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
+});
+
+// Add a GSI with multi-attribute keys
+table.addGlobalSecondaryIndex({
+  indexName: 'multi-attribute-gsi2',
+  partitionKeys: [
+    { name: 'multi-attribute_pk1', type: dynamodb.AttributeType.STRING },
+    { name: 'multi-attribute_pk2', type: dynamodb.AttributeType.NUMBER },
+  ],
+  sortKey: { name: 'sk', type: dynamodb.AttributeType.STRING },
 });
 ```
 
@@ -343,7 +601,7 @@ const table = new dynamodb.TableV2(this, 'Table', {
 });
 ```
 
-All `globalSecondaryIndexes` for replica tables are inherited from the primary table. You can configure `contributorInsights` and `readCapacity` for each `globalSecondaryIndex` on a per-replica basis:
+All `globalSecondaryIndexes` for replica tables are inherited from the primary table. You can configure `contributorInsightsSpecification` and `readCapacity` for each `globalSecondaryIndex` on a per-replica basis:
 
 ```ts
 import * as cdk from 'aws-cdk-lib';
@@ -353,7 +611,9 @@ const stack = new cdk.Stack(app, 'Stack', { env: { region: 'us-west-2' } });
 
 const globalTable = new dynamodb.TableV2(stack, 'GlobalTable', {
   partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
-  contributorInsights: true,
+  contributorInsightsSpecification: {
+    enabled: true,
+  },
   billing: dynamodb.Billing.provisioned({
     readCapacity: dynamodb.Capacity.fixed(10),
     writeCapacity: dynamodb.Capacity.autoscaled({ maxCapacity: 10 }),
@@ -384,7 +644,9 @@ const globalTable = new dynamodb.TableV2(stack, 'GlobalTable', {
       region: 'us-east-2',
       globalSecondaryIndexOptions: {
         gsi2: {
-          contributorInsights: false,
+          contributorInsightsSpecification: {
+            enabled: false,
+          },
         },
       },
     },
@@ -505,12 +767,42 @@ const table = new dynamodb.TableV2(this, 'Table', {
 
 ## Contributor Insights
 
-Enabling `contributorInsights` for `TableV2` will provide information about the most accessed and throttled items in a table or `globalSecondaryIndex`. DynamoDB delivers this information to you via CloudWatch Contributor Insights rules, reports, and graphs of report data.
+Enabling `contributorInsightSpecification` for `TableV2` will provide information about the most accessed and throttled or throttled only items in a table or `globalSecondaryIndex`. DynamoDB delivers this information to you via CloudWatch Contributor Insights rules, reports, and graphs of report data.
+
+By default, Contributor Insights for DynamoDB monitors all requests, including both the most accessed and most throttled items.  
+To limit the scope to only the most accessed or only the most throttled items, use the optional `mode` parameter.
+
+- To monitor all traffic on a table or index, set `mode` to `ContributorInsightsMode.ACCESSED_AND_THROTTLED_KEYS`.
+- To monitor only throttled traffic on a table or index, set `mode` to `ContributorInsightsMode.THROTTLED_KEYS`. 
+
 
 ```ts
 const table = new dynamodb.TableV2(this, 'Table', {
   partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
-  contributorInsights: true,
+  contributorInsightsSpecification: {
+    enabled: true,
+    mode: dynamodb.ContributorInsightsMode.ACCESSED_AND_THROTTLED_KEYS,
+  },
+});
+```
+
+When you use `Table`, you can enable contributor insights for a table or specific global secondary index by setting `contributorInsightsSpecification` parameter `enabled` to `true`.
+
+```ts
+const table = new dynamodb.Table(this, 'Table', {
+  partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
+  contributorInsightsSpecification: { // for a table
+    enabled: true,
+    mode: dynamodb.ContributorInsightsMode.THROTTLED_KEYS, // only emit throttling events
+  },
+});
+
+table.addGlobalSecondaryIndex({
+  contributorInsightsSpecification: { // for a specific global secondary index
+    enabled: true,
+  },
+  indexName: 'gsi',
+  partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
 });
 ```
 
@@ -538,7 +830,7 @@ const stack = new cdk.Stack(app, 'Stack', { env: { region: 'us-west-2' } });
 
 const globalTable = new dynamodb.TableV2(stack, 'GlobalTable', {
   partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
-  // applys to all replicas, i.e., us-west-2, us-east-1, us-east-2
+  // applies to all replicas, i.e., us-west-2, us-east-1, us-east-2
   removalPolicy: cdk.RemovalPolicy.DESTROY,
   replicas: [
     { region: 'us-east-1' },
@@ -575,12 +867,17 @@ const globalTable = new dynamodb.TableV2(stack, 'GlobalTable', {
 
 ## Point-in-Time Recovery
 
-`pointInTimeRecovery` provides automatic backups of your DynamoDB table data which helps protect your tables from accidental write or delete operations.
+`pointInTimeRecoverySpecifcation` provides automatic backups of your DynamoDB table data which helps protect your tables from accidental write or delete operations.
+
+You can also choose to set `recoveryPeriodInDays` to a value between `1` and `35` which dictates how many days of recoverable data is stored. If no value is provided, the recovery period defaults to `35` days.
 
 ```ts
 const table = new dynamodb.TableV2(this, 'Table', {
   partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
-  pointInTimeRecovery: true,
+  pointInTimeRecoverySpecification: {
+    pointInTimeRecoveryEnabled: true,
+    recoveryPeriodInDays: 4,
+  },
 });
 ```
 
@@ -602,7 +899,7 @@ https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/HowItWorks.Tabl
 
 ## Tags
 
-You can add tags to a `TableV2` in several ways. By adding the tags to the construct itself it will apply the tags to the 
+You can add tags to a `TableV2` in several ways. By adding the tags to the construct itself it will apply the tags to the
 primary table.
 ```ts
 const table = new dynamodb.TableV2(this, 'Table', {
@@ -671,8 +968,132 @@ Using `resourcePolicy` you can add a [resource policy](https://docs.aws.amazon.c
     });
 ```
 
+### Adding Resource Policy Statements Dynamically
+
+You can also add resource policy statements to a table after it's created using the `addToResourcePolicy` method. Following the same pattern as KMS, resource policies use wildcard resources to avoid circular dependencies:
+
+```ts
+const table = new dynamodb.TableV2(this, 'Table', {
+  partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
+});
+
+// Standard resource policy (recommended approach)
+table.addToResourcePolicy(new iam.PolicyStatement({
+  actions: ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:Query'],
+  principals: [new iam.AccountRootPrincipal()],
+  resources: ['*'], // Wildcard avoids circular dependency - same pattern as KMS
+}));
+
+// Allow specific service access
+table.addToResourcePolicy(new iam.PolicyStatement({
+  actions: ['dynamodb:Query'],
+  principals: [new iam.ServicePrincipal('lambda.amazonaws.com')],
+  resources: ['*'],
+}));
+```
+
+#### Scoped Resource Policies (Advanced)
+
+For scoped resource policies that reference specific table ARNs, you must specify an explicit table name:
+
+```ts
+import { Fn } from 'aws-cdk-lib';
+
+// Table with explicit name enables scoped resource policies
+const table = new dynamodb.TableV2(this, 'Table', {
+  tableName: 'my-explicit-table-name', // Required for scoped resources
+  partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
+});
+
+// Now you can use scoped resources
+table.addToResourcePolicy(new iam.PolicyStatement({
+  actions: ['dynamodb:GetItem'],
+  principals: [new iam.AccountRootPrincipal()],
+  resources: [
+    Fn.sub('arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/my-explicit-table-name'),
+    Fn.sub('arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/my-explicit-table-name/index/*'),
+  ],
+}));
+```
+
+**Important Limitations:**
+- **Auto-generated table names**: Must use `resources: ['*']` to avoid circular dependencies
+- **Explicit table names**: Enable scoped resources but lose CDK's automatic naming benefits
+- **CloudFormation constraint**: Resource policies cannot reference the resource they're attached to during creation
+
 TableV2 doesn’t support creating a replica and adding a resource-based policy to that replica in the same stack update in Regions other than the Region where you deploy the stack update.
 To incorporate a resource-based policy into a replica, you'll need to initially deploy the replica without the policy, followed by a subsequent update to include the desired policy.
+
+### Grant Methods and Resource Policies
+
+Grant methods like `grantReadData()`, `grantWriteData()`, and `grantReadWriteData()` automatically add permissions to resource policies when used with same-account principals (like `AccountRootPrincipal`). This happens transparently:
+
+```ts
+const table = new dynamodb.TableV2(this, 'Table', {
+  partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
+});
+
+// Automatically adds to table's resource policy (same account)
+table.grantReadData(new iam.AccountRootPrincipal());
+
+// Adds to IAM user's policy (not resource policy)
+declare const user: iam.User;
+table.grantReadData(user);
+```
+
+**How it works:**
+- **Same-account principals** (AccountRootPrincipal, AccountPrincipal): Grant adds statement to table's resource policy
+- **IAM identities** (User, Role, Group): Grant adds statement to the identity's IAM policy
+- **Resource policy statements**: Automatically use wildcard resources (`*`) to avoid circular dependencies
+
+This behavior follows the same pattern as other AWS services like KMS and S3, where grants intelligently choose between resource policies and identity policies based on the principal type.
+
+**To avoid wildcards in resource policies:** If you need scoped resource ARNs instead of wildcards, use `addToResourcePolicy()` directly with an explicit table name instead of grant methods. See the "Scoped Resource Policies (Advanced)" section above for details.
+
+### Stream Resource Policy
+
+You can attach a resource policy to a DynamoDB stream using `streamResourcePolicy`. This applies per-replica, so you can set different policies for the primary table and each replica:
+
+```ts
+const streamPolicy = new iam.PolicyDocument({
+  statements: [
+    new iam.PolicyStatement({
+      actions: ['dynamodb:DescribeStream', 'dynamodb:GetRecords', 'dynamodb:GetShardIterator'],
+      principals: [new iam.AccountRootPrincipal()],
+      resources: ['*'],
+    }),
+  ],
+});
+
+new dynamodb.TableV2(this, 'GlobalTable', {
+  partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
+  dynamoStream: dynamodb.StreamViewType.NEW_AND_OLD_IMAGES,
+  streamResourcePolicy: streamPolicy,
+  replicas: [
+    {
+      region: 'us-west-2',
+      streamResourcePolicy: streamPolicy,
+    },
+  ],
+});
+```
+
+You can also add stream resource policy statements dynamically using `addToStreamResourcePolicy`:
+
+```ts
+const table = new dynamodb.TableV2(this, 'Table', {
+  partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
+  dynamoStream: dynamodb.StreamViewType.NEW_AND_OLD_IMAGES,
+});
+
+table.addToStreamResourcePolicy(new iam.PolicyStatement({
+  actions: ['dynamodb:DescribeStream', 'dynamodb:GetRecords', 'dynamodb:GetShardIterator'],
+  principals: [new iam.AccountRootPrincipal()],
+  resources: ['*'],
+}));
+```
+
+Note: `addToStreamResourcePolicy` applies to the primary table's stream only. To set a stream resource policy on a replica, pass `streamResourcePolicy` in the replica props.
 
 ## Grants
 
@@ -702,7 +1123,7 @@ const globalTable = new dynamodb.TableV2(stack, 'GlobalTable', {
   ],
 });
 
-// grantReadData only applys to the table in us-west-2 and the tableKey
+// grantReadData only applies to the table in us-west-2 and the tableKey
 globalTable.grantReadData(user);
 ```
 
@@ -732,7 +1153,7 @@ const globalTable = new dynamodb.TableV2(stack, 'GlobalTable', {
   ],
 });
 
-// grantReadData applys to the table in us-east-2 and the key arn for the key in us-east-2
+// grantReadData applies to the table in us-east-2 and the key arn for the key in us-east-2
 globalTable.replica('us-east-2').grantReadData(user);
 ```
 
@@ -768,7 +1189,7 @@ new cloudwatch.Alarm(this, 'Alarm', {
 The `replica` method can be used to generate a metric for a specific replica table:
 
 ```ts
-import * as cdk form 'aws-cdk-lib';
+import * as cdk from 'aws-cdk-lib';
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 
 class FooStack extends cdk.Stack {
@@ -777,7 +1198,7 @@ class FooStack extends cdk.Stack {
   public constructor(scope: Construct, id: string, props: cdk.StackProps) {
     super(scope, id, props);
 
-    this.globalTable = new dynamodb.Tablev2(this, 'GlobalTable', {
+    this.globalTable = new dynamodb.TableV2(this, 'GlobalTable', {
       partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
       replicas: [
         { region: 'us-east-1' },
@@ -787,7 +1208,7 @@ class FooStack extends cdk.Stack {
   }
 }
 
-interface BarStack extends cdk.StackProps {
+interface BarStackProps extends cdk.StackProps {
   readonly replicaTable: dynamodb.ITableV2;
 }
 

@@ -1,7 +1,9 @@
-import * as s3 from 'aws-cdk-lib/aws-s3';
-import * as cdk from 'aws-cdk-lib/core';
-import { Construct } from 'constructs';
 import * as codestar from 'aws-cdk-lib/aws-codestar';
+import type * as s3 from 'aws-cdk-lib/aws-s3';
+import * as cdk from 'aws-cdk-lib/core';
+import { addConstructMetadata } from 'aws-cdk-lib/core/lib/metadata-resource';
+import { propertyInjectable } from 'aws-cdk-lib/core/lib/prop-injectable';
+import type { Construct } from 'constructs';
 
 /**
  * GitHubRepository resource interface
@@ -41,7 +43,7 @@ export interface GitHubRepositoryProps {
   /**
    * The name of the Amazon S3 bucket that contains the ZIP file with the content to be committed to the new repository
    */
-  readonly contentsBucket: s3.IBucket;
+  readonly contentsBucket: s3.IBucketRef;
 
   /**
    * The S3 object key or file name for the ZIP file
@@ -83,13 +85,17 @@ export interface GitHubRepositoryProps {
 /**
  * The GitHubRepository resource
  */
+@propertyInjectable
 export class GitHubRepository extends cdk.Resource implements IGitHubRepository {
-
+  /** Uniquely identifies this class. */
+  public static readonly PROPERTY_INJECTION_ID: string = '@aws-cdk.aws-codestar-alpha.GitHubRepository';
   public readonly owner: string;
   public readonly repo: string;
 
   constructor(scope: Construct, id: string, props: GitHubRepositoryProps) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     const resource = new codestar.CfnGitHubRepository(this, 'Resource', {
       repositoryOwner: props.owner,
@@ -97,7 +103,7 @@ export class GitHubRepository extends cdk.Resource implements IGitHubRepository 
       repositoryAccessToken: props.accessToken.unsafeUnwrap(), // Safe usage
       code: {
         s3: {
-          bucket: props.contentsBucket.bucketName,
+          bucket: props.contentsBucket.bucketRef.bucketName,
           key: props.contentsKey,
           objectVersion: props.contentsS3Version,
         },

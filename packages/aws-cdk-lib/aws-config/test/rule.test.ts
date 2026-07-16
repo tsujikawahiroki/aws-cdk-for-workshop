@@ -18,6 +18,7 @@ describe('rule', () => {
       },
       maximumExecutionFrequency: config.MaximumExecutionFrequency.THREE_HOURS,
       configRuleName: 'cool rule',
+      evaluationModes: config.EvaluationMode.DETECTIVE_AND_PROACTIVE,
     });
 
     // THEN
@@ -32,6 +33,14 @@ describe('rule', () => {
         key: 'value',
       },
       MaximumExecutionFrequency: 'Three_Hours',
+      EvaluationModes: [
+        {
+          Mode: 'DETECTIVE',
+        },
+        {
+          Mode: 'PROACTIVE',
+        },
+      ],
     });
   });
 
@@ -41,7 +50,7 @@ describe('rule', () => {
     const fn = new lambda.Function(stack, 'Function', {
       code: lambda.AssetCode.fromInline('foo'),
       handler: 'index.handler',
-      runtime: lambda.Runtime.NODEJS_18_X,
+      runtime: lambda.Runtime.NODEJS_20_X,
     });
 
     // WHEN
@@ -55,6 +64,7 @@ describe('rule', () => {
       maximumExecutionFrequency: config.MaximumExecutionFrequency.SIX_HOURS,
       configRuleName: 'cool rule',
       periodic: true,
+      evaluationModes: config.EvaluationMode.DETECTIVE_AND_PROACTIVE,
     });
 
     // THEN
@@ -90,6 +100,14 @@ describe('rule', () => {
           key: 'value',
         },
         MaximumExecutionFrequency: 'Six_Hours',
+        EvaluationModes: [
+          {
+            Mode: 'DETECTIVE',
+          },
+          {
+            Mode: 'PROACTIVE',
+          },
+        ],
       },
     });
 
@@ -197,7 +215,7 @@ describe('rule', () => {
     const fn = new lambda.Function(stack, 'Function', {
       code: lambda.AssetCode.fromInline('foo'),
       handler: 'index.handler',
-      runtime: lambda.Runtime.NODEJS_18_X,
+      runtime: lambda.Runtime.NODEJS_20_X,
     });
 
     // THEN
@@ -214,7 +232,7 @@ describe('rule', () => {
     const fn = new lambda.Function(stack, 'Function', {
       code: lambda.AssetCode.fromInline('foo'),
       handler: 'index.handler',
-      runtime: lambda.Runtime.NODEJS_18_X,
+      runtime: lambda.Runtime.NODEJS_20_X,
     });
 
     // THEN
@@ -233,7 +251,7 @@ describe('rule', () => {
     const fn = new lambda.Function(stack, 'Function', {
       code: lambda.Code.fromInline('dummy'),
       handler: 'index.handler',
-      runtime: lambda.Runtime.NODEJS_18_X,
+      runtime: lambda.Runtime.NODEJS_20_X,
     });
 
     // WHEN
@@ -419,12 +437,12 @@ describe('rule', () => {
     new config.CustomPolicy(stack, 'Rule', {
       policyText: `
       let status = ['ACTIVE']
-  
+
       rule tableisactive when
           resourceType == "AWS::DynamoDB::Table" {
           configuration.tableStatus == %status
       }
-  
+
       rule checkcompliance when
           resourceType == "AWS::DynamoDB::Table"
           tableisactive {
@@ -433,6 +451,7 @@ describe('rule', () => {
       }`,
       description: 'really cool rule',
       configRuleName: 'cool rule',
+      evaluationModes: config.EvaluationMode.DETECTIVE_AND_PROACTIVE,
     });
 
     // THEN
@@ -452,6 +471,14 @@ describe('rule', () => {
       },
       ConfigRuleName: 'cool rule',
       Description: 'really cool rule',
+      EvaluationModes: [
+        {
+          Mode: 'DETECTIVE',
+        },
+        {
+          Mode: 'PROACTIVE',
+        },
+      ],
     });
   });
 
@@ -461,7 +488,7 @@ describe('rule', () => {
     const fn = new lambda.Function(stack, 'Function', {
       code: lambda.AssetCode.fromInline('foo'),
       handler: 'index.handler',
-      runtime: lambda.Runtime.NODEJS_18_X,
+      runtime: lambda.Runtime.NODEJS_20_X,
     });
 
     // WHEN

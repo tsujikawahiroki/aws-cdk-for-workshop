@@ -1,5 +1,7 @@
-import { Step, StackOutputReference, StackDeployment, StackAsset, StageDeployment } from '../blueprint';
-import { PipelineBase } from '../main/pipeline-base';
+import { ValidationError } from '../../../core';
+import { lit } from '../../../core/lib/private/literal-string';
+import type { Step, StackOutputReference, StackDeployment, StackAsset, StageDeployment } from '../blueprint';
+import type { PipelineBase } from '../main/pipeline-base';
 
 /**
  * Answer some questions about a pipeline blueprint
@@ -48,7 +50,7 @@ export class PipelineQueries {
       }
     }
 
-    throw new Error(`Stack '${outputReference.stackDescription}' (producing output '${outputReference.outputName}') is not in the pipeline; call 'addStage()' to add the stack's Stage to the pipeline`);
+    throw new ValidationError(lit`StackProducingOutputPipeline`, `Stack '${outputReference.stackDescription}' (producing output '${outputReference.outputName}') is not in the pipeline; call 'addStage()' to add the stack's Stage to the pipeline`, this.pipeline);
   }
 
   /**

@@ -1,19 +1,16 @@
-import { Construct } from 'constructs';
+import type { Construct } from 'constructs';
 import { DynamoMethod, getDynamoResourceArn, transformAttributeValueMap } from './private/utils';
-import { DynamoAttributeValue, DynamoConsumedCapacity, DynamoItemCollectionMetrics, DynamoReturnValues } from './shared-types';
-import * as ddb from '../../../aws-dynamodb';
+import type { DynamoAttributeValue, DynamoConsumedCapacity, DynamoItemCollectionMetrics, DynamoReturnValues } from './shared-types';
+import type * as ddb from '../../../aws-dynamodb';
 import * as iam from '../../../aws-iam';
 import * as sfn from '../../../aws-stepfunctions';
 import { Stack } from '../../../core';
 
-/**
- * Properties for DynamoDeleteItem Task
- */
-export interface DynamoDeleteItemProps extends sfn.TaskStateBaseProps {
+interface DynamoDeleteItemOptions {
   /**
    * The name of the table containing the requested item.
    */
-  readonly table: ddb.ITable;
+  readonly table: ddb.ITableRef;
 
   /**
    * Primary key of the item to retrieve.
@@ -83,9 +80,38 @@ export interface DynamoDeleteItemProps extends sfn.TaskStateBaseProps {
 }
 
 /**
+ * Properties for DynamoDeleteItem Task using JSONPath
+ */
+export interface DynamoDeleteItemJsonPathProps extends sfn.TaskStateJsonPathBaseProps, DynamoDeleteItemOptions {}
+
+/**
+ * Properties for DynamoDeleteItem Task using JSONata
+ */
+export interface DynamoDeleteItemJsonataProps extends sfn.TaskStateJsonataBaseProps, DynamoDeleteItemOptions {}
+
+/**
+ * Properties for DynamoDeleteItem Task
+ */
+export interface DynamoDeleteItemProps extends sfn.TaskStateBaseProps, DynamoDeleteItemOptions {}
+
+/**
  * A StepFunctions task to call DynamoDeleteItem
  */
 export class DynamoDeleteItem extends sfn.TaskStateBase {
+  /**
+   * A StepFunctions task to call DynamoDeleteItem using JSONPath
+   */
+  public static jsonPath(scope: Construct, id: string, props: DynamoDeleteItemJsonPathProps) {
+    return new DynamoDeleteItem(scope, id, props);
+  }
+
+  /**
+   * A StepFunctions task to call DynamoDeleteItem using JSONata
+   */
+  public static jsonata(scope: Construct, id: string, props: DynamoDeleteItemJsonataProps) {
+    return new DynamoDeleteItem(scope, id, { ...props, queryLanguage: sfn.QueryLanguage.JSONATA });
+  }
+
   protected readonly taskMetrics?: sfn.TaskMetricsConfig;
   protected readonly taskPolicies?: iam.PolicyStatement[];
 
@@ -98,7 +124,7 @@ export class DynamoDeleteItem extends sfn.TaskStateBase {
           Stack.of(this).formatArn({
             service: 'dynamodb',
             resource: 'table',
-            resourceName: props.table.tableName,
+            resourceName: props.table.tableRef.tableName,
           }),
         ],
         actions: [`dynamodb:${DynamoMethod.DELETE}Item`],
@@ -109,19 +135,20 @@ export class DynamoDeleteItem extends sfn.TaskStateBase {
   /**
    * @internal
    */
-  protected _renderTask(): any {
+  protected _renderTask(topLevelQueryLanguage?: sfn.QueryLanguage): any {
+    const queryLanguage = sfn._getActualQueryLanguage(topLevelQueryLanguage, this.props.queryLanguage);
     return {
       Resource: getDynamoResourceArn(DynamoMethod.DELETE),
-      Parameters: sfn.FieldUtils.renderObject({
+      ...this._renderParametersOrArguments({
         Key: transformAttributeValueMap(this.props.key),
-        TableName: this.props.table.tableName,
+        TableName: this.props.table.tableRef.tableName,
         ConditionExpression: this.props.conditionExpression,
         ExpressionAttributeNames: this.props.expressionAttributeNames,
         ExpressionAttributeValues: transformAttributeValueMap(this.props.expressionAttributeValues),
         ReturnConsumedCapacity: this.props.returnConsumedCapacity,
         ReturnItemCollectionMetrics: this.props.returnItemCollectionMetrics,
         ReturnValues: this.props.returnValues,
-      }),
+      }, queryLanguage),
     };
   }
 }

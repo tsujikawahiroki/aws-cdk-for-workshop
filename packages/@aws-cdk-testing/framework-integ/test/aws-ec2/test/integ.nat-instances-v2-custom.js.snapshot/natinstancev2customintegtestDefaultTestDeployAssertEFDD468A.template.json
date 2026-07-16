@@ -33,7 +33,8 @@
      "fetchOptions": {}
     },
     "expected": "{\"$ObjectLike\":{\"status\":200}}",
-    "salt": "1712646801664"
+    "flattenResponse": "false",
+    "salt": "1779973572367"
    },
    "UpdateReplacePolicy": "Delete",
    "DeletionPolicy": "Delete"
@@ -92,12 +93,12 @@
   "SingletonFunction1488541a7b23466481b69b4408076b81HandlerCD40AE9F": {
    "Type": "AWS::Lambda::Function",
    "Properties": {
-    "Runtime": "nodejs18.x",
+    "Runtime": "nodejs24.x",
     "Code": {
      "S3Bucket": {
       "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
      },
-     "S3Key": "980ab41b674bbe2a714081b8b83c3b7bc45c4f8bb52a347bc93fc308857eadec.zip"
+     "S3Key": "642d8e8ca8e53fa044f62ae97b83bfd1c4198d5257165b8720d3d698fe1fc9b5.zip"
     },
     "Timeout": 120,
     "Handler": "index.handler",
@@ -136,7 +137,7 @@
      "Key": "\"hello.txt\""
     },
     "flattenResponse": "false",
-    "salt": "1712646801666"
+    "salt": "1779973572369"
    },
    "UpdateReplacePolicy": "Delete",
    "DeletionPolicy": "Delete"

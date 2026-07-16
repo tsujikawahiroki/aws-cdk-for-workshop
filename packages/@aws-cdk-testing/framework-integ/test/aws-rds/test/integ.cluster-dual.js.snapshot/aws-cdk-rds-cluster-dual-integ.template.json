@@ -13,14 +13,13 @@
       "Value": "aws-cdk-rds-cluster-dual-integ/VPC"
      }
     ]
-   }
+   },
+   "UpdateReplacePolicy": "Delete",
+   "DeletionPolicy": "Delete"
   },
   "VPCPublicSubnet1SubnetB4246D30": {
    "Type": "AWS::EC2::Subnet",
    "Properties": {
-    "VpcId": {
-     "Ref": "VPCB9E5F0B4"
-    },
     "AvailabilityZone": {
      "Fn::Select": [
       0,
@@ -44,22 +43,29 @@
       "Key": "Name",
       "Value": "aws-cdk-rds-cluster-dual-integ/VPC/PublicSubnet1"
      }
-    ]
-   }
+    ],
+    "VpcId": {
+     "Ref": "VPCB9E5F0B4"
+    }
+   },
+   "UpdateReplacePolicy": "Delete",
+   "DeletionPolicy": "Delete"
   },
   "VPCPublicSubnet1RouteTableFEE4B781": {
    "Type": "AWS::EC2::RouteTable",
    "Properties": {
-    "VpcId": {
-     "Ref": "VPCB9E5F0B4"
-    },
     "Tags": [
      {
       "Key": "Name",
       "Value": "aws-cdk-rds-cluster-dual-integ/VPC/PublicSubnet1"
      }
-    ]
-   }
+    ],
+    "VpcId": {
+     "Ref": "VPCB9E5F0B4"
+    }
+   },
+   "UpdateReplacePolicy": "Delete",
+   "DeletionPolicy": "Delete"
   },
   "VPCPublicSubnet1RouteTableAssociation0B0896DC": {
    "Type": "AWS::EC2::SubnetRouteTableAssociation",
@@ -70,29 +76,30 @@
     "SubnetId": {
      "Ref": "VPCPublicSubnet1SubnetB4246D30"
     }
-   }
+   },
+   "UpdateReplacePolicy": "Delete",
+   "DeletionPolicy": "Delete"
   },
   "VPCPublicSubnet1DefaultRoute91CEF279": {
    "Type": "AWS::EC2::Route",
    "Properties": {
-    "RouteTableId": {
-     "Ref": "VPCPublicSubnet1RouteTableFEE4B781"
-    },
     "DestinationCidrBlock": "0.0.0.0/0",
     "GatewayId": {
      "Ref": "VPCIGWB7E252D3"
+    },
+    "RouteTableId": {
+     "Ref": "VPCPublicSubnet1RouteTableFEE4B781"
     }
    },
    "DependsOn": [
     "VPCVPCGW99B986DC"
-   ]
+   ],
+   "UpdateReplacePolicy": "Delete",
+   "DeletionPolicy": "Delete"
   },
   "VPCPublicSubnet2Subnet74179F39": {
    "Type": "AWS::EC2::Subnet",
    "Properties": {
-    "VpcId": {
-     "Ref": "VPCB9E5F0B4"
-    },
     "AvailabilityZone": {
      "Fn::Select": [
       1,
@@ -116,22 +123,29 @@
       "Key": "Name",
       "Value": "aws-cdk-rds-cluster-dual-integ/VPC/PublicSubnet2"
      }
-    ]
-   }
+    ],
+    "VpcId": {
+     "Ref": "VPCB9E5F0B4"
+    }
+   },
+   "UpdateReplacePolicy": "Delete",
+   "DeletionPolicy": "Delete"
   },
   "VPCPublicSubnet2RouteTable6F1A15F1": {
    "Type": "AWS::EC2::RouteTable",
    "Properties": {
-    "VpcId": {
-     "Ref": "VPCB9E5F0B4"
-    },
     "Tags": [
      {
       "Key": "Name",
       "Value": "aws-cdk-rds-cluster-dual-integ/VPC/PublicSubnet2"
      }
-    ]
-   }
+    ],
+    "VpcId": {
+     "Ref": "VPCB9E5F0B4"
+    }
+   },
+   "UpdateReplacePolicy": "Delete",
+   "DeletionPolicy": "Delete"
   },
   "VPCPublicSubnet2RouteTableAssociation5A808732": {
    "Type": "AWS::EC2::SubnetRouteTableAssociation",
@@ -142,29 +156,30 @@
     "SubnetId": {
      "Ref": "VPCPublicSubnet2Subnet74179F39"
     }
-   }
+   },
+   "UpdateReplacePolicy": "Delete",
+   "DeletionPolicy": "Delete"
   },
   "VPCPublicSubnet2DefaultRouteB7481BBA": {
    "Type": "AWS::EC2::Route",
    "Properties": {
-    "RouteTableId": {
-     "Ref": "VPCPublicSubnet2RouteTable6F1A15F1"
-    },
     "DestinationCidrBlock": "0.0.0.0/0",
     "GatewayId": {
      "Ref": "VPCIGWB7E252D3"
+    },
+    "RouteTableId": {
+     "Ref": "VPCPublicSubnet2RouteTable6F1A15F1"
     }
    },
    "DependsOn": [
     "VPCVPCGW99B986DC"
-   ]
+   ],
+   "UpdateReplacePolicy": "Delete",
+   "DeletionPolicy": "Delete"
   },
   "VPCIsolatedSubnet1SubnetEBD00FC6": {
    "Type": "AWS::EC2::Subnet",
    "Properties": {
-    "VpcId": {
-     "Ref": "VPCB9E5F0B4"
-    },
     "AvailabilityZone": {
      "Fn::Select": [
       0,
@@ -210,25 +225,32 @@
       "Key": "Name",
       "Value": "aws-cdk-rds-cluster-dual-integ/VPC/IsolatedSubnet1"
      }
-    ]
+    ],
+    "VpcId": {
+     "Ref": "VPCB9E5F0B4"
+    }
    },
    "DependsOn": [
     "Ipv6CidrBlock"
-   ]
+   ],
+   "UpdateReplacePolicy": "Delete",
+   "DeletionPolicy": "Delete"
   },
   "VPCIsolatedSubnet1RouteTableEB156210": {
    "Type": "AWS::EC2::RouteTable",
    "Properties": {
-    "VpcId": {
-     "Ref": "VPCB9E5F0B4"
-    },
     "Tags": [
      {
       "Key": "Name",
       "Value": "aws-cdk-rds-cluster-dual-integ/VPC/IsolatedSubnet1"
      }
-    ]
-   }
+    ],
+    "VpcId": {
+     "Ref": "VPCB9E5F0B4"
+    }
+   },
+   "UpdateReplacePolicy": "Delete",
+   "DeletionPolicy": "Delete"
   },
   "VPCIsolatedSubnet1RouteTableAssociationA2D18F7C": {
    "Type": "AWS::EC2::SubnetRouteTableAssociation",
@@ -239,14 +261,13 @@
     "SubnetId": {
      "Ref": "VPCIsolatedSubnet1SubnetEBD00FC6"
     }
-   }
+   },
+   "UpdateReplacePolicy": "Delete",
+   "DeletionPolicy": "Delete"
   },
   "VPCIsolatedSubnet2Subnet4B1C8CAA": {
    "Type": "AWS::EC2::Subnet",
    "Properties": {
-    "VpcId": {
-     "Ref": "VPCB9E5F0B4"
-    },
     "AvailabilityZone": {
      "Fn::Select": [
       1,
@@ -292,25 +313,32 @@
       "Key": "Name",
       "Value": "aws-cdk-rds-cluster-dual-integ/VPC/IsolatedSubnet2"
      }
-    ]
+    ],
+    "VpcId": {
+     "Ref": "VPCB9E5F0B4"
+    }
    },
    "DependsOn": [
     "Ipv6CidrBlock"
-   ]
+   ],
+   "UpdateReplacePolicy": "Delete",
+   "DeletionPolicy": "Delete"
   },
   "VPCIsolatedSubnet2RouteTable9B4F78DC": {
    "Type": "AWS::EC2::RouteTable",
    "Properties": {
-    "VpcId": {
-     "Ref": "VPCB9E5F0B4"
-    },
     "Tags": [
      {
       "Key": "Name",
       "Value": "aws-cdk-rds-cluster-dual-integ/VPC/IsolatedSubnet2"
      }
-    ]
-   }
+    ],
+    "VpcId": {
+     "Ref": "VPCB9E5F0B4"
+    }
+   },
+   "UpdateReplacePolicy": "Delete",
+   "DeletionPolicy": "Delete"
   },
   "VPCIsolatedSubnet2RouteTableAssociation7BF8E0EB": {
    "Type": "AWS::EC2::SubnetRouteTableAssociation",
@@ -321,7 +349,9 @@
     "SubnetId": {
      "Ref": "VPCIsolatedSubnet2Subnet4B1C8CAA"
     }
-   }
+   },
+   "UpdateReplacePolicy": "Delete",
+   "DeletionPolicy": "Delete"
   },
   "VPCIGWB7E252D3": {
    "Type": "AWS::EC2::InternetGateway",
@@ -332,27 +362,33 @@
       "Value": "aws-cdk-rds-cluster-dual-integ/VPC"
      }
     ]
-   }
+   },
+   "UpdateReplacePolicy": "Delete",
+   "DeletionPolicy": "Delete"
   },
   "VPCVPCGW99B986DC": {
    "Type": "AWS::EC2::VPCGatewayAttachment",
    "Properties": {
-    "VpcId": {
-     "Ref": "VPCB9E5F0B4"
-    },
     "InternetGatewayId": {
      "Ref": "VPCIGWB7E252D3"
+    },
+    "VpcId": {
+     "Ref": "VPCB9E5F0B4"
     }
-   }
+   },
+   "UpdateReplacePolicy": "Delete",
+   "DeletionPolicy": "Delete"
   },
   "Ipv6CidrBlock": {
    "Type": "AWS::EC2::VPCCidrBlock",
    "Properties": {
+    "AmazonProvidedIpv6CidrBlock": true,
     "VpcId": {
      "Ref": "VPCB9E5F0B4"
-    },
-    "AmazonProvidedIpv6CidrBlock": true
-   }
+    }
+   },
+   "UpdateReplacePolicy": "Delete",
+   "DeletionPolicy": "Delete"
   },
   "DualstackClusterSubnets00EA466E": {
    "Type": "AWS::RDS::DBSubnetGroup",
@@ -366,7 +402,9 @@
       "Ref": "VPCIsolatedSubnet2Subnet4B1C8CAA"
      }
     ]
-   }
+   },
+   "UpdateReplacePolicy": "Delete",
+   "DeletionPolicy": "Delete"
   },
   "DualstackClusterSecurityGroupA8CDA208": {
    "Type": "AWS::EC2::SecurityGroup",
@@ -382,20 +420,22 @@
     "VpcId": {
      "Ref": "VPCB9E5F0B4"
     }
-   }
+   },
+   "UpdateReplacePolicy": "Delete",
+   "DeletionPolicy": "Delete"
   },
   "DualstackCluster84A5FE37": {
    "Type": "AWS::RDS::DBCluster",
    "Properties": {
-    "Engine": "aurora-mysql",
     "CopyTagsToSnapshot": true,
     "DBClusterParameterGroupName": "default.aurora-mysql8.0",
     "DBSubnetGroupName": {
      "Ref": "DualstackClusterSubnets00EA466E"
     },
-    "EngineVersion": "8.0.mysql_aurora.3.02.0",
-    "MasterUsername": "admin",
+    "Engine": "aurora-mysql",
+    "EngineVersion": "8.0.mysql_aurora.3.12.0",
     "MasterUserPassword": "7959866cacc02c2d243ecfe177464fe6",
+    "MasterUsername": "admin",
     "NetworkType": "DUAL",
     "VpcSecurityGroupIds": [
      {
@@ -461,7 +501,9 @@
       "Ref": "VPCIsolatedSubnet2Subnet4B1C8CAA"
      }
     ]
-   }
+   },
+   "UpdateReplacePolicy": "Delete",
+   "DeletionPolicy": "Delete"
   },
   "Ipv4ClusterSecurityGroup90341172": {
    "Type": "AWS::EC2::SecurityGroup",
@@ -477,20 +519,22 @@
     "VpcId": {
      "Ref": "VPCB9E5F0B4"
     }
-   }
+   },
+   "UpdateReplacePolicy": "Delete",
+   "DeletionPolicy": "Delete"
   },
   "Ipv4Cluster5F67A28A": {
    "Type": "AWS::RDS::DBCluster",
    "Properties": {
-    "Engine": "aurora-mysql",
     "CopyTagsToSnapshot": true,
     "DBClusterParameterGroupName": "default.aurora-mysql8.0",
     "DBSubnetGroupName": {
      "Ref": "Ipv4ClusterSubnets5BD573AA"
     },
-    "EngineVersion": "8.0.mysql_aurora.3.02.0",
-    "MasterUsername": "admin",
+    "Engine": "aurora-mysql",
+    "EngineVersion": "8.0.mysql_aurora.3.12.0",
     "MasterUserPassword": "7959866cacc02c2d243ecfe177464fe6",
+    "MasterUsername": "admin",
     "NetworkType": "IPV4",
     "VpcSecurityGroupIds": [
      {

@@ -1,5 +1,5 @@
 import { readFileSync } from 'fs';
-import { AttributeValues, KeyCondition, PrimaryKey } from './key';
+import type { AttributeValues, KeyCondition, PrimaryKey } from './key';
 
 /**
  * MappingTemplates for AppSync resolvers
@@ -111,7 +111,6 @@ export abstract class MappingTemplate {
 }
 
 class StringMappingTemplate extends MappingTemplate {
-
   constructor(private readonly template: string) {
     super();
   }

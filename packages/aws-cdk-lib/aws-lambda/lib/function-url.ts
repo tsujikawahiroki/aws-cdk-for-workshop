@@ -1,10 +1,16 @@
-import { Construct } from 'constructs';
-import { IAlias } from './alias';
-import { IFunction } from './function-base';
-import { IVersion } from './lambda-version';
+import type { Construct } from 'constructs';
+import type { IAlias } from './alias';
+import type { IFunction } from './function-base';
+import type { IVersion } from './lambda-version';
 import { CfnUrl } from './lambda.generated';
 import * as iam from '../../aws-iam';
-import { Duration, IResource, Resource } from '../../core';
+import type { Duration, IResource } from '../../core';
+import { Resource } from '../../core';
+import { ValidationError } from '../../core/lib/errors';
+import { addConstructMetadata, MethodMetadata } from '../../core/lib/metadata-resource';
+import { lit } from '../../core/lib/private/literal-string';
+import { propertyInjectable } from '../../core/lib/prop-injectable';
+import type { IUrlRef, UrlReference } from '../../interfaces/generated/aws-lambda-interfaces.generated';
 
 /**
  * The auth types for a function url
@@ -128,7 +134,7 @@ export interface FunctionUrlCorsOptions {
 /**
  * A Lambda function Url
  */
-export interface IFunctionUrl extends IResource {
+export interface IFunctionUrl extends IResource, IUrlRef {
   /**
    * The url of the Lambda function.
    *
@@ -142,6 +148,13 @@ export interface IFunctionUrl extends IResource {
    * @attribute FunctionArn
    */
   readonly functionArn: string;
+
+  /**
+   * The authType of the function URL, used for access control
+   *
+   * @attribute AuthType
+   */
+  readonly authType: FunctionUrlAuthType;
 
   /**
    * Grant the given identity permissions to invoke this Lambda Function URL
@@ -191,7 +204,13 @@ export interface FunctionUrlProps extends FunctionUrlOptions {
  *
  * @resource AWS::Lambda::Url
  */
+@propertyInjectable
 export class FunctionUrl extends Resource implements IFunctionUrl {
+  /**
+   * Uniquely identifies this class.
+   */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-lambda.FunctionUrl';
+
   /**
    * The url of the Lambda function.
    */
@@ -202,13 +221,24 @@ export class FunctionUrl extends Resource implements IFunctionUrl {
    */
   public readonly functionArn: string;
 
+  /**
+   * The authentication type used for this Function URL
+   */
+  public readonly authType: FunctionUrlAuthType;
+
   private readonly function: IFunction;
 
   constructor(scope: Construct, id: string, props: FunctionUrlProps) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     if (this.instanceOfVersion(props.function)) {
-      throw new Error('FunctionUrl cannot be used with a Version');
+      throw new ValidationError(lit`FunctionUrlCannotVersion`, 'FunctionUrl cannot be used with a Version', this);
+    }
+
+    if (props.function.tenancyConfig?.tenancyConfigProperty?.tenantIsolationMode !== undefined) {
+      throw new ValidationError(lit`FunctionUrlSupportedFunctionsTenant`, 'FunctionUrl is not supported for functions with tenant isolation mode', this);
     }
 
     // If the target function is an alias, then it must be configured using the underlying function
@@ -217,8 +247,10 @@ export class FunctionUrl extends Resource implements IFunctionUrl {
       ? { targetFunction: props.function.version.lambda, alias: props.function }
       : { targetFunction: props.function, alias: undefined };
 
+    this.authType = props.authType ?? FunctionUrlAuthType.AWS_IAM;
+
     const resource: CfnUrl = new CfnUrl(this, 'Resource', {
-      authType: props.authType ?? FunctionUrlAuthType.AWS_IAM,
+      authType: this.authType,
       cors: props.cors ? this.renderCors(props.cors) : undefined,
       invokeMode: props.invokeMode,
       targetFunctionArn: targetFunction.functionArn,
@@ -240,9 +272,25 @@ export class FunctionUrl extends Resource implements IFunctionUrl {
         action: 'lambda:InvokeFunctionUrl',
         functionUrlAuthType: props.authType,
       });
+
+      props.function.addPermission('invoke-function', {
+        principal: new iam.AnyPrincipal(),
+        action: 'lambda:InvokeFunction',
+        invokedViaFunctionUrl: true,
+      });
     }
   }
 
+  public get urlRef(): UrlReference {
+    return {
+      functionArn: this.functionArn,
+    };
+  }
+
+  /**
+   * [disable-awslint:no-grants]
+   */
+  @MethodMetadata()
   public grantInvokeUrl(grantee: iam.IGrantable): iam.Grant {
     return this.function.grantInvokeUrl(grantee);
   }
@@ -257,7 +305,7 @@ export class FunctionUrl extends Resource implements IFunctionUrl {
 
   private renderCors(cors: FunctionUrlCorsOptions): CfnUrl.CorsProperty {
     if (cors.maxAge && !cors.maxAge.isUnresolved() && cors.maxAge.toSeconds() > 86400) {
-      throw new Error(`FunctionUrl CORS maxAge should be less than or equal to 86400 secs (got ${cors.maxAge.toSeconds()})`);
+      throw new ValidationError(lit`FunctionUrlMaxAgeLess`, `FunctionUrl CORS maxAge should be less than or equal to 86400 secs (got ${cors.maxAge.toSeconds()})`, this);
     }
 
     return {

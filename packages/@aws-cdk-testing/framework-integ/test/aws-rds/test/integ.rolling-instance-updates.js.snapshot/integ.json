@@ -1,12 +1,14 @@
 {
-  "version": "20.0.0",
+  "version": "52.0.0",
   "testCases": {
     "InstanceUpdateBehaviorTests/DefaultTest": {
       "stacks": [
         "BulkUpdate",
         "RollingUpdate"
       ],
-      "assertionStack": "InstanceUpdateBehaviorTests/DefaultTest/DeployAssert"
+      "assertionStack": "InstanceUpdateBehaviorTests/DefaultTest/DeployAssert",
+      "assertionStackName": "InstanceUpdateBehaviorTestsDefaultTestDeployAssert287956FD"
     }
-  }
+  },
+  "minimumCliVersion": "2.1107.0"
 }

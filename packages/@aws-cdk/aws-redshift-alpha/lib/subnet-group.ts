@@ -1,7 +1,10 @@
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
-import { IResource, RemovalPolicy, Resource } from 'aws-cdk-lib/core';
-import { Construct } from 'constructs';
 import { CfnClusterSubnetGroup } from 'aws-cdk-lib/aws-redshift';
+import type { IResource } from 'aws-cdk-lib/core';
+import { RemovalPolicy, Resource } from 'aws-cdk-lib/core';
+import { addConstructMetadata } from 'aws-cdk-lib/core/lib/metadata-resource';
+import { propertyInjectable } from 'aws-cdk-lib/core/lib/prop-injectable';
+import type { Construct } from 'constructs';
 
 /**
  * Interface for a cluster subnet group.
@@ -49,7 +52,10 @@ export interface ClusterSubnetGroupProps {
  *
  * @resource AWS::Redshift::ClusterSubnetGroup
  */
+@propertyInjectable
 export class ClusterSubnetGroup extends Resource implements IClusterSubnetGroup {
+  /** Uniquely identifies this class. */
+  public static readonly PROPERTY_INJECTION_ID: string = '@aws-cdk.aws-redshift-alpha.ClusterSubnetGroup';
 
   /**
    * Imports an existing subnet group by name.
@@ -64,6 +70,8 @@ export class ClusterSubnetGroup extends Resource implements IClusterSubnetGroup 
 
   constructor(scope: Construct, id: string, props: ClusterSubnetGroupProps) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     const { subnetIds } = props.vpc.selectSubnets(props.vpcSubnets ?? { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS });
 

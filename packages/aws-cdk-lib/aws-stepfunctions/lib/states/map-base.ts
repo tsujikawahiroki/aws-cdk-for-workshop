@@ -1,48 +1,36 @@
-import { Construct } from 'constructs';
+import type { Construct } from 'constructs';
 import { StateType } from './private/state-type';
+import type { AssignableStateOptions, JsonataCommonOptions, JsonPathCommonOptions, StateBaseProps } from './state';
 import { renderJsonPath, State } from './state';
 import { Token } from '../../../core';
 import { Chain } from '../chain';
 import { FieldUtils } from '../fields';
-import { IChainable, INextable, ProcessorMode } from '../types';
+import { isValidJsonataExpression } from '../private/jsonata';
+import type { IChainable, INextable, QueryLanguage } from '../types';
+import { ProcessorMode } from '../types';
 
 /**
- * Properties for defining a Map state
+ * Base properties for defining a Map state that using JSONPath
  */
-export interface MapBaseProps {
+export interface MapBaseJsonPathOptions extends JsonPathCommonOptions {
   /**
-   * Optional name for this state
-   *
-   * @default - The construct ID will be used as state name
-   */
-  readonly stateName?: string;
-
-  /**
-   * An optional description for this state
-   *
-   * @default No comment
-   */
-  readonly comment?: string;
-
-  /**
-   * JSONPath expression to select part of the state to be the input to this state.
-   *
-   * May also be the special value JsonPath.DISCARD, which will cause the effective
-   * input to be the empty object {}.
+   * JSONPath expression to select the array to iterate over
    *
    * @default $
    */
-  readonly inputPath?: string;
+  readonly itemsPath?: string;
 
   /**
-   * JSONPath expression to select part of the state to be the output to this state.
+   * MaxConcurrencyPath
    *
-   * May also be the special value JsonPath.DISCARD, which will cause the effective
-   * output to be the empty object {}.
+   * A JsonPath that specifies the maximum concurrency dynamically from the state input.
    *
-   * @default $
+   * @see
+   * https://docs.aws.amazon.com/step-functions/latest/dg/concepts-asl-use-map-state-inline.html#map-state-inline-additional-fields
+   *
+   * @default - full concurrency
    */
-  readonly outputPath?: string;
+  readonly maxConcurrencyPath?: string;
 
   /**
    * JSONPath expression to indicate where to inject the state's output
@@ -53,23 +41,6 @@ export interface MapBaseProps {
    * @default $
    */
   readonly resultPath?: string;
-
-  /**
-   * JSONPath expression to select the array to iterate over
-   *
-   * @default $
-   */
-  readonly itemsPath?: string;
-
-  /**
-   * The JSON that you want to override your default iteration input (mutually exclusive  with `parameters`).
-   *
-   * @see
-   * https://docs.aws.amazon.com/step-functions/latest/dg/input-output-itemselector.html
-   *
-   * @default $
-   */
-  readonly itemSelector?: { [key: string]: any };
 
   /**
    * The JSON that will replace the state's raw result and become the effective
@@ -84,7 +55,45 @@ export interface MapBaseProps {
    * @default - None
    */
   readonly resultSelector?: { [key: string]: any };
+}
 
+/**
+ * The array that the Map state will iterate over.
+ */
+export abstract class ProvideItems {
+  /**
+   * Use a JSON array as Map state items.
+   *
+   * Example value: `[1, "{% $two %}", 3]`
+   */
+  public static jsonArray(array: any[]): ProvideItems { return { items: array }; }
+  /**
+   * Use a JSONata expression as Map state items.
+   *
+   * Example value: `{% $states.input.items %}`
+   */
+  public static jsonata(jsonataExpression: string): ProvideItems { return { items: jsonataExpression }; }
+  /**
+   * The array that the Map state will iterate over.
+   */
+  public abstract readonly items: any;
+}
+
+/**
+ * Base properties for defining a Map state that using JSONata
+ */
+export interface MapBaseJsonataOptions extends JsonataCommonOptions {
+  /**
+   * The array that the Map state will iterate over.
+   * @default - The state input as is.
+   */
+  readonly items?: ProvideItems;
+}
+
+/**
+ * Base properties for defining a Map state
+ */
+export interface MapBaseOptions extends AssignableStateOptions {
   /**
    * MaxConcurrency
    *
@@ -98,17 +107,44 @@ export interface MapBaseProps {
   readonly maxConcurrency?: number;
 
   /**
-   * MaxConcurrencyPath
+   * JSONata expression for MaxConcurrency
    *
-   * A JsonPath that specifies the maximum concurrency dynamically from the state input.
+   * A JSONata expression that evaluates to an integer, specifying the maximum
+   * concurrency dynamically. Mutually exclusive with `maxConcurrency` and
+   * `maxConcurrencyPath`.
    *
-   * @see
-   * https://docs.aws.amazon.com/step-functions/latest/dg/concepts-asl-use-map-state-inline.html#map-state-inline-additional-fields
+   * Example value: `{% $states.input.maxConcurrency %}`
+   *
+   * @see https://docs.aws.amazon.com/step-functions/latest/dg/concepts-asl-use-map-state-inline.html#map-state-inline-additional-fields
    *
    * @default - full concurrency
    */
-  readonly maxConcurrencyPath?: string;
+  readonly jsonataMaxConcurrency?: string;
+
+  /**
+   * The JSON that you want to override your default iteration input (mutually exclusive  with `parameters` and `jsonataItemSelector`).
+   *
+   * @see
+   * https://docs.aws.amazon.com/step-functions/latest/dg/input-output-itemselector.html
+   *
+   * @default $
+   */
+  readonly itemSelector?: { [key: string]: any };
+
+  /**
+   * Jsonata expression that evaluates to a JSON array to override your default iteration input (mutually exclusive with `parameters` and `itemSelector`).
+   *
+   * Example value: `{% {\"foo\": \"foo\", \"input\": $states.input} %}`
+   *
+   * @default $
+   */
+  readonly jsonataItemSelector?: string;
 }
+
+/**
+ * Properties for defining a Map state
+ */
+export interface MapBaseProps extends StateBaseProps, MapBaseOptions, MapBaseJsonPathOptions, MapBaseJsonataOptions {}
 
 /**
  * Returns true if the value passed is a positive integer
@@ -138,16 +174,22 @@ export abstract class MapBase extends State implements INextable {
 
   private readonly maxConcurrency?: number;
   private readonly maxConcurrencyPath?: string;
+  private readonly jsonataMaxConcurrency?: string;
+  protected readonly items?: ProvideItems;
   protected readonly itemsPath?: string;
   protected readonly itemSelector?: { [key: string]: any };
+  protected readonly jsonataItemSelector?: string;
 
   constructor(scope: Construct, id: string, props: MapBaseProps = {}) {
     super(scope, id, props);
     this.endStates = [this];
     this.maxConcurrency = props.maxConcurrency;
     this.maxConcurrencyPath = props.maxConcurrencyPath;
+    this.jsonataMaxConcurrency = props.jsonataMaxConcurrency;
+    this.items = props.items;
     this.itemsPath = props.itemsPath;
     this.itemSelector = props.itemSelector;
+    this.jsonataItemSelector = props.jsonataItemSelector;
   }
 
   /**
@@ -161,20 +203,24 @@ export abstract class MapBase extends State implements INextable {
   /**
    * Return the Amazon States Language object for this state
    */
-  public toStateJson(): object {
+  public toStateJson(topLevelQueryLanguage?: QueryLanguage): object {
     return {
       Type: StateType.MAP,
+      ...this.renderQueryLanguage(topLevelQueryLanguage),
       Comment: this.comment,
       ResultPath: renderJsonPath(this.resultPath),
       ...this.renderNextEnd(),
       ...this.renderInputOutput(),
       ...this.renderResultSelector(),
       ...this.renderRetryCatch(),
+      Items: this.items?.items,
       ...this.renderItemsPath(),
       ...this.renderItemSelector(),
       ...this.renderItemProcessor(),
       ...(this.maxConcurrency && { MaxConcurrency: this.maxConcurrency }),
       ...(this.maxConcurrencyPath && { MaxConcurrencyPath: renderJsonPath(this.maxConcurrencyPath) }),
+      ...this.renderMaxConcurrency(),
+      ...this.renderAssign(topLevelQueryLanguage),
     };
   }
 
@@ -196,6 +242,26 @@ export abstract class MapBase extends State implements INextable {
       errors.push('Provide either `maxConcurrency` or `maxConcurrencyPath`, but not both');
     }
 
+    if (this.jsonataMaxConcurrency && this.maxConcurrency) {
+      errors.push('Provide either `maxConcurrency` or `jsonataMaxConcurrency`, but not both');
+    }
+
+    if (this.jsonataMaxConcurrency && this.maxConcurrencyPath) {
+      errors.push('Provide either `maxConcurrencyPath` or `jsonataMaxConcurrency`, but not both');
+    }
+
+    if (this.jsonataMaxConcurrency && !isValidJsonataExpression(this.jsonataMaxConcurrency)) {
+      errors.push('The `jsonataMaxConcurrency` property must be a valid JSONata expression');
+    }
+
+    if (this.itemSelector && this.jsonataItemSelector) {
+      errors.push('Provide either `itemSelector` or `jsonataItemSelector`, but not both');
+    }
+
+    if (this.jsonataItemSelector && !isValidJsonataExpression(this.jsonataItemSelector)) {
+      errors.push('The `jsonataItemSelector` property must be a valid JSONata expression');
+    }
+
     return errors;
   }
 
@@ -209,9 +275,19 @@ export abstract class MapBase extends State implements INextable {
    * Render ItemSelector in ASL JSON format
    */
   private renderItemSelector(): any {
-    if (!this.itemSelector) return undefined;
+    if (!this.itemSelector && !this.jsonataItemSelector) return undefined;
     return FieldUtils.renderObject({
-      ItemSelector: this.itemSelector,
+      ItemSelector: this.itemSelector ?? this.jsonataItemSelector,
+    });
+  }
+
+  /**
+   * Render MaxConcurrency in ASL JSON format
+   */
+  private renderMaxConcurrency(): any {
+    if (!this.maxConcurrency && !this.jsonataMaxConcurrency) return undefined;
+    return FieldUtils.renderObject({
+      MaxConcurrency: this.maxConcurrency ?? this.jsonataMaxConcurrency,
     });
   }
 }

@@ -1,17 +1,19 @@
-import { Construct } from 'constructs';
-import { AlgorithmSpecification, Channel, InputMode, OutputDataConfig, ResourceConfig, S3DataType, StoppingCondition, VpcConfig } from './base-types';
+import type { Construct } from 'constructs';
+import type { AlgorithmSpecification, Channel, OutputDataConfig, ResourceConfig, StoppingCondition, VpcConfig } from './base-types';
+import { InputMode, S3DataType } from './base-types';
 import { renderEnvironment, renderTags } from './private/utils';
 import * as ec2 from '../../../aws-ec2';
 import * as iam from '../../../aws-iam';
 import * as sfn from '../../../aws-stepfunctions';
-import { Duration, Lazy, Size, Stack, Token } from '../../../core';
-import { integrationResourceArn, validatePatternSupported } from '../private/task-utils';
+import { Duration, Size, Stack, Token, ValidationError } from '../../../core';
+import type { IArrayBox } from '../../../core/lib/helpers-internal';
+import { Box } from '../../../core/lib/helpers-internal';
+import { noBoxStackTraces } from '../../../core/lib/no-box-stack-traces';
+import { lit } from '../../../core/lib/private/literal-string';
+import { propertyInjectable } from '../../../core/lib/prop-injectable';
+import { integrationResourceArn, isJsonPathOrJsonataExpression, validatePatternSupported } from '../private/task-utils';
 
-/**
- * Properties for creating an Amazon SageMaker training job
- *
- */
-export interface SageMakerCreateTrainingJobProps extends sfn.TaskStateBaseProps {
+interface SageMakerCreateTrainingJobOptions {
   /**
    * Training Job Name.
    */
@@ -50,8 +52,10 @@ export interface SageMakerCreateTrainingJobProps extends sfn.TaskStateBaseProps 
 
   /**
    *  Describes the various datasets (e.g. train, validation, test) and the Amazon S3 location where stored.
+   *
+   * @default - No inputDataConfig
    */
-  readonly inputDataConfig: Channel[];
+  readonly inputDataConfig?: Channel[];
 
   /**
    * Tags to be applied to the train job.
@@ -95,10 +99,48 @@ export interface SageMakerCreateTrainingJobProps extends sfn.TaskStateBaseProps 
 }
 
 /**
- * Class representing the SageMaker Create Training Job task.
- *
+ * Properties for creating an Amazon SageMaker training job using JSONPath
  */
+export interface SageMakerCreateTrainingJobJsonPathProps extends sfn.TaskStateJsonPathBaseProps, SageMakerCreateTrainingJobOptions {}
+
+/**
+ * Properties for creating an Amazon SageMaker training job using JSONata
+ */
+export interface SageMakerCreateTrainingJobJsonataProps extends sfn.TaskStateJsonataBaseProps, SageMakerCreateTrainingJobOptions {}
+
+/**
+ * Properties for creating an Amazon SageMaker training job
+ */
+export interface SageMakerCreateTrainingJobProps extends sfn.TaskStateBaseProps, SageMakerCreateTrainingJobOptions {}
+
+/**
+ * Class representing the SageMaker Create Training Job task.
+ */
+@propertyInjectable
+@noBoxStackTraces
 export class SageMakerCreateTrainingJob extends sfn.TaskStateBase implements iam.IGrantable, ec2.IConnectable {
+  /**
+   * Uniquely identifies this class.
+   */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-stepfunctions-tasks.SageMakerCreateTrainingJob';
+
+  /**
+   * A Step Functions Task using JSONPath to create a SageMaker training job.
+   */
+  public static jsonPath(scope: Construct, id: string, props: SageMakerCreateTrainingJobJsonPathProps) {
+    return new SageMakerCreateTrainingJob(scope, id, props);
+  }
+
+  /**
+   * A Step Functions Task using JSONata to create a SageMaker training job.
+   */
+  public static jsonata(scope: Construct, id: string, props: SageMakerCreateTrainingJobJsonataProps) {
+    return new SageMakerCreateTrainingJob(scope, id, {
+      ...props,
+      queryLanguage: sfn.QueryLanguage.JSONATA,
+    });
+  }
+
   private static readonly SUPPORTED_INTEGRATION_PATTERNS: sfn.IntegrationPattern[] = [
     sfn.IntegrationPattern.REQUEST_RESPONSE,
     sfn.IntegrationPattern.RUN_JOB,
@@ -120,7 +162,7 @@ export class SageMakerCreateTrainingJob extends sfn.TaskStateBase implements iam
   /**
    * The Input Data Config.
    */
-  private readonly inputDataConfig: Channel[];
+  private readonly inputDataConfig?: Channel[];
 
   /**
    * The resource config for the task.
@@ -134,7 +176,7 @@ export class SageMakerCreateTrainingJob extends sfn.TaskStateBase implements iam
 
   private readonly vpc?: ec2.IVpc;
   private securityGroup?: ec2.ISecurityGroup;
-  private readonly securityGroups: ec2.ISecurityGroup[] = [];
+  private readonly _securityGroups: IArrayBox<ec2.ISecurityGroup>;
   private readonly subnets?: string[];
   private readonly integrationPattern: sfn.IntegrationPattern;
   private _role?: iam.IRole;
@@ -142,6 +184,8 @@ export class SageMakerCreateTrainingJob extends sfn.TaskStateBase implements iam
 
   constructor(scope: Construct, id: string, private readonly props: SageMakerCreateTrainingJobProps) {
     super(scope, id, props);
+
+    this._securityGroups = Box.fromArray([], { omitEmpty: false });
 
     this.integrationPattern = props.integrationPattern || sfn.IntegrationPattern.REQUEST_RESPONSE;
     validatePatternSupported(this.integrationPattern, SageMakerCreateTrainingJob.SUPPORTED_INTEGRATION_PATTERNS);
@@ -160,12 +204,12 @@ export class SageMakerCreateTrainingJob extends sfn.TaskStateBase implements iam
 
     // check that either algorithm name or image is defined
     if (!props.algorithmSpecification.algorithmName && !props.algorithmSpecification.trainingImage) {
-      throw new Error('Must define either an algorithm name or training image URI in the algorithm specification');
+      throw new ValidationError(lit`DefineAlgorithmNameTrainingImage`, 'Must define either an algorithm name or training image URI in the algorithm specification', this);
     }
 
     // check that both algorithm name and image are not defined
     if (props.algorithmSpecification.algorithmName && props.algorithmSpecification.trainingImage) {
-      throw new Error('Cannot define both an algorithm name and training image URI in the algorithm specification');
+      throw new ValidationError(lit`CannotDefineAlgorithmNameTraining`, 'Cannot define both an algorithm name and training image URI in the algorithm specification', this);
     }
 
     // validate algorithm name
@@ -177,7 +221,7 @@ export class SageMakerCreateTrainingJob extends sfn.TaskStateBase implements iam
       : { ...props.algorithmSpecification, trainingInputMode: InputMode.FILE };
 
     // set the S3 Data type of the input data config objects to be 'S3Prefix' if not defined
-    this.inputDataConfig = props.inputDataConfig.map((config) => {
+    this.inputDataConfig = props.inputDataConfig?.map((config) => {
       if (!config.dataSource.s3DataSource.s3DataType) {
         return {
           ...config,
@@ -204,14 +248,14 @@ export class SageMakerCreateTrainingJob extends sfn.TaskStateBase implements iam
    */
   public get role(): iam.IRole {
     if (this._role === undefined) {
-      throw new Error('role not available yet--use the object in a Task first');
+      throw new ValidationError(lit`RoleAvailableYetObjectTask`, 'role not available yet--use the object in a Task first', this);
     }
     return this._role;
   }
 
   public get grantPrincipal(): iam.IPrincipal {
     if (this._grantPrincipal === undefined) {
-      throw new Error('Principal not available yet--use the object in a Task first');
+      throw new ValidationError(lit`PrincipalAvailableYetObjectTask`, 'Principal not available yet--use the object in a Task first', this);
     }
     return this._grantPrincipal;
   }
@@ -223,16 +267,17 @@ export class SageMakerCreateTrainingJob extends sfn.TaskStateBase implements iam
    * @param securityGroup: The security group to add
    */
   public addSecurityGroup(securityGroup: ec2.ISecurityGroup): void {
-    this.securityGroups.push(securityGroup);
+    this._securityGroups.push(securityGroup);
   }
 
   /**
    * @internal
    */
-  protected _renderTask(): any {
+  protected _renderTask(topLevelQueryLanguage?: sfn.QueryLanguage): any {
+    const queryLanguage = sfn._getActualQueryLanguage(topLevelQueryLanguage, this.props.queryLanguage);
     return {
       Resource: integrationResourceArn('sagemaker', 'createTrainingJob', this.integrationPattern),
-      Parameters: sfn.FieldUtils.renderObject(this.renderParameters()),
+      ...this._renderParametersOrArguments(this.renderParameters(), queryLanguage),
     };
   }
 
@@ -266,7 +311,10 @@ export class SageMakerCreateTrainingJob extends sfn.TaskStateBase implements iam
     };
   }
 
-  private renderInputDataConfig(config: Channel[]): { [key: string]: any } {
+  private renderInputDataConfig(config?: Channel[]): { [key: string]: any } {
+    if (!config) {
+      return {};
+    }
     return {
       InputDataConfig: config.map((channel) => ({
         ChannelName: channel.channelName,
@@ -301,7 +349,7 @@ export class SageMakerCreateTrainingJob extends sfn.TaskStateBase implements iam
     return {
       ResourceConfig: {
         InstanceCount: config.instanceCount,
-        InstanceType: sfn.JsonPath.isEncodedJsonPath(config.instanceType.toString())
+        InstanceType: isJsonPathOrJsonataExpression(config.instanceType.toString())
           ? config.instanceType.toString() : `ml.${config.instanceType}`,
         VolumeSizeInGB: config.volumeSize.toGibibytes(),
         ...(config.volumeEncryptionKey ? { VolumeKmsKeyId: config.volumeEncryptionKey.keyArn } : {}),
@@ -325,7 +373,7 @@ export class SageMakerCreateTrainingJob extends sfn.TaskStateBase implements iam
     return config
       ? {
         VpcConfig: {
-          SecurityGroupIds: Lazy.list({ produce: () => this.securityGroups.map((sg) => sg.securityGroupId) }),
+          SecurityGroupIds: Token.asList(this._securityGroups.map((sg) => sg.securityGroupId), { displayHint: 'SecurityGroupIds' }),
           Subnets: this.subnets,
         },
       }
@@ -338,12 +386,12 @@ export class SageMakerCreateTrainingJob extends sfn.TaskStateBase implements iam
     }
 
     if (algorithmName.length < 1 || 170 < algorithmName.length) {
-      throw new Error(`Algorithm name length must be between 1 and 170, but got ${algorithmName.length}`);
+      throw new ValidationError(lit`AlgorithmNameLength`, `Algorithm name length must be between 1 and 170, but got ${algorithmName.length}`, this);
     }
 
     const regex = /^(arn:aws[a-z\-]*:sagemaker:[a-z0-9\-]*:[0-9]{12}:[a-z\-]*\/)?([a-zA-Z0-9]([a-zA-Z0-9-]){0,62})(?<!-)$/;
     if (!regex.test(algorithmName)) {
-      throw new Error(`Expected algorithm name to match pattern ${regex.source}, but got ${algorithmName}`);
+      throw new ValidationError(lit`ExpectedAlgorithmNameMatchPattern`, `Expected algorithm name to match pattern ${regex.source}, but got ${algorithmName}`, this);
     }
   }
 
@@ -399,7 +447,7 @@ export class SageMakerCreateTrainingJob extends sfn.TaskStateBase implements iam
         vpc: this.vpc,
       });
       this.connections.addSecurityGroup(this.securityGroup);
-      this.securityGroups.push(this.securityGroup);
+      this._securityGroups.push(this.securityGroup);
     }
 
     const stack = Stack.of(this);
@@ -413,13 +461,24 @@ export class SageMakerCreateTrainingJob extends sfn.TaskStateBase implements iam
             service: 'sagemaker',
             resource: 'training-job',
             // If the job name comes from input, we cannot target the policy to a particular ARN prefix reliably...
-            resourceName: sfn.JsonPath.isEncodedJsonPath(this.props.trainingJobName) ? '*' : `${this.props.trainingJobName}*`,
+            resourceName: isJsonPathOrJsonataExpression(this.props.trainingJobName) ? '*' : `${this.props.trainingJobName}*`,
           }),
         ],
       }),
       new iam.PolicyStatement({
         actions: ['sagemaker:ListTags'],
         resources: ['*'],
+      }),
+      new iam.PolicyStatement({
+        actions: ['sagemaker:AddTags'],
+        resources: [
+          stack.formatArn({
+            service: 'sagemaker',
+            resource: 'training-job',
+            // If the job name comes from input, we cannot target the policy to a particular ARN prefix reliably...
+            resourceName: sfn.JsonPath.isEncodedJsonPath(this.props.trainingJobName) ? '*' : `${this.props.trainingJobName}*`,
+          }),
+        ],
       }),
       new iam.PolicyStatement({
         actions: ['iam:PassRole'],

@@ -11,6 +11,11 @@ export enum IpAddressType {
    * Allocate both IPv4 and IPv6 addresses
    */
   DUAL_STACK = 'dualstack',
+
+  /**
+   * IPv6 only public addresses, with private IPv4 and IPv6 addresses
+   */
+  DUAL_STACK_WITHOUT_PUBLIC_IPV4 = 'dualstack-without-public-ipv4',
 }
 
 /**
@@ -100,8 +105,23 @@ export enum SslPolicy {
   /**
    * The recommended security policy for TLS listeners.
    * This is the default policy for listeners created using the AWS Management Console
+   *
+   * This policy includes TLS 1.3, and is backwards compatible with TLS 1.2
+   *
+   * When feature flag @aws-cdk/aws-elasticloadbalancingv2:usePostQuantumTlsPolicy is enabled,
+   * listeners automatically use the post-quantum policy instead.
    */
   RECOMMENDED_TLS = 'ELBSecurityPolicy-TLS13-1-2-2021-06',
+
+  /**
+   * TLS 1.3 and 1.2 with post-quantum hybrid key exchange using ML-KEM.
+   *
+   * This uses the non-restricted variant (without -Res-) to maintain AES-CBC cipher support
+   * for TLS 1.2 clients, ensuring backward compatibility.
+   *
+   * @see https://docs.aws.amazon.com/elasticloadbalancing/latest/application/describe-ssl-policies.html
+   */
+  TLS13_12_PQ = 'ELBSecurityPolicy-TLS13-1-2-PQ-2025-09',
 
   /**
    * The recommended policy for http listeners.
@@ -138,6 +158,48 @@ export enum SslPolicy {
    * TLS1.3 only
    */
   TLS13_13 = 'ELBSecurityPolicy-TLS13-1-3-2021-06',
+
+  /**
+   * TLS 1.3 only with post-quantum hybrid key exchange using ML-KEM
+   *
+   * @see https://docs.aws.amazon.com/elasticloadbalancing/latest/application/describe-ssl-policies.html
+   */
+  TLS13_13_PQ = 'ELBSecurityPolicy-TLS13-1-3-PQ-2025-09',
+
+  /**
+   * TLS 1.2 and 1.3 with post-quantum hybrid key exchange using ML-KEM
+   *
+   * Restricted cipher suite for enhanced security with quantum resistance.
+   * Removes AES-CBC algorithms. AWS Console default policy for post-quantum cryptography.
+   *
+   * @see https://docs.aws.amazon.com/elasticloadbalancing/latest/application/describe-ssl-policies.html
+   */
+  TLS13_12_RES_PQ = 'ELBSecurityPolicy-TLS13-1-2-Res-PQ-2025-09',
+
+  /**
+   * TLS 1.2 and 1.3 with post-quantum hybrid key exchange using ML-KEM
+   *
+   * Extended cipher suite 1 with quantum resistance.
+   *
+   * @see https://docs.aws.amazon.com/elasticloadbalancing/latest/application/describe-ssl-policies.html
+   */
+  TLS13_12_EXT1_PQ = 'ELBSecurityPolicy-TLS13-1-2-Ext1-PQ-2025-09',
+
+  /**
+   * TLS 1.2 and 1.3 with post-quantum hybrid key exchange using ML-KEM
+   *
+   * Extended cipher suite 2 with quantum resistance.
+   *
+   * @see https://docs.aws.amazon.com/elasticloadbalancing/latest/application/describe-ssl-policies.html
+   */
+  TLS13_12_EXT2_PQ = 'ELBSecurityPolicy-TLS13-1-2-Ext2-PQ-2025-09',
+
+  /**
+   * TLS 1.0 through 1.3 with post-quantum hybrid key exchange using ML-KEM
+   *
+   * @see https://docs.aws.amazon.com/elasticloadbalancing/latest/application/describe-ssl-policies.html
+   */
+  TLS13_10_PQ = 'ELBSecurityPolicy-TLS13-1-0-PQ-2025-09',
 
   /**
    * TLS 1.3 only with AES 128 and 256 GCM SHA ciphers
@@ -178,6 +240,70 @@ export enum SslPolicy {
    *  TLS1.0 through 1.3 with all ciphers
    */
   FIPS_TLS13_10 = 'ELBSecurityPolicy-TLS13-1-0-FIPS-2023-04',
+
+  /**
+   * TLS 1.3 only with post-quantum hybrid key exchange using ML-KEM
+   *
+   * FIPS-compliant with quantum resistance.
+   *
+   * @see https://docs.aws.amazon.com/elasticloadbalancing/latest/application/describe-ssl-policies.html#fips-security-policies
+   */
+  FIPS_TLS13_13_PQ = 'ELBSecurityPolicy-TLS13-1-3-FIPS-PQ-2025-09',
+
+  /**
+   * TLS 1.2 and 1.3 with post-quantum hybrid key exchange using ML-KEM
+   *
+   * FIPS-compliant with quantum resistance.
+   *
+   * @see https://docs.aws.amazon.com/elasticloadbalancing/latest/application/describe-ssl-policies.html#fips-security-policies
+   */
+  FIPS_TLS13_12_PQ = 'ELBSecurityPolicy-TLS13-1-2-FIPS-PQ-2025-09',
+
+  /**
+   * TLS 1.2 and 1.3 with post-quantum hybrid key exchange using ML-KEM
+   *
+   * Restricted cipher suite for enhanced security with quantum resistance.
+   * FIPS-compliant. AWS recommended policy for post-quantum cryptography with FIPS.
+   *
+   * @see https://docs.aws.amazon.com/elasticloadbalancing/latest/application/describe-ssl-policies.html#fips-security-policies
+   */
+  FIPS_TLS13_12_RES_PQ = 'ELBSecurityPolicy-TLS13-1-2-Res-FIPS-PQ-2025-09',
+
+  /**
+   * TLS 1.2 and 1.3 with post-quantum hybrid key exchange using ML-KEM
+   *
+   * Extended cipher suite 0 with quantum resistance. FIPS-compliant.
+   *
+   * @see https://docs.aws.amazon.com/elasticloadbalancing/latest/application/describe-ssl-policies.html#fips-security-policies
+   */
+  FIPS_TLS13_12_EXT0_PQ = 'ELBSecurityPolicy-TLS13-1-2-Ext0-FIPS-PQ-2025-09',
+
+  /**
+   * TLS 1.2 and 1.3 with post-quantum hybrid key exchange using ML-KEM
+   *
+   * Extended cipher suite 1 with quantum resistance. FIPS-compliant.
+   *
+   * @see https://docs.aws.amazon.com/elasticloadbalancing/latest/application/describe-ssl-policies.html#fips-security-policies
+   */
+  FIPS_TLS13_12_EXT1_PQ = 'ELBSecurityPolicy-TLS13-1-2-Ext1-FIPS-PQ-2025-09',
+
+  /**
+   * TLS 1.2 and 1.3 with post-quantum hybrid key exchange using ML-KEM
+   *
+   * Extended cipher suite 2 with quantum resistance. FIPS-compliant.
+   *
+   * @see https://docs.aws.amazon.com/elasticloadbalancing/latest/application/describe-ssl-policies.html#fips-security-policies
+   */
+  FIPS_TLS13_12_EXT2_PQ = 'ELBSecurityPolicy-TLS13-1-2-Ext2-FIPS-PQ-2025-09',
+
+  /**
+   * TLS 1.0 through 1.3 with post-quantum hybrid key exchange using ML-KEM
+   *
+   * FIPS-compliant with quantum resistance.
+   *
+   * @see https://docs.aws.amazon.com/elasticloadbalancing/latest/application/describe-ssl-policies.html#fips-security-policies
+   */
+  FIPS_TLS13_10_PQ = 'ELBSecurityPolicy-TLS13-1-0-FIPS-PQ-2025-09',
 
   /**
    * Strong foward secrecy ciphers and TLV1.2 only (2020 edition).
@@ -298,6 +424,11 @@ export enum TargetGroupLoadBalancingAlgorithmType {
    * least_outstanding_requests
    */
   LEAST_OUTSTANDING_REQUESTS = 'least_outstanding_requests',
+
+  /**
+   * weighted_random
+   */
+  WEIGHTED_RANDOM = 'weighted_random',
 }
 
 /**

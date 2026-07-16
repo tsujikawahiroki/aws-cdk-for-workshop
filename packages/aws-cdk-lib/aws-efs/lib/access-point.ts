@@ -1,12 +1,17 @@
-import { Construct } from 'constructs';
-import { IFileSystem } from './efs-file-system';
+import type { Construct } from 'constructs';
+import type { IFileSystem } from './efs-file-system';
 import { CfnAccessPoint } from './efs.generated';
-import { ArnFormat, IResource, Resource, Stack, Tags } from '../../core';
+import type { IResource } from '../../core';
+import { ArnFormat, Resource, Stack, Tags, Token, UnscopedValidationError, ValidationError } from '../../core';
+import { addConstructMetadata } from '../../core/lib/metadata-resource';
+import { lit } from '../../core/lib/private/literal-string';
+import { propertyInjectable } from '../../core/lib/prop-injectable';
+import type { AccessPointReference, IAccessPointRef, IFileSystemRef } from '../../interfaces/generated/aws-efs-interfaces.generated';
 
 /**
  * Represents an EFS AccessPoint
  */
-export interface IAccessPoint extends IResource {
+export interface IAccessPoint extends IAccessPointRef, IResource {
   /**
    * The ID of the AccessPoint
    *
@@ -29,7 +34,7 @@ export interface IAccessPoint extends IResource {
 
 /**
  * Permissions as POSIX ACL
-*/
+ */
 export interface Acl {
   /**
    * Specifies the POSIX user ID to apply to the RootDirectory. Accepts values from 0 to 2^32 (4294967295).
@@ -102,6 +107,15 @@ export interface AccessPointOptions {
    * @default - user identity not enforced
    */
   readonly posixUser?: PosixUser;
+
+  /**
+   * The opaque string specified in the request to ensure idempotent creation.
+   *
+   * @see https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-efs-accesspoint.html#cfn-efs-accesspoint-clienttoken
+   *
+   * @default - No client token
+   */
+  readonly clientToken?: string;
 }
 
 /**
@@ -111,7 +125,7 @@ export interface AccessPointProps extends AccessPointOptions {
   /**
    * The efs filesystem
    */
-  readonly fileSystem: IFileSystem;
+  readonly fileSystem: IFileSystemRef;
 }
 
 /**
@@ -139,7 +153,7 @@ export interface AccessPointAttributes {
    *
    * @default - no EFS file system
    */
-  readonly fileSystem?: IFileSystem;
+  readonly fileSystem?: IFileSystemRef;
 }
 
 abstract class AccessPointBase extends Resource implements IAccessPoint {
@@ -159,12 +173,23 @@ abstract class AccessPointBase extends Resource implements IAccessPoint {
    * The file system of the access point
    */
   public abstract readonly fileSystem: IFileSystem;
+
+  public get accessPointRef(): AccessPointReference {
+    return {
+      accessPointId: this.accessPointId,
+      accessPointArn: this.accessPointArn,
+    };
+  }
 }
 
 /**
  * Represents the AccessPoint
  */
+@propertyInjectable
 export class AccessPoint extends AccessPointBase {
+  /** Uniquely identifies this class. */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-efs.AccessPoint';
+
   /**
    * Import an existing Access Point by attributes
    */
@@ -193,16 +218,27 @@ export class AccessPoint extends AccessPointBase {
    */
   public readonly accessPointId: string;
 
+  private readonly _fileSystem: IFileSystemRef;
+
   /**
    * The file system of the access point
    */
-  public readonly fileSystem: IFileSystem;
+  public get fileSystem(): IFileSystem {
+    return toIFileSystem(this._fileSystem);
+  }
 
   constructor(scope: Construct, id: string, props: AccessPointProps) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
+
+    const clientToken = props.clientToken;
+    if ((clientToken?.length === 0 || (clientToken && clientToken.length > 64)) && !Token.isUnresolved(clientToken)) {
+      throw new ValidationError(lit`LengthClienttokenRangeCharacters`, `The length of \'clientToken\' must range from 1 to 64 characters, got: ${clientToken.length} characters`, this);
+    }
 
     const resource = new CfnAccessPoint(this, 'Resource', {
-      fileSystemId: props.fileSystem.fileSystemId,
+      fileSystemId: props.fileSystem.fileSystemRef.fileSystemId,
       rootDirectory: {
         creationInfo: props.createAcl ? {
           ownerGid: props.createAcl.ownerGid,
@@ -216,6 +252,7 @@ export class AccessPoint extends AccessPointBase {
         gid: props.posixUser.gid,
         secondaryGids: props.posixUser.secondaryGids,
       } : undefined,
+      clientToken,
     });
 
     Tags.of(this).add('Name', this.node.path);
@@ -226,34 +263,39 @@ export class AccessPoint extends AccessPointBase {
       resource: 'access-point',
       resourceName: this.accessPointId,
     });
-    this.fileSystem = props.fileSystem;
+    this._fileSystem = props.fileSystem;
   }
 }
 
+@propertyInjectable
 class ImportedAccessPoint extends AccessPointBase {
+  /** Uniquely identifies this class. */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-efs.ImportedAccessPoint';
   public readonly accessPointId: string;
   public readonly accessPointArn: string;
-  private readonly _fileSystem?: IFileSystem;
+  private readonly _fileSystem?: IFileSystemRef;
 
   constructor(scope: Construct, id: string, attrs: AccessPointAttributes) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, attrs);
 
     if (!attrs.accessPointId) {
       if (!attrs.accessPointArn) {
-        throw new Error('One of accessPointId or AccessPointArn is required!');
+        throw new ValidationError(lit`OneAccessPointIdAccess`, 'One of accessPointId or AccessPointArn is required!', this);
       }
 
       this.accessPointArn = attrs.accessPointArn;
       let maybeApId = Stack.of(scope).splitArn(attrs.accessPointArn, ArnFormat.SLASH_RESOURCE_NAME).resourceName;
 
       if (!maybeApId) {
-        throw new Error('ARN for AccessPoint must provide the resource name.');
+        throw new ValidationError(lit`AccessPointProvideResourceName`, 'ARN for AccessPoint must provide the resource name.', this);
       }
 
       this.accessPointId = maybeApId;
     } else {
       if (attrs.accessPointArn) {
-        throw new Error('Only one of accessPointId or AccessPointArn can be provided!');
+        throw new ValidationError(lit`OneAccessPointIdAccess`, 'Only one of accessPointId or AccessPointArn can be provided!', this);
       }
 
       this.accessPointId = attrs.accessPointId;
@@ -269,9 +311,16 @@ class ImportedAccessPoint extends AccessPointBase {
 
   public get fileSystem() {
     if (!this._fileSystem) {
-      throw new Error("fileSystem is only available if 'fromAccessPointAttributes()' is used and a fileSystem is passed in as an attribute.");
+      throw new ValidationError(lit`FileSystemAvailableAccessPoint`, "fileSystem is only available if 'fromAccessPointAttributes()' is used and a fileSystem is passed in as an attribute.", this);
     }
 
-    return this._fileSystem;
+    return toIFileSystem(this._fileSystem);
   }
+}
+
+function toIFileSystem(fileSystem: IFileSystemRef): IFileSystem {
+  if (!('fileSystemId' in fileSystem) || !('fileSystemArn' in fileSystem)) {
+    throw new UnscopedValidationError(lit`FilesystemInstanceShouldImplement`, `'fileSystem' instance should implement IFileSystem, but doesn't: ${fileSystem.constructor.name}`);
+  }
+  return fileSystem as IFileSystem;
 }

@@ -1,9 +1,10 @@
 import * as path from 'path';
-import { App, Stack, StackProps } from 'aws-cdk-lib';
-import { Construct } from 'constructs';
-import * as amplify from '../lib';
-import { Asset } from 'aws-cdk-lib/aws-s3-assets';
 import { IntegTest } from '@aws-cdk/integ-tests-alpha';
+import type { StackProps } from 'aws-cdk-lib';
+import { App, Stack } from 'aws-cdk-lib';
+import { Asset } from 'aws-cdk-lib/aws-s3-assets';
+import type { Construct } from 'constructs';
+import * as amplify from '../lib';
 
 class TestStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
@@ -18,7 +19,12 @@ class TestStack extends Stack {
   }
 }
 
-const app = new App();
+const app = new App({
+  postCliContext: {
+    '@aws-cdk/aws-lambda:createNewPoliciesWithAddToRolePolicy': true,
+    '@aws-cdk/aws-lambda:useCdkManagedLogGroup': false,
+  },
+});
 const stack = new TestStack(app, 'cdk-amplify-app-asset-deployment');
 
 // Deploying the stack is sufficient to test the custom resources
@@ -26,5 +32,4 @@ const stack = new TestStack(app, 'cdk-amplify-app-asset-deployment');
 // On updating the asset file and re-deploying it updates the existing Amplify app with the new change.
 new IntegTest(app, 'cdk-amplify-app-integ-test', {
   testCases: [stack],
-  diffAssets: true,
 });

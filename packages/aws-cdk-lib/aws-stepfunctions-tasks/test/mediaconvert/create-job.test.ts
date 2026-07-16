@@ -10,7 +10,6 @@ beforeEach(() => {
 });
 
 describe('MediaConvert Create Job', () => {
-
   test('REQUEST_RESPONSE Integration Pattern', () => {
     // WHEN
     const task = new MediaConvertCreateJob(stack, 'MediaConvertCreateJob', {
@@ -40,6 +39,45 @@ describe('MediaConvert Create Job', () => {
       },
       End: true,
       Parameters: {
+        Role: 'arn:aws:iam::123456789012:role/MediaConvertRole',
+        Settings: {
+          OutputGroups: [],
+          Inputs: [],
+        },
+      },
+    });
+  });
+
+  test('REQUEST_RESPONSE Integration Pattern - using JSONata', () => {
+  // WHEN
+    const task = MediaConvertCreateJob.jsonata(stack, 'MediaConvertCreateJob', {
+      createJobRequest: {
+        Role: 'arn:aws:iam::123456789012:role/MediaConvertRole',
+        Settings: {
+          OutputGroups: [],
+          Inputs: [],
+        },
+      },
+    });
+
+    // THEN
+    expect(stack.resolve(task.toStateJson())).toEqual({
+      Type: 'Task',
+      QueryLanguage: 'JSONata',
+      Resource: {
+        'Fn::Join': [
+          '',
+          [
+            'arn:',
+            {
+              Ref: 'AWS::Partition',
+            },
+            ':states:::mediaconvert:createJob',
+          ],
+        ],
+      },
+      End: true,
+      Arguments: {
         Role: 'arn:aws:iam::123456789012:role/MediaConvertRole',
         Settings: {
           OutputGroups: [],
@@ -91,7 +129,7 @@ describe('MediaConvert Create Job', () => {
   test('Fails on Unsupported Integration Pattern', () => {
     expect(() => {
       // WHEN
-      const task = new MediaConvertCreateJob(stack, 'MediaConvertCreateJob', {
+      new MediaConvertCreateJob(stack, 'MediaConvertCreateJob', {
         integrationPattern: sfn.IntegrationPattern.WAIT_FOR_TASK_TOKEN,
         createJobRequest: {
           Settings: {
@@ -107,7 +145,7 @@ describe('MediaConvert Create Job', () => {
   test('Fails on role not specified', () => {
     expect(() => {
       // WHEN
-      const task = new MediaConvertCreateJob(stack, 'MediaConvertCreateJob', {
+      new MediaConvertCreateJob(stack, 'MediaConvertCreateJob', {
         createJobRequest: {
           Settings: {
             OutputGroups: [],
@@ -122,7 +160,7 @@ describe('MediaConvert Create Job', () => {
   test('Fails on settings not specified', () => {
     expect(() => {
       // WHEN
-      const task = new MediaConvertCreateJob(stack, 'MediaConvertCreateJob', {
+      new MediaConvertCreateJob(stack, 'MediaConvertCreateJob', {
         createJobRequest: {
           Role: 'arn:aws:iam::123456789012:role/MediaConvertRole',
         },

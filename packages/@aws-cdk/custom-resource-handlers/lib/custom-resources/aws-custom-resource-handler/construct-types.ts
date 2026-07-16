@@ -21,5 +21,6 @@ export interface AwsSdkCall {
   readonly outputPath?: string;
   readonly outputPaths?: string[];
   readonly assumedRoleArn?: string;
-  readonly logApiResponseData: boolean;
+  readonly externalId?: string;
+  readonly logApiResponseData?: boolean;
 }

@@ -1,12 +1,13 @@
-import { Construct } from 'constructs';
-import * as ec2 from '../../../aws-ec2';
-import * as ecr from '../../../aws-ecr';
-import { DockerImageAsset, DockerImageAssetProps } from '../../../aws-ecr-assets';
+import type { Construct } from 'constructs';
+import type * as ec2 from '../../../aws-ec2';
+import type * as ecr from '../../../aws-ecr';
+import type { DockerImageAssetProps } from '../../../aws-ecr-assets';
+import { DockerImageAsset } from '../../../aws-ecr-assets';
 import * as iam from '../../../aws-iam';
-import * as kms from '../../../aws-kms';
-import * as s3 from '../../../aws-s3';
+import type * as kms from '../../../aws-kms';
+import type * as s3 from '../../../aws-s3';
 import * as sfn from '../../../aws-stepfunctions';
-import { Duration, Size } from '../../../core';
+import type { Duration, Size } from '../../../core';
 
 /**
  * Task to train a machine learning model using Amazon SageMaker
@@ -296,7 +297,7 @@ export abstract class S3Location {
   }
 
   /**
-   * An `IS3Location` determined fully by a JSON Path from the task input.
+   * An `IS3Location` determined fully by a JSONata expression or JSON Path from the task input.
    *
    * Due to the dynamic nature of those locations, the IAM grants that will be set by `grantRead` and `grantWrite`
    * apply to the `*` resource.
@@ -304,7 +305,9 @@ export abstract class S3Location {
    * @param expression the JSON expression resolving to an S3 location URI.
    */
   public static fromJsonExpression(expression: string): S3Location {
-    return new StandardS3Location({ uri: sfn.JsonPath.stringAt(expression) });
+    const isJsonata = () => expression.startsWith('{%');
+    const uri = isJsonata() ? expression : sfn.JsonPath.stringAt(expression);
+    return new StandardS3Location({ uri });
   }
 
   /**
@@ -362,7 +365,7 @@ export abstract class DockerImage {
   /**
    * Reference a Docker image which URI is obtained from the task's input.
    *
-   * @param expression           the JSON path expression with the task input.
+   * @param expression           the JSONata or JSON path expression with the task input.
    * @param allowAnyEcrImagePull whether ECR access should be permitted (set to `false` if the image will never be in ECR).
    */
   public static fromJsonExpression(expression: string, allowAnyEcrImagePull = true): DockerImage {
@@ -602,7 +605,7 @@ export interface TransformOutput {
    *
    * @default - default KMS key for Amazon S3 for your role's account.
    */
-  readonly encryptionKey?: kms.IKey;
+  readonly encryptionKey?: kms.IKeyRef;
 
   /**
    * S3 path where you want Amazon SageMaker to store the results of the transform job.
@@ -631,7 +634,7 @@ export interface TransformResources {
    *
    * @default - None
    */
-  readonly volumeEncryptionKey?: kms.IKey;
+  readonly volumeEncryptionKey?: kms.IKeyRef;
 }
 
 /**
@@ -688,7 +691,6 @@ export interface ContainerDefinitionOptions {
  * @see https://docs.aws.amazon.com/sagemaker/latest/APIReference/API_ContainerDefinition.html
  */
 export class ContainerDefinition implements IContainerDefinition {
-
   constructor(private readonly options: ContainerDefinitionOptions) {}
 
   /**
@@ -804,7 +806,7 @@ export class AcceleratorClass {
   /**
    * Custom AcceleratorType
    * @param version - Elastic Inference accelerator generation
-  */
+   */
   public static of(version: string) { return new AcceleratorClass(version); }
   /**
    * @param version - Elastic Inference accelerator generation

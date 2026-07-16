@@ -2,14 +2,17 @@ import * as path from 'path';
 import { Construct } from 'constructs';
 import * as consts from './runtime/consts';
 import { calculateRetryPolicy } from './util';
-import { LogOptions, WaiterStateMachine } from './waiter-state-machine';
-import { CustomResourceProviderConfig, ICustomResourceProvider } from '../../../aws-cloudformation';
-import * as ec2 from '../../../aws-ec2';
+import type { LogOptions } from './waiter-state-machine';
+import { WaiterStateMachine } from './waiter-state-machine';
+import type { CustomResourceProviderConfig, ICustomResourceProvider } from '../../../aws-cloudformation';
+import type * as ec2 from '../../../aws-ec2';
 import * as iam from '../../../aws-iam';
-import * as kms from '../../../aws-kms';
+import type * as kms from '../../../aws-kms';
 import * as lambda from '../../../aws-lambda';
-import * as logs from '../../../aws-logs';
-import { Duration } from '../../../core';
+import type * as logs from '../../../aws-logs';
+import { Duration, ValidationError } from '../../../core';
+import { lit } from '../../../core/lib/private/literal-string';
+import { propertyInjectable } from '../../../core/lib/prop-injectable';
 
 const RUNTIME_HANDLER_PATH = path.join(__dirname, 'runtime');
 const FRAMEWORK_HANDLER_TIMEOUT = Duration.minutes(15); // keep it simple for now
@@ -85,7 +88,7 @@ export interface ProviderProps {
    *
    * @default - a default log group created by AWS Lambda
    */
-  readonly logGroup?: logs.ILogGroup;
+  readonly logGroup?: logs.ILogGroupRef;
 
   /**
    * The vpc to provision the lambda functions in.
@@ -117,12 +120,36 @@ export interface ProviderProps {
   /**
    * AWS Lambda execution role.
    *
-   * The role that will be assumed by the AWS Lambda.
-   * Must be assumable by the 'lambda.amazonaws.com' service principal.
+   * The role is shared by provider framework's onEvent, isComplete lambda, and onTimeout Lambda functions.
+   * This role will be assumed by the AWS Lambda, so it must be assumable by the 'lambda.amazonaws.com'
+   * service principal.
+   *
+   * @default - A default role will be created.
+   * @deprecated - Use frameworkOnEventRole, frameworkCompleteAndTimeoutRole
+   */
+  readonly role?: iam.IRole;
+
+  /**
+   * Lambda execution role for provider framework's onEvent Lambda function. Note that this role must be assumed
+   * by the 'lambda.amazonaws.com' service principal.
+   *
+   * This property cannot be used with 'role' property
    *
    * @default - A default role will be created.
    */
-  readonly role?: iam.IRole;
+  readonly frameworkOnEventRole?: iam.IRole;
+
+  /**
+   * Lambda execution role for provider framework's isComplete/onTimeout Lambda function. Note that this role
+   * must be assumed by the 'lambda.amazonaws.com' service principal. To prevent circular dependency problem
+   * in the provider framework, please ensure you specify a different IAM Role for 'frameworkCompleteAndTimeoutRole'
+   * from 'frameworkOnEventRole'.
+   *
+   * This property cannot be used with 'role' property
+   *
+   * @default - A default role will be created.
+   */
+  readonly frameworkCompleteAndTimeoutRole?: iam.IRole;
 
   /**
    * Provider Lambda name.
@@ -138,7 +165,7 @@ export interface ProviderProps {
    *
    * @default -  AWS Lambda creates and uses an AWS managed customer master key (CMK)
    */
-  readonly providerFunctionEnvEncryption?: kms.IKey;
+  readonly providerFunctionEnvEncryption?: kms.IKeyRef;
 
   /**
    * Defines what execution history events of the waiter state machine are logged and where they are logged.
@@ -150,15 +177,27 @@ export interface ProviderProps {
   /**
    * Whether logging for the waiter state machine is disabled.
    *
-   * @default - false
+   * @default - true
    */
   readonly disableWaiterStateMachineLogging?: boolean;
+
+  /**
+   * Log level of the provider framework lambda
+   *
+   * @default true - Logging is disabled by default
+   */
+  readonly frameworkLambdaLoggingLevel?: lambda.ApplicationLogLevel;
 }
 
 /**
  * Defines an AWS CloudFormation custom resource provider.
  */
+@propertyInjectable
 export class Provider extends Construct implements ICustomResourceProvider {
+  /**
+   * Uniquely identifies this class.
+   */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-custom-resources.Provider';
 
   /**
    * The user-defined AWS Lambda function which is invoked for all resource
@@ -180,12 +219,13 @@ export class Provider extends Construct implements ICustomResourceProvider {
 
   private readonly entrypoint: lambda.Function;
   private readonly logRetention?: logs.RetentionDays;
-  private readonly logGroup?: logs.ILogGroup;
+  private readonly logGroup?: logs.ILogGroupRef;
   private readonly vpc?: ec2.IVpc;
   private readonly vpcSubnets?: ec2.SubnetSelection;
   private readonly securityGroups?: ec2.ISecurityGroup[];
   private readonly role?: iam.IRole;
-  private readonly providerFunctionEnvEncryption?: kms.IKey;
+  private readonly providerFunctionEnvEncryption?: kms.IKeyRef;
+  private readonly frameworkLambdaLoggingLevel?: lambda.ApplicationLogLevel;
 
   constructor(scope: Construct, id: string, props: ProviderProps) {
     super(scope, id);
@@ -197,14 +237,23 @@ export class Provider extends Construct implements ICustomResourceProvider {
         || props.waiterStateMachineLogOptions
         || props.disableWaiterStateMachineLogging !== undefined
       ) {
-        throw new Error('"queryInterval", "totalTimeout", "waiterStateMachineLogOptions", and "disableWaiterStateMachineLogging" '
+        throw new ValidationError(lit`InvalidConfigurationWithoutIsCompleteHandler`, '"queryInterval", "totalTimeout", "waiterStateMachineLogOptions", and "disableWaiterStateMachineLogging" '
           + 'can only be configured if "isCompleteHandler" is specified. '
-          + 'Otherwise, they have no meaning');
+          + 'Otherwise, they have no meaning', this);
       }
+    }
+
+    if (props.role && (props.frameworkOnEventRole || props.frameworkCompleteAndTimeoutRole)) {
+      throw new ValidationError(lit`ConflictingRoleConfiguration`, 'Cannot specify both "role" and any of "frameworkOnEventRole" or "frameworkCompleteAndTimeoutRole".', this);
+    }
+    if (!props.isCompleteHandler && props.frameworkCompleteAndTimeoutRole) {
+      throw new ValidationError(lit`FrameworkCompleteAndTimeoutRoleWithoutIsCompleteHandler`, 'Cannot specify "frameworkCompleteAndTimeoutRole" when "isCompleteHandler" is not specified.', this);
     }
 
     this.onEventHandler = props.onEventHandler;
     this.isCompleteHandler = props.isCompleteHandler;
+
+    this.frameworkLambdaLoggingLevel = props.frameworkLambdaLoggingLevel ?? lambda.ApplicationLogLevel.FATAL;
 
     this.logRetention = props.logRetention;
     this.logGroup = props.logGroup;
@@ -215,13 +264,13 @@ export class Provider extends Construct implements ICustomResourceProvider {
     this.role = props.role;
     this.providerFunctionEnvEncryption = props.providerFunctionEnvEncryption;
 
-    const onEventFunction = this.createFunction(consts.FRAMEWORK_ON_EVENT_HANDLER_NAME, props.providerFunctionName);
+    const onEventFunction = this.createFunction(consts.FRAMEWORK_ON_EVENT_HANDLER_NAME, props.providerFunctionName, props.frameworkOnEventRole);
 
     if (this.isCompleteHandler) {
-      const isCompleteFunction = this.createFunction(consts.FRAMEWORK_IS_COMPLETE_HANDLER_NAME);
-      const timeoutFunction = this.createFunction(consts.FRAMEWORK_ON_TIMEOUT_HANDLER_NAME);
+      const isCompleteFunction = this.createFunction(consts.FRAMEWORK_IS_COMPLETE_HANDLER_NAME, undefined, props.frameworkCompleteAndTimeoutRole);
+      const timeoutFunction = this.createFunction(consts.FRAMEWORK_ON_TIMEOUT_HANDLER_NAME, undefined, props.frameworkCompleteAndTimeoutRole);
 
-      const retry = calculateRetryPolicy(props);
+      const retry = calculateRetryPolicy(this, props);
       const waiterStateMachine = new WaiterStateMachine(this, 'waiter-state-machine', {
         isCompleteHandler: isCompleteFunction,
         timeoutHandler: timeoutFunction,
@@ -229,7 +278,7 @@ export class Provider extends Construct implements ICustomResourceProvider {
         interval: retry.interval,
         maxAttempts: retry.maxAttempts,
         logOptions: props.waiterStateMachineLogOptions,
-        disableLogging: props.disableWaiterStateMachineLogging,
+        disableLogging: props.disableWaiterStateMachineLogging ?? true,
       });
       // the on-event entrypoint is going to start the execution of the waiter
       onEventFunction.addEnvironment(consts.WAITER_STATE_MACHINE_ARN_ENV, waiterStateMachine.stateMachineArn);
@@ -250,15 +299,36 @@ export class Provider extends Construct implements ICustomResourceProvider {
     };
   }
 
-  private createFunction(entrypoint: string, name?: string) {
+  private addPermissions(frameworkLambda: lambda.Function, userDefinedHandlerLambda: lambda.IFunction) {
+    userDefinedHandlerLambda.grantInvoke(frameworkLambda);
+
+    /*
+    lambda:GetFunction is needed as the framework Lambda use it to poll the state of User Defined
+    Handler until it is ACTIVE state
+     */
+    frameworkLambda.addToRolePolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: ['lambda:GetFunction'],
+      resources: [userDefinedHandlerLambda.functionArn],
+    }));
+  }
+
+  private createFunction(entrypoint: string, name?: string, role?: iam.IRole) {
+    // Determine logging configuration - disabled by default for security
+    const loggingLevel = this.frameworkLambdaLoggingLevel;
+
     const fn = new lambda.Function(this, `framework-${entrypoint}`, {
       code: lambda.Code.fromAsset(RUNTIME_HANDLER_PATH, {
         exclude: ['*.ts'],
       }),
       description: `AWS CDK resource provider framework - ${entrypoint} (${this.node.path})`.slice(0, 256),
-      runtime: lambda.Runtime.NODEJS_18_X,
+      runtime: lambda.determineLatestNodeRuntime(this),
       handler: `framework.${entrypoint}`,
       timeout: FRAMEWORK_HANDLER_TIMEOUT,
+
+      // Using loggingFormat instead of deprecated logFormat which will be removed in the next major release
+      loggingFormat: lambda.LoggingFormat.JSON,
+      applicationLogLevelV2: loggingLevel,
       // props.logRetention is deprecated, make sure we only set it if it is actually provided
       // otherwise jsii will print warnings even for users that don't use this directly
       ...(this.logRetention ? { logRetention: this.logRetention } : {}),
@@ -266,17 +336,17 @@ export class Provider extends Construct implements ICustomResourceProvider {
       vpc: this.vpc,
       vpcSubnets: this.vpcSubnets,
       securityGroups: this.securityGroups,
-      role: this.role,
+      role: this.role ?? role,
       functionName: name,
       environmentEncryption: this.providerFunctionEnvEncryption,
     });
 
     fn.addEnvironment(consts.USER_ON_EVENT_FUNCTION_ARN_ENV, this.onEventHandler.functionArn);
-    this.onEventHandler.grantInvoke(fn);
+    this.addPermissions(fn, this.onEventHandler);
 
     if (this.isCompleteHandler) {
       fn.addEnvironment(consts.USER_IS_COMPLETE_FUNCTION_ARN_ENV, this.isCompleteHandler.functionArn);
-      this.isCompleteHandler.grantInvoke(fn);
+      this.addPermissions(fn, this.isCompleteHandler);
     }
 
     return fn;
