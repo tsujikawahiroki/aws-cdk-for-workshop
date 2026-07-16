@@ -8,7 +8,6 @@ class SNSFifoInteg extends Stack {
 
     new Topic(this, 'MyTopic', {
       topicName: 'fooTopic',
-      displayName: 'fooDisplayName',
       contentBasedDeduplication: true,
       fifo: true,
     });

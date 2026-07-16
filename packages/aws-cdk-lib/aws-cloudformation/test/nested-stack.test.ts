@@ -814,9 +814,8 @@ describeDeprecated('NestedStack', () => {
     });
 
     // use the asset, so the parameters will be wired.
-    new sns.Topic(nested, 'MyTopic', {
-      displayName: `image location is ${location.imageUri}`,
-    });
+    const myTopic = new sns.Topic(nested, 'MyTopic');
+    (myTopic.node.defaultChild as sns.CfnTopic).displayName = `image location is ${location.imageUri}`;
 
     // THEN
     const asm = app.synth();

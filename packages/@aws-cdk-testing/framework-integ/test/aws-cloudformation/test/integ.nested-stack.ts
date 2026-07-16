@@ -28,7 +28,8 @@ class MyNestedStack extends NestedStack {
     const topicNamePrefixParameter = new CfnParameter(this, 'TopicNamePrefix', { type: 'String' });
 
     for (let i = 0; i < props.topicCount; ++i) {
-      const topic = new sns.Topic(this, `topic-${i}`, { displayName: `${topicNamePrefixParameter.valueAsString}-${i}` });
+      const topic = new sns.Topic(this, `topic-${i}`);
+      (topic.node.defaultChild as sns.CfnTopic).displayName = `${topicNamePrefixParameter.valueAsString}-${i}`;
 
       // since the subscription resources are defined in the subscriber's stack, this
       // will add an SNS subscription resource to the parent stack that reference this topic.

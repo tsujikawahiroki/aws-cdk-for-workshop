@@ -23429,7 +23429,6 @@ export const AWS_CDK_CONSTRUCTOR_PROPS: { [key: string]: any } = {
       }
     },
     'Topic': {
-      'displayName': '*',
       'topicName': '*',
       'masterKey': {
         'keyArn': '*',

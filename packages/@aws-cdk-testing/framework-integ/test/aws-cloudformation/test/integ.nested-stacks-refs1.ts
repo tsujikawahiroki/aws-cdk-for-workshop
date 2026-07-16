@@ -10,9 +10,8 @@ class ConsumerNestedStack extends NestedStack {
   constructor(scope: Construct, id: string, topic: sns.Topic) {
     super(scope, id);
 
-    new sns.Topic(this, 'ConsumerTopic', {
-      displayName: `Consumer of ${topic.topicName}`,
-    });
+    const consumerTopic = new sns.Topic(this, 'ConsumerTopic');
+    (consumerTopic.node.defaultChild as sns.CfnTopic).displayName = `Consumer of ${topic.topicName}`;
   }
 }
 

@@ -135,9 +135,8 @@ describe('Product', () => {
 
     new sns.Topic(productStackVersion1, 'SNSTopicProductStack1');
 
-    new sns.Topic(productStackVersion2, 'SNSTopicProductStack2', {
-      displayName: 'a test',
-    });
+    const topicProductStack2 = new sns.Topic(productStackVersion2, 'SNSTopicProductStack2');
+    (topicProductStack2.node.defaultChild as sns.CfnTopic).displayName = 'a test';
 
     new servicecatalog.CloudFormationProduct(stack, 'MyProduct', {
       productName: 'testProduct',

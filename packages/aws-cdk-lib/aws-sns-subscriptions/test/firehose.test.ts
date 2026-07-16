@@ -225,7 +225,6 @@ describe('Amazon Data Firehose delivery stream subscription cross-stack', () => 
     const firehoseStack = new Stack(app, 'FirehoseStack', { env: { account: '11111111111', region: 'us-east-2' } });
 
     const topic = new sns.Topic(topicStack, 'Topic', {
-      displayName: 'displayName',
       topicName: 'topicName',
     });
 
@@ -239,7 +238,6 @@ describe('Amazon Data Firehose delivery stream subscription cross-stack', () => 
 
     // THEN
     Template.fromStack(topicStack).hasResourceProperties('AWS::SNS::Topic', {
-      DisplayName: 'displayName',
       TopicName: 'topicName',
     });
     Template.fromStack(firehoseStack).hasResourceProperties('AWS::SNS::Subscription', {
@@ -283,7 +281,6 @@ describe('Amazon Data Firehose delivery stream subscription cross-stack', () => 
     const firehoseStack = new Stack(app, 'FirehoseStack');
 
     const topic = new sns.Topic(topicStack, 'Topic', {
-      displayName: 'displayName',
       topicName: 'topicName',
     });
 
@@ -297,7 +294,6 @@ describe('Amazon Data Firehose delivery stream subscription cross-stack', () => 
 
     // THEN
     Template.fromStack(topicStack).hasResourceProperties('AWS::SNS::Topic', {
-      DisplayName: 'displayName',
       TopicName: 'topicName',
     });
     Template.fromStack(firehoseStack).hasResourceProperties('AWS::SNS::Subscription', {

@@ -19,16 +19,6 @@ import { propertyInjectable } from '../../core/lib/prop-injectable';
  */
 export interface TopicProps {
   /**
-   * A developer-defined string that can be used to identify this SNS topic.
-   *
-   * The display name must be maximum 100 characters long, including hyphens (-),
-   * underscores (_), spaces, and tabs.
-   *
-   * @default None
-   */
-  readonly displayName?: string;
-
-  /**
    * A name for the topic.
    *
    * If you don't specify a name, AWS CloudFormation generates a unique
@@ -370,15 +360,10 @@ export class Topic extends TopicBase {
       throw new ValidationError(lit`SignatureVersionReceived`, `signatureVersion must be "1" or "2", received: "${props.signatureVersion}"`, this);
     }
 
-    if (props.displayName && !Token.isUnresolved(props.displayName) && props.displayName.length > 100) {
-      throw new ValidationError(lit`DisplayNameLessEqualCharacters`, `displayName must be less than or equal to 100 characters, got ${props.displayName.length}`, this);
-    }
-
     const resource = new CfnTopic(this, 'Resource', {
       archivePolicy: props.messageRetentionPeriodInDays ? {
         MessageRetentionPeriod: props.messageRetentionPeriodInDays,
       } : undefined,
-      displayName: props.displayName,
       topicName: cfnTopicName,
       kmsMasterKeyId: props.masterKey && props.masterKey.keyArn,
       contentBasedDeduplication: props.contentBasedDeduplication,

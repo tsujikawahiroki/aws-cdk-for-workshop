@@ -30,9 +30,9 @@ class ConsumerStack extends Stack {
   constructor(scope: Construct, id: string, topic: sns.Topic) {
     super(scope, id);
 
-    new sns.Topic(this, 'ConsumerTopic', {
-      displayName: `Consuming ${Fn.select(2, Fn.split('-', topic.topicName))}`, // just shorten because display name is limited
-    });
+    const consumerTopic = new sns.Topic(this, 'ConsumerTopic');
+    // just shorten because display name is limited
+    (consumerTopic.node.defaultChild as sns.CfnTopic).displayName = `Consuming ${Fn.select(2, Fn.split('-', topic.topicName))}`;
   }
 }
 

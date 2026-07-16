@@ -16,7 +16,6 @@ beforeEach(() => {
   stack = new Stack();
   topic = new sns.Topic(stack, 'MyTopic', {
     topicName: 'topicName',
-    displayName: 'displayName',
   });
 });
 
@@ -28,7 +27,6 @@ test('url subscription', () => {
       'MyTopic86869434': {
         'Type': 'AWS::SNS::Topic',
         'Properties': {
-          'DisplayName': 'displayName',
           'TopicName': 'topicName',
         },
       },
@@ -60,7 +58,6 @@ test('url subscription with user provided dlq', () => {
       'MyTopic86869434': {
         'Type': 'AWS::SNS::Topic',
         'Properties': {
-          'DisplayName': 'displayName',
           'TopicName': 'topicName',
         },
       },
@@ -140,7 +137,6 @@ test('url subscription (with raw delivery)', () => {
       'MyTopic86869434': {
         'Type': 'AWS::SNS::Topic',
         'Properties': {
-          'DisplayName': 'displayName',
           'TopicName': 'topicName',
         },
       },
@@ -166,7 +162,6 @@ test('url subscription (unresolved url with protocol)', () => {
       'MyTopic86869434': {
         'Type': 'AWS::SNS::Topic',
         'Properties': {
-          'DisplayName': 'displayName',
           'TopicName': 'topicName',
         },
       },
@@ -196,7 +191,6 @@ test('url subscription (double unresolved url with protocol)', () => {
       'MyTopic86869434': {
         'Type': 'AWS::SNS::Topic',
         'Properties': {
-          'DisplayName': 'displayName',
           'TopicName': 'topicName',
         },
       },
@@ -246,7 +240,6 @@ test('queue subscription', () => {
       'MyTopic86869434': {
         'Type': 'AWS::SNS::Topic',
         'Properties': {
-          'DisplayName': 'displayName',
           'TopicName': 'topicName',
         },
       },
@@ -326,7 +319,6 @@ test('queue subscription cross region', () => {
 
   const topic1 = new sns.Topic(topicStack, 'Topic', {
     topicName: 'topicName',
-    displayName: 'displayName',
   });
 
   const queue = new sqs.Queue(queueStack, 'MyQueue');
@@ -338,7 +330,6 @@ test('queue subscription cross region', () => {
       'TopicBFC7AF6E': {
         'Type': 'AWS::SNS::Topic',
         'Properties': {
-          'DisplayName': 'displayName',
           'TopicName': 'topicName',
         },
       },
@@ -432,7 +423,6 @@ test('queue subscription cross region, env agnostic', () => {
 
   const topic1 = new sns.Topic(topicStack, 'Topic', {
     topicName: 'topicName',
-    displayName: 'displayName',
   });
 
   const queue = new sqs.Queue(queueStack, 'MyQueue');
@@ -444,7 +434,6 @@ test('queue subscription cross region, env agnostic', () => {
       'TopicBFC7AF6E': {
         'Type': 'AWS::SNS::Topic',
         'Properties': {
-          'DisplayName': 'displayName',
           'TopicName': 'topicName',
         },
       },
@@ -534,7 +523,6 @@ test('queue subscription cross region, topic env agnostic', () => {
 
   const topic1 = new sns.Topic(topicStack, 'Topic', {
     topicName: 'topicName',
-    displayName: 'displayName',
   });
 
   const queue = new sqs.Queue(queueStack, 'MyQueue');
@@ -546,7 +534,6 @@ test('queue subscription cross region, topic env agnostic', () => {
       'TopicBFC7AF6E': {
         'Type': 'AWS::SNS::Topic',
         'Properties': {
-          'DisplayName': 'displayName',
           'TopicName': 'topicName',
         },
       },
@@ -660,7 +647,6 @@ test('queue subscription cross region, queue env agnostic', () => {
 
   const topic1 = new sns.Topic(topicStack, 'Topic', {
     topicName: 'topicName',
-    displayName: 'displayName',
   });
 
   const queue = new sqs.Queue(queueStack, 'MyQueue');
@@ -672,7 +658,6 @@ test('queue subscription cross region, queue env agnostic', () => {
       'TopicBFC7AF6E': {
         'Type': 'AWS::SNS::Topic',
         'Properties': {
-          'DisplayName': 'displayName',
           'TopicName': 'topicName',
         },
       },
@@ -774,7 +759,6 @@ test('queue subscription with user provided dlq', () => {
       'MyTopic86869434': {
         'Type': 'AWS::SNS::Topic',
         'Properties': {
-          'DisplayName': 'displayName',
           'TopicName': 'topicName',
         },
       },
@@ -926,7 +910,6 @@ test('encrypted queue subscription', () => {
       'MyTopic86869434': {
         'Type': 'AWS::SNS::Topic',
         'Properties': {
-          'DisplayName': 'displayName',
           'TopicName': 'topicName',
         },
       },
@@ -1050,7 +1033,6 @@ describe('Restrict sqs decryption feature flag', () => {
     );
     const topicUnderTest = new sns.Topic(stackUnderTest, 'MyTopic', {
       topicName: 'topicName',
-      displayName: 'displayName',
     });
     const key = new kms.Key(stackUnderTest, 'MyKey', {
       removalPolicy: RemovalPolicy.DESTROY,
@@ -1121,7 +1103,6 @@ describe('Restrict sqs decryption feature flag', () => {
     );
     const topicUnderTest = new sns.Topic(stackUnderTest, 'MyTopic', {
       topicName: 'topicName',
-      displayName: 'displayName',
     });
     const key = new kms.Key(stackUnderTest, 'MyKey', {
       removalPolicy: RemovalPolicy.DESTROY,
@@ -1247,7 +1228,6 @@ test('lambda subscription', () => {
       'MyTopic86869434': {
         'Type': 'AWS::SNS::Topic',
         'Properties': {
-          'DisplayName': 'displayName',
           'TopicName': 'topicName',
         },
       },
@@ -1343,7 +1323,6 @@ test('lambda subscription, cross region env agnostic', () => {
 
   const topic1 = new sns.Topic(topicStack, 'Topic', {
     topicName: 'topicName',
-    displayName: 'displayName',
   });
   const func = new lambda.Function(lambdaStack, 'MyFunc', {
     runtime: lambda.Runtime.NODEJS_LATEST,
@@ -1457,7 +1436,6 @@ test('lambda subscription, cross region', () => {
 
   const topic1 = new sns.Topic(topicStack, 'Topic', {
     topicName: 'topicName',
-    displayName: 'displayName',
   });
   const func = new lambda.Function(lambdaStack, 'MyFunc', {
     runtime: lambda.Runtime.NODEJS_LATEST,
@@ -1581,7 +1559,6 @@ test('email subscription', () => {
       'MyTopic86869434': {
         'Type': 'AWS::SNS::Topic',
         'Properties': {
-          'DisplayName': 'displayName',
           'TopicName': 'topicName',
         },
       },
@@ -1608,7 +1585,6 @@ test('email subscription with unresolved', () => {
       'MyTopic86869434': {
         'Type': 'AWS::SNS::Topic',
         'Properties': {
-          'DisplayName': 'displayName',
           'TopicName': 'topicName',
         },
       },
@@ -1639,7 +1615,6 @@ test('email and url subscriptions with unresolved', () => {
       'MyTopic86869434': {
         'Type': 'AWS::SNS::Topic',
         'Properties': {
-          'DisplayName': 'displayName',
           'TopicName': 'topicName',
         },
       },
@@ -1687,7 +1662,6 @@ test('email and url subscriptions with unresolved - four subscriptions', () => {
       'MyTopic86869434': {
         'Type': 'AWS::SNS::Topic',
         'Properties': {
-          'DisplayName': 'displayName',
           'TopicName': 'topicName',
         },
       },
@@ -1759,7 +1733,6 @@ test('multiple subscriptions', () => {
       'MyTopic86869434': {
         'Type': 'AWS::SNS::Topic',
         'Properties': {
-          'DisplayName': 'displayName',
           'TopicName': 'topicName',
         },
       },
@@ -2090,7 +2063,6 @@ test('sms subscription', () => {
       'MyTopic86869434': {
         'Type': 'AWS::SNS::Topic',
         'Properties': {
-          'DisplayName': 'displayName',
           'TopicName': 'topicName',
         },
       },
@@ -2117,7 +2089,6 @@ test('sms subscription with unresolved', () => {
       'MyTopic86869434': {
         'Type': 'AWS::SNS::Topic',
         'Properties': {
-          'DisplayName': 'displayName',
           'TopicName': 'topicName',
         },
       },

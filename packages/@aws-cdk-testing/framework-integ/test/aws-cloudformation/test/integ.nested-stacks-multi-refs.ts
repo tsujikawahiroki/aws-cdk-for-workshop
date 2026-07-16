@@ -9,17 +9,14 @@ const nested2 = new NestedStack(nested1, 'Nested2');
 const nested3 = new NestedStack(nested2, 'Nested3');
 
 // WHEN
-const level2 = new sns.Topic(nested2, 'Level2ReferencesLevel1', {
-  displayName: shortName(level1.topicName),
-});
+const level2 = new sns.Topic(nested2, 'Level2ReferencesLevel1');
+(level2.node.defaultChild as sns.CfnTopic).displayName = shortName(level1.topicName);
 
-new sns.Topic(nested3, 'Level3ReferencesLevel1', {
-  displayName: shortName(level1.topicName),
-});
+const level3a = new sns.Topic(nested3, 'Level3ReferencesLevel1');
+(level3a.node.defaultChild as sns.CfnTopic).displayName = shortName(level1.topicName);
 
-new sns.Topic(nested3, 'Level3ReferencesLevel2', {
-  displayName: shortName(level2.topicName),
-});
+const level3b = new sns.Topic(nested3, 'Level3ReferencesLevel2');
+(level3b.node.defaultChild as sns.CfnTopic).displayName = shortName(level2.topicName);
 
 app.synth();
 
