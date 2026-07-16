@@ -26,6 +26,7 @@ Present what you are about to do (command, target, expected cost/impact) and pro
 
 - Some features that exist in upstream `aws/aws-cdk` are intentionally NOT implemented here — they are the workshop exercises (see the repository issues). Do not "restore" or copy upstream implementations wholesale; implement exercises following this guide and the user's direction.
 - `.contributions/` is a scratch directory used by contribution tooling. It is listed in `.gitignore`; never commit its contents.
+- Git LFS is NOT used in this repository. Some integration test snapshot assets (~207 files such as `asset.*.zip` under `*.snapshot/` directories) are LFS pointer placeholders without real content, because the upstream LFS objects are not available in this repository's network. Building, unit testing, and the workshop exercise modules (aws-sns, aws-ecr) are unaffected, but integration tests of unrelated modules that need those binary assets cannot be run here.
 
 ## Overview
 
