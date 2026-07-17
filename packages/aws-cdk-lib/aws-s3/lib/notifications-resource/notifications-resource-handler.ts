@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { Construct } from 'constructs';
 import * as iam from '../../../aws-iam';
+import { Runtime } from '../../../aws-lambda/lib/runtime';
 import * as cdk from '../../../core';
 
 export class NotificationsResourceHandlerProps {
@@ -66,10 +67,6 @@ export class NotificationsResourceHandler extends Construct {
     this.role.addManagedPolicy(
       iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
     );
-    this.role.addToPrincipalPolicy(new iam.PolicyStatement({
-      actions: ['s3:PutBucketNotification'],
-      resources: ['*'],
-    }));
 
     const resourceType = 'AWS::Lambda::Function';
     class InLineLambda extends cdk.CfnResource {
@@ -84,12 +81,8 @@ export class NotificationsResourceHandler extends Construct {
 
     const handlerSource = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'custom-resource-handlers', 'dist', 'aws-s3', 'notifications-resource-handler', 'index.py'), 'utf8');
 
-    // Removing lines that starts with '#' (comment lines) in order to fit the 4096 limit
+    // Removing lines that starts with '#' (comment lines)
     const handlerSourceWithoutComments = handlerSource.replace(/^ *#.*\n?/gm, '');
-
-    if (handlerSourceWithoutComments.length > 4096) {
-      throw new Error(`Source of Notifications Resource Handler is too large (${handlerSourceWithoutComments.length} > 4096)`);
-    }
 
     const resource = new InLineLambda(this, 'Resource', {
       type: resourceType,
@@ -98,7 +91,12 @@ export class NotificationsResourceHandler extends Construct {
         Code: { ZipFile: handlerSourceWithoutComments },
         Handler: 'index.handler',
         Role: this.role.roleArn,
-        Runtime: 'python3.11',
+        /**
+         * When updating runtime version here do not forget to update it also in:
+         *   1. Unit test Dockerfile: https://github.com/aws/aws-cdk/blob/main/packages/%40aws-cdk/custom-resource-handlers/test/aws-s3/notifications-resource-handler/Dockerfile
+         *   2. Custom Resource Handler Framework: https://github.com/aws/aws-cdk/blob/main/packages/aws-cdk-lib/aws-s3/lib/notifications-resource/notifications-resource-handler.ts
+         */
+        Runtime: Runtime.determineLatestPythonRuntime(this).name,
         Timeout: 300,
       },
     });

@@ -1,29 +1,68 @@
-
-import { Construct } from 'constructs';
+import type { Construct } from 'constructs';
 import { InstanceRequireImdsv2Aspect } from './aspects';
-import { CloudFormationInit } from './cfn-init';
-import { Connections, IConnectable } from './connections';
+import type { CloudFormationInit } from './cfn-init';
+import type { IConnectable } from './connections';
+import { Connections } from './connections';
+import type { IInstanceRef, InstanceReference, IPlacementGroupRef } from './ec2.generated';
 import { CfnInstance } from './ec2.generated';
-import { InstanceType } from './instance-types';
-import { IKeyPair } from './key-pair';
-import { CpuCredits, InstanceInitiatedShutdownBehavior } from './launch-template';
-import { IMachineImage, OperatingSystemType } from './machine-image';
-import { IPlacementGroup } from './placement-group';
+import type { InstanceType } from './instance-types';
+import type { IKeyPair } from './key-pair';
+import type { CpuCredits, InstanceInitiatedShutdownBehavior } from './launch-template';
+import type { IMachineImage, OperatingSystemType } from './machine-image';
 import { instanceBlockDeviceMappings } from './private/ebs-util';
-import { ISecurityGroup, SecurityGroup } from './security-group';
-import { UserData } from './user-data';
-import { BlockDevice } from './volume';
-import { IVpc, Subnet, SubnetSelection } from './vpc';
+import type { ISecurityGroup } from './security-group';
+import { SecurityGroup } from './security-group';
+import type { UserData } from './user-data';
+import type { BlockDevice } from './volume';
+import type { IVpc, SubnetSelection } from './vpc';
+import { Subnet } from './vpc';
 import * as iam from '../../aws-iam';
-import { Annotations, Aspects, Duration, Fn, IResource, Lazy, Resource, Stack, Tags } from '../../core';
-import { md5hash } from '../../core/lib/helpers-internal';
+import type { IResource } from '../../core';
+import {
+  Annotations,
+  Aspects,
+  Duration,
+  FeatureFlags,
+  Fn,
+  Lazy,
+  Resource,
+  Stack,
+  Tags,
+  Token,
+  ValidationError,
+} from '../../core';
+import type { IArrayBox } from '../../core/lib/helpers-internal';
+import { Box, md5hash } from '../../core/lib/helpers-internal';
+import { addConstructMetadata, MethodMetadata } from '../../core/lib/metadata-resource';
+import { noBoxStackTraces } from '../../core/lib/no-box-stack-traces';
+import { mutatingAspectPrio32333 } from '../../core/lib/private/aspect-prio';
+import { lit } from '../../core/lib/private/literal-string';
+import { propertyInjectable } from '../../core/lib/prop-injectable';
+import * as cxapi from '../../cx-api';
+
+/**
+ * The state of token usage for your instance metadata requests.
+ *
+ * @see https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-ec2-instance-metadataoptions.html#cfn-ec2-instance-metadataoptions-httptokens
+ */
+export enum HttpTokens {
+  /**
+   * If the state is optional, you can choose to retrieve instance metadata with or without a signed token header on your request.
+   */
+  OPTIONAL = 'optional',
+  /**
+   * If the state is required, you must send a signed token header with any instance metadata retrieval requests. In this state,
+   * retrieving the IAM role credentials always returns the version 2.0 credentials; the version 1.0 credentials are not available.
+   */
+  REQUIRED = 'required',
+}
 
 /**
  * Name tag constant
  */
 const NAME_TAG: string = 'Name';
 
-export interface IInstance extends IResource, IConnectable, iam.IGrantable {
+export interface IInstance extends IResource, IConnectable, iam.IGrantable, IInstanceRef {
   /**
    * The instance's ID
    *
@@ -177,7 +216,7 @@ export interface InstanceProps {
    * UserData, which will cause CloudFormation to replace it if the UserData
    * changes.
    *
-   * @default - true iff `initOptions` is specified, false otherwise.
+   * @default - true if `initOptions` is specified, false otherwise.
    */
   readonly userDataCausesReplacement?: boolean;
 
@@ -185,6 +224,7 @@ export interface InstanceProps {
    * An IAM role to associate with the instance profile assigned to this Auto Scaling Group.
    *
    * The role must be assumable by the service principal `ec2.amazonaws.com`:
+   * Note: You can provide an instanceProfile or a role, but not both.
    *
    * @example
    * const role = new iam.Role(this, 'MyRole', {
@@ -194,6 +234,15 @@ export interface InstanceProps {
    * @default - A role will automatically be created, it can be accessed via the `role` property
    */
   readonly role?: iam.IRole;
+
+  /**
+   * The instance profile used to pass role information to EC2 instances.
+   *
+   * Note: You can provide an instanceProfile or a role, but not both.
+   *
+   * @default - No instance profile
+   */
+  readonly instanceProfile?: iam.IInstanceProfile;
 
   /**
    * The name of the instance
@@ -261,9 +310,68 @@ export interface InstanceProps {
   /**
    * Whether IMDSv2 should be required on this instance.
    *
+   * This is a simple boolean flag that enforces IMDSv2 by creating a Launch Template
+   * with `httpTokens: 'required'`. Use this for straightforward IMDSv2 enforcement.
+   *
+   * For more granular control over metadata options (like disabling the metadata endpoint,
+   * configuring hop limits, or enabling instance tags), use the individual metadata option properties instead.
+   *
    * @default - false
    */
   readonly requireImdsv2?: boolean;
+
+  /**
+   * Enables or disables the HTTP metadata endpoint on your instances.
+   *
+   * @see https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-ec2-instance-metadataoptions.html#cfn-ec2-instance-metadataoptions-httpendpoint
+   *
+   * @default true
+   */
+  readonly httpEndpoint?: boolean;
+
+  /**
+   * Enables or disables the IPv6 endpoint for the instance metadata service.
+   *
+   * @see https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-ec2-instance-metadataoptions.html#cfn-ec2-instance-metadataoptions-httpprotocolipv6
+   *
+   * @default false
+   */
+  readonly httpProtocolIpv6?: boolean;
+
+  /**
+   * The desired HTTP PUT response hop limit for instance metadata requests. The larger the number, the further instance metadata requests can travel.
+   *
+   * Possible values: Integers from 1 to 64
+   *
+   * @see https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-ec2-instance-metadataoptions.html#cfn-ec2-instance-metadataoptions-httpputresponsehoplimit
+   *
+   * @default - No default value specified by CloudFormation
+   */
+  readonly httpPutResponseHopLimit?: number;
+
+  /**
+   * The state of token usage for your instance metadata requests.
+   *
+   * Set to 'required' to enforce IMDSv2. This is equivalent to using `requireImdsv2: true`,
+   * but allows you to configure other metadata options alongside IMDSv2 enforcement.
+   *
+   * @see https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-ec2-instance-metadataoptions.html#cfn-ec2-instance-metadataoptions-httptokens
+   *
+   * @default - The default is conditional based on the AMI and account-level settings:
+   * - If the AMI's `ImdsSupport` is `v2.0` and the account level default is `no-preference`, the default is `HttpTokens.REQUIRED`
+   * - If the AMI's `ImdsSupport` is `v2.0` and the account level default is `V1 or V2`, the default is `HttpTokens.OPTIONAL`
+   * - See https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-instance-metadata-options.html#instance-metadata-options-order-of-precedence
+   */
+  readonly httpTokens?: HttpTokens;
+
+  /**
+   * Set to enabled to allow access to instance tags from the instance metadata. Set to disabled to turn off access to instance tags from the instance metadata.
+   *
+   * @see https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-ec2-instance-metadataoptions.html#cfn-ec2-instance-metadataoptions-instancemetadatatags
+   *
+   * @default false
+   */
+  readonly instanceMetadataTags?: boolean;
 
   /**
    * Whether "Detailed Monitoring" is enabled for this instance
@@ -294,6 +402,8 @@ export interface InstanceProps {
   /**
    * Whether to associate a public IP address to the primary network interface attached to this instance.
    *
+   * You cannot specify this property and `ipv6AddressCount` at the same time.
+   *
    * @default - public IP address is automatically assigned based on default behavior
    */
   readonly associatePublicIpAddress?: boolean;
@@ -318,6 +428,19 @@ export interface InstanceProps {
   readonly ebsOptimized?: boolean;
 
   /**
+   * If true, the instance will not be able to be terminated using the Amazon EC2 console, CLI, or API.
+   *
+   * To change this attribute after launch, use [ModifyInstanceAttribute](https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_ModifyInstanceAttribute.html).
+   * Alternatively, if you set InstanceInitiatedShutdownBehavior to terminate, you can terminate the instance
+   * by running the shutdown command from the instance.
+   *
+   * @see https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-ec2-instance.html#cfn-ec2-instance-disableapitermination
+   *
+   * @default false
+   */
+  readonly disableApiTermination?: boolean;
+
+  /**
    * Indicates whether an instance stops or terminates when you initiate shutdown from the instance
    * (using the operating system command for system shutdown).
    *
@@ -332,13 +455,56 @@ export interface InstanceProps {
    *
    * @default - no placement group will be used for this instance.
    */
-  readonly placementGroup?: IPlacementGroup;
+  readonly placementGroup?: IPlacementGroupRef;
+
+  /**
+   * Whether the instance is enabled for AWS Nitro Enclaves.
+   *
+   * Nitro Enclaves requires a Nitro-based virtualized parent instance with specific Intel/AMD with at least 4 vCPUs
+   * or Graviton with at least 2 vCPUs instance types and Linux/Windows host OS,
+   * while the enclave itself supports only Linux OS.
+   *
+   * You can't set both `enclaveEnabled` and `hibernationEnabled` to true on the same instance.
+   *
+   * @see https://docs.aws.amazon.com/enclaves/latest/user/nitro-enclave.html#nitro-enclave-reqs
+   *
+   * @default - false
+   */
+  readonly enclaveEnabled?: boolean;
+
+  /**
+   * Whether the instance is enabled for hibernation.
+   *
+   * You can't set both `enclaveEnabled` and `hibernationEnabled` to true on the same instance.
+   *
+   * @see https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-ec2-instance-hibernationoptions.html
+   *
+   * @default - false
+   */
+  readonly hibernationEnabled?: boolean;
+
+  /**
+   * The number of IPv6 addresses to associate with the primary network interface.
+   *
+   * Amazon EC2 chooses the IPv6 addresses from the range of your subnet.
+   *
+   * You cannot specify this property and `associatePublicIpAddress` at the same time.
+   *
+   * @default - For instances associated with an IPv6 subnet, use 1; otherwise, use 0.
+   */
+  readonly ipv6AddressCount?: number;
 }
 
 /**
  * This represents a single EC2 instance
  */
+@propertyInjectable
+@noBoxStackTraces
 export class Instance extends Resource implements IInstance {
+  /**
+   * Uniquely identifies this class.
+   */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-ec2.Instance';
 
   /**
    * The type of OS the instance is running.
@@ -367,6 +533,8 @@ export class Instance extends Resource implements IInstance {
 
   /**
    * the underlying instance resource
+   *
+   * @jsii suppress JSII5019 For historic reasons
    */
   public readonly instance: CfnInstance;
   /**
@@ -395,22 +563,24 @@ export class Instance extends Resource implements IInstance {
   public readonly instancePublicIp: string;
 
   private readonly securityGroup: ISecurityGroup;
-  private readonly securityGroups: ISecurityGroup[] = [];
+  private readonly _securityGroups: IArrayBox<ISecurityGroup>;
 
   constructor(scope: Construct, id: string, props: InstanceProps) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     if (props.initOptions && !props.init) {
-      throw new Error('Setting \'initOptions\' requires that \'init\' is also set');
+      throw new ValidationError(lit`RequiresSettingInitoptionsRequires`, 'Setting \'initOptions\' requires that \'init\' is also set', this);
     }
 
     if (props.keyName && props.keyPair) {
-      throw new Error('Cannot specify both of \'keyName\' and \'keyPair\'; prefer \'keyPair\'');
+      throw new ValidationError(lit`CannotSpecifyKeyNameKey`, 'Cannot specify both of \'keyName\' and \'keyPair\'; prefer \'keyPair\'', this);
     }
 
     // if credit specification is set, then the instance type must be burstable
     if (props.creditSpecification && !props.instanceType.isBurstable()) {
-      throw new Error(`creditSpecification is supported only for T4g, T3a, T3, T2 instance type, got: ${props.instanceType.toString()}`);
+      throw new ValidationError(lit`CreditSpecificationSupportedInstanceType`, `creditSpecification is supported only for T4g, T3a, T3, T2 instance type, got: ${props.instanceType.toString()}`, this);
     }
 
     if (props.securityGroup) {
@@ -423,27 +593,39 @@ export class Instance extends Resource implements IInstance {
       });
     }
     this.connections = new Connections({ securityGroups: [this.securityGroup] });
-    this.securityGroups.push(this.securityGroup);
+    this._securityGroups = Box.fromArray([this.securityGroup], { omitEmpty: false });
     Tags.of(this).add(NAME_TAG, props.instanceName || this.node.path);
 
-    this.role = props.role || new iam.Role(this, 'InstanceRole', {
-      assumedBy: new iam.ServicePrincipal('ec2.amazonaws.com'),
-    });
+    if (props.instanceProfile && props.role) {
+      throw new ValidationError(lit`CannotProvideInstanceProfileRole`, 'You cannot provide both instanceProfile and role', this);
+    }
+
+    let iamInstanceProfile: string | undefined = undefined;
+    if (props.instanceProfile?.role) {
+      this.role = props.instanceProfile.role;
+      iamInstanceProfile = props.instanceProfile.instanceProfileName;
+    } else {
+      this.role = props.role || new iam.Role(this, 'InstanceRole', {
+        assumedBy: new iam.ServicePrincipal('ec2.amazonaws.com'),
+      });
+
+      const iamProfile = new iam.CfnInstanceProfile(this, 'InstanceProfile', {
+        roles: [this.role.roleName],
+      });
+      iamInstanceProfile = iamProfile.ref;
+    }
+
     this.grantPrincipal = this.role;
 
     if (props.ssmSessionPermissions) {
       this.role.addManagedPolicy(iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonSSMManagedInstanceCore'));
     }
 
-    const iamProfile = new iam.CfnInstanceProfile(this, 'InstanceProfile', {
-      roles: [this.role.roleName],
-    });
-
     // use delayed evaluation
     const imageConfig = props.machineImage.getImage(this);
     this.userData = props.userData ?? imageConfig.userData;
     const userDataToken = Lazy.string({ produce: () => Fn.base64(this.userData.render()) });
-    const securityGroupsToken = Lazy.list({ produce: () => this.securityGroups.map(sg => sg.securityGroupId) });
+    const securityGroupsToken = Token.asList(this._securityGroups.map(sg => sg.securityGroupId), { displayHint: 'securityGroupIds' });
 
     const { subnets, hasPublic } = props.vpc.selectSubnets(props.vpcSubnets);
     let subnet;
@@ -452,13 +634,13 @@ export class Instance extends Resource implements IInstance {
       if (selected.length === 1) {
         subnet = selected[0];
       } else {
-        Annotations.of(this).addError(`Need exactly 1 subnet to match AZ '${props.availabilityZone}', found ${selected.length}. Use a different availabilityZone.`);
+        Annotations.of(this)._addTrackableError(lit`AmbiguousSubnetForAz`, `Need exactly 1 subnet to match AZ '${props.availabilityZone}', found ${selected.length}. Use a different availabilityZone.`);
       }
     } else {
       if (subnets.length > 0) {
         subnet = subnets[0];
       } else {
-        Annotations.of(this).addError(`Did not find any subnets matching '${JSON.stringify(props.vpcSubnets)}', please use a different selection.`);
+        Annotations.of(this)._addTrackableError(lit`NoMatchingSubnets`, `Did not find any subnets matching '${JSON.stringify(props.vpcSubnets)}', please use a different selection.`);
       }
     }
     if (!subnet) {
@@ -481,7 +663,25 @@ export class Instance extends Resource implements IInstance {
       }] : undefined;
 
     if (props.keyPair && !props.keyPair._isOsCompatible(imageConfig.osType)) {
-      throw new Error(`${props.keyPair.type} keys are not compatible with the chosen AMI`);
+      throw new ValidationError(lit`IncompatibleKeyPairType`, `${props.keyPair.type} keys are not compatible with the chosen AMI`, this);
+    }
+
+    if (props.enclaveEnabled && props.hibernationEnabled) {
+      throw new ValidationError(lit`CanTBothTrueSame`, 'You can\'t set both `enclaveEnabled` and `hibernationEnabled` to true on the same instance', this);
+    }
+
+    if (
+      props.ipv6AddressCount !== undefined &&
+      !Token.isUnresolved(props.ipv6AddressCount) &&
+      (props.ipv6AddressCount < 0 || !Number.isInteger(props.ipv6AddressCount))
+    ) {
+      throw new ValidationError(lit`MustBeIpv6addresscountNonNegativeInteger`, `\'ipv6AddressCount\' must be a non-negative integer, got: ${props.ipv6AddressCount}`, this);
+    }
+
+    if (
+      props.ipv6AddressCount !== undefined &&
+      props.associatePublicIpAddress !== undefined) {
+      throw new ValidationError(lit`SetIpvAddressCountAssociate`, 'You can\'t set both \'ipv6AddressCount\' and \'associatePublicIpAddress\'', this);
     }
 
     // if network interfaces array is configured then subnetId, securityGroupIds,
@@ -494,7 +694,7 @@ export class Instance extends Resource implements IInstance {
       subnetId: networkInterfaces ? undefined : subnet.subnetId,
       securityGroupIds: networkInterfaces ? undefined : securityGroupsToken,
       networkInterfaces,
-      iamInstanceProfile: iamProfile.ref,
+      iamInstanceProfile,
       userData: userDataToken,
       availabilityZone: subnet.availabilityZone,
       sourceDestCheck: props.sourceDestCheck,
@@ -504,8 +704,13 @@ export class Instance extends Resource implements IInstance {
       monitoring: props.detailedMonitoring,
       creditSpecification: props.creditSpecification ? { cpuCredits: props.creditSpecification } : undefined,
       ebsOptimized: props.ebsOptimized,
+      disableApiTermination: props.disableApiTermination,
       instanceInitiatedShutdownBehavior: props.instanceInitiatedShutdownBehavior,
-      placementGroupName: props.placementGroup?.placementGroupName,
+      placementGroupName: props.placementGroup?.placementGroupRef.groupName,
+      enclaveOptions: props.enclaveEnabled !== undefined ? { enabled: props.enclaveEnabled } : undefined,
+      hibernationOptions: props.hibernationEnabled !== undefined ? { configured: props.hibernationEnabled } : undefined,
+      ipv6AddressCount: props.ipv6AddressCount,
+      metadataOptions: this.renderMetadataOptions(props),
     });
     this.instance.node.addDependency(this.role);
 
@@ -516,7 +721,7 @@ export class Instance extends Resource implements IInstance {
     }
 
     if (!hasPublic && props.associatePublicIpAddress) {
-      throw new Error("To set 'associatePublicIpAddress: true' you must select Public subnets (vpcSubnets: { subnetType: SubnetType.PUBLIC })");
+      throw new ValidationError(lit`SetAssociatePublicIpAddress`, "To set 'associatePublicIpAddress: true' you must select Public subnets (vpcSubnets: { subnetType: SubnetType.PUBLIC })", this);
     }
 
     this.osType = imageConfig.osType;
@@ -529,11 +734,22 @@ export class Instance extends Resource implements IInstance {
     this.instancePublicDnsName = this.instance.attrPublicDnsName;
     this.instancePublicIp = this.instance.attrPublicIp;
 
-    if (props.init) {
-      this.applyCloudFormationInit(props.init, props.initOptions);
-    }
+    // When feature flag is true, if both the resourceSignalTimeout and initOptions.timeout are set,
+    // the timeout is summed together. This logic is done in applyCloudFormationInit.
+    // This is because applyUpdatePolicies overwrites the timeout when both timeout fields are specified.
+    if (FeatureFlags.of(this).isEnabled(cxapi.EC2_SUM_TIMEOUT_ENABLED)) {
+      this.applyUpdatePolicies(props);
 
-    this.applyUpdatePolicies(props);
+      if (props.init) {
+        this.applyCloudFormationInit(props.init, props.initOptions);
+      }
+    } else {
+      if (props.init) {
+        this.applyCloudFormationInit(props.init, props.initOptions);
+      }
+
+      this.applyUpdatePolicies(props);
+    }
 
     // Trigger replacement (via new logical ID) on user data change, if specified or cfn-init is being used.
     //
@@ -543,6 +759,7 @@ export class Instance extends Resource implements IInstance {
     // try to naively resolve. We need a recursion breaker in this.
     const originalLogicalId = Stack.of(this).getLogicalId(this.instance);
     let recursing = false;
+    // eslint-disable-next-line no-restricted-syntax
     this.instance.overrideLogicalId(Lazy.uncachedString({
       produce: (context) => {
         if (recursing) { return originalLogicalId; }
@@ -561,8 +778,16 @@ export class Instance extends Resource implements IInstance {
     }));
 
     if (props.requireImdsv2) {
-      Aspects.of(this).add(new InstanceRequireImdsv2Aspect());
+      Aspects.of(this).add(new InstanceRequireImdsv2Aspect(), {
+        priority: mutatingAspectPrio32333(this),
+      });
     }
+  }
+
+  public get instanceRef(): InstanceReference {
+    return {
+      instanceId: this.instanceId,
+    };
   }
 
   /**
@@ -570,14 +795,16 @@ export class Instance extends Resource implements IInstance {
    *
    * @param securityGroup: The security group to add
    */
+  @MethodMetadata()
   public addSecurityGroup(securityGroup: ISecurityGroup): void {
-    this.securityGroups.push(securityGroup);
+    this._securityGroups.push(securityGroup);
   }
 
   /**
    * Add command to the startup script of the instance.
    * The command must be in the scripting language supported by the instance's OS (i.e. Linux/Windows).
    */
+  @MethodMetadata()
   public addUserData(...commands: string[]) {
     this.userData.addCommands(...commands);
   }
@@ -585,6 +812,7 @@ export class Instance extends Resource implements IInstance {
   /**
    * Adds a statement to the IAM role assumed by the instance.
    */
+  @MethodMetadata()
   public addToRolePolicy(statement: iam.PolicyStatement) {
     this.role.addToPrincipalPolicy(statement);
   }
@@ -598,7 +826,8 @@ export class Instance extends Resource implements IInstance {
    * - Add commands to the instance UserData to run `cfn-init` and `cfn-signal`.
    * - Update the instance's CreationPolicy to wait for the `cfn-signal` commands.
    */
-  private applyCloudFormationInit(init: CloudFormationInit, options: ApplyCloudFormationInitOptions = {}) {
+  @MethodMetadata()
+  public applyCloudFormationInit(init: CloudFormationInit, options: ApplyCloudFormationInitOptions = {}) {
     init.attach(this.instance, {
       platform: this.osType,
       instanceRole: this.role,
@@ -642,10 +871,52 @@ export class Instance extends Resource implements IInstance {
       this.instance.cfnOptions.creationPolicy = {
         ...this.instance.cfnOptions.creationPolicy,
         resourceSignal: {
+          ...this.instance.cfnOptions.creationPolicy?.resourceSignal,
           timeout: props.resourceSignalTimeout && props.resourceSignalTimeout.toIsoString(),
         },
       };
     }
+  }
+
+  /**
+   * Render the metadata options for the instance
+   */
+  private renderMetadataOptions(props: InstanceProps): CfnInstance.MetadataOptionsProperty | undefined {
+    // Check if any metadata options are actually specified
+    // This matches the LaunchTemplate behavior
+    if (props.httpEndpoint === undefined &&
+        props.httpProtocolIpv6 === undefined &&
+        props.httpPutResponseHopLimit === undefined &&
+        props.httpTokens === undefined &&
+        props.instanceMetadataTags === undefined) {
+      return undefined;
+    }
+
+    // CloudFormation constraint: An EC2 instance cannot have metadata options specified both
+    // directly on the instance AND in an associated Launch Template. The requireImdsv2 property
+    // works by creating a Launch Template with httpTokens='required', while metadata options
+    // are set directly on the instance. Using both would result in a CloudFormation
+    // deployment error, so we prevent this combination at synthesis time.
+    if (props.requireImdsv2) {
+      throw new ValidationError(lit`CannotRequireImdsvMetadataOptions`, 'Cannot use both requireImdsv2 and metadata options. Use requireImdsv2 for simple IMDSv2 enforcement or individual metadata option properties for advanced configuration, but not both.', this);
+    }
+
+    // Validate httpPutResponseHopLimit range
+    if (props.httpPutResponseHopLimit !== undefined &&
+      (props.httpPutResponseHopLimit < 1 || props.httpPutResponseHopLimit > 64)) {
+      throw new ValidationError(lit`HttpPutResponseHopLimit`, 'httpPutResponseHopLimit must be between 1 and 64', this);
+    }
+
+    return {
+      httpEndpoint: props.httpEndpoint === true ? 'enabled' :
+        props.httpEndpoint === false ? 'disabled' : undefined,
+      httpProtocolIpv6: props.httpProtocolIpv6 === true ? 'enabled' :
+        props.httpProtocolIpv6 === false ? 'disabled' : undefined,
+      httpPutResponseHopLimit: props.httpPutResponseHopLimit,
+      httpTokens: props.httpTokens,
+      instanceMetadataTags: props.instanceMetadataTags === true ? 'enabled' :
+        props.instanceMetadataTags === false ? 'disabled' : undefined,
+    };
   }
 }
 

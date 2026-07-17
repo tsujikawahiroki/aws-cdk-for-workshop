@@ -1,6 +1,6 @@
-/* eslint-disable no-console */
+
 /// <reference path="../../../../../../../node_modules/aws-cdk-lib/custom-resources/lib/provider-framework/types.d.ts" />
-import { RDS } from '@aws-sdk/client-rds'; // eslint-disable-line import/no-extraneous-dependencies
+import { RDS } from '@aws-sdk/client-rds';
 
 export async function onEventHandler(event: AWSCDKAsyncCustomResource.OnEventRequest): Promise<AWSCDKAsyncCustomResource.OnEventResponse> {
   console.log('Event: %j', event);
@@ -55,7 +55,7 @@ async function tryGetClusterSnapshotStatus(identifier: string): Promise<string |
     });
     return data.DBClusterSnapshots?.[0].Status;
   } catch (err: any) {
-    if (err.code === 'DBClusterSnapshotNotFoundFault') {
+    if (err.name === 'DBClusterSnapshotNotFoundFault') {
       return undefined;
     }
     throw err;

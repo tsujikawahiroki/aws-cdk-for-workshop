@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { Template } from '../../assertions';
+import { Match, Template } from '../../assertions';
 import * as sfn from '../../aws-stepfunctions';
 import * as cdk from '../../core';
 import * as appsync from '../lib';
@@ -18,7 +18,6 @@ beforeEach(() => {
 });
 
 describe('Http Data Source configuration', () => {
-
   test('default configuration produces name `HttpCDKDataSource`', () => {
     // WHEN
     api.addHttpDataSource('ds', endpoint);
@@ -55,6 +54,23 @@ describe('Http Data Source configuration', () => {
       Type: 'HTTP',
       Name: 'custom',
       Description: 'custom description',
+    });
+  });
+
+  test.each([
+    [appsync.DataSourceMetricsConfig.ENABLED, 'ENABLED'],
+    [appsync.DataSourceMetricsConfig.DISABLED, 'DISABLED'],
+    [undefined, Match.absent()],
+  ])('appsync configures metrics config correctly to set %s', (metricsConfig, expected) => {
+    // WHEN
+    api.addHttpDataSource('ds', endpoint, {
+      metricsConfig: metricsConfig,
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::AppSync::DataSource', {
+      Type: 'HTTP',
+      MetricsConfig: expected,
     });
   });
 
@@ -163,7 +179,6 @@ describe('Http Data Source configuration', () => {
       api.addHttpDataSource('ds', endpoint);
     }).toThrow("There is already a Construct with name 'ds' in GraphqlApi [baseApi]");
   });
-
 });
 
 describe('adding http data source from imported api', () => {

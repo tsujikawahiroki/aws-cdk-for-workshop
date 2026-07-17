@@ -113,7 +113,7 @@
      "S3Bucket": {
       "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
      },
-     "S3Key": "bde7b5c89cb43285f884c94f0b9e17cdb0f5eb5345005114dd60342e0b8a85a1.zip"
+     "S3Key": "bea78ce725e22a5e0d82378f6b49028c09ba86499286d6945a0506e820854e92.zip"
     },
     "Timeout": 900,
     "MemorySize": 128,
@@ -124,7 +124,7 @@
       "Arn"
      ]
     },
-    "Runtime": "nodejs18.x",
+    "Runtime": "nodejs24.x",
     "Description": "Lambda function for removing all inbound/outbound rules from the VPC default security group"
    },
    "DependsOn": [
@@ -151,6 +151,16 @@
    "Type": "AWS::EC2::LaunchTemplate",
    "Properties": {
     "LaunchTemplateData": {
+     "BlockDeviceMappings": [
+      {
+       "DeviceName": "/dev/xvda",
+       "Ebs": {
+        "Throughput": 250,
+        "VolumeSize": 15,
+        "VolumeType": "gp3"
+       }
+      }
+     ],
      "MetadataOptions": {
       "HttpEndpoint": "enabled",
       "HttpProtocolIpv6": "enabled",
@@ -203,7 +213,8 @@
        }
       ]
      }
-    ]
+    ],
+    "VersionDescription": "test template v1"
    }
   },
   "sg2860DD91F": {
@@ -227,7 +238,7 @@
    "Properties": {
     "LaunchTemplateData": {
      "ImageId": {
-      "Ref": "SsmParameterValueawsserviceamiamazonlinuxlatestamzn2amihvmx8664gp2C96584B6F00A464EAD1953AFF4B05118Parameter"
+      "Ref": "SsmParameterValueawsserviceamiamazonlinuxlatestamzn2amikernel510hvmx8664gp2C96584B6F00A464EAD1953AFF4B05118Parameter"
      },
      "TagSpecifications": [
       {
@@ -265,12 +276,64 @@
      }
     ]
    }
+  },
+  "pg749EE6ED": {
+   "Type": "AWS::EC2::PlacementGroup",
+   "Properties": {
+    "Strategy": "spread"
+   }
+  },
+  "LTWithPlacementGroup4B40027C": {
+   "Type": "AWS::EC2::LaunchTemplate",
+   "Properties": {
+    "LaunchTemplateData": {
+     "Placement": {
+      "GroupName": {
+       "Fn::GetAtt": [
+        "pg749EE6ED",
+        "GroupName"
+       ]
+      }
+     },
+     "TagSpecifications": [
+      {
+       "ResourceType": "instance",
+       "Tags": [
+        {
+         "Key": "Name",
+         "Value": "aws-cdk-ec2-lt-metadata-1/LTWithPlacementGroup"
+        }
+       ]
+      },
+      {
+       "ResourceType": "volume",
+       "Tags": [
+        {
+         "Key": "Name",
+         "Value": "aws-cdk-ec2-lt-metadata-1/LTWithPlacementGroup"
+        }
+       ]
+      }
+     ]
+    },
+    "TagSpecifications": [
+     {
+      "ResourceType": "launch-template",
+      "Tags": [
+       {
+        "Key": "Name",
+        "Value": "aws-cdk-ec2-lt-metadata-1/LTWithPlacementGroup"
+       }
+      ]
+     }
+    ]
+   }
   }
  },
  "Parameters": {
-  "SsmParameterValueawsserviceamiamazonlinuxlatestamzn2amihvmx8664gp2C96584B6F00A464EAD1953AFF4B05118Parameter": {
+  "SsmParameterValueawsserviceamiamazonlinuxlatestamzn2amikernel510hvmx8664gp2C96584B6F00A464EAD1953AFF4B05118Parameter": {
    "Type": "AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>",
-   "Default": "/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2"
+   "Default": "/aws/service/ami-amazon-linux-latest/amzn2-ami-kernel-5.10-hvm-x86_64-gp2"
   },
   "BootstrapVersion": {
    "Type": "AWS::SSM::Parameter::Value<String>",

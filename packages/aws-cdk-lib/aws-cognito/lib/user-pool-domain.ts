@@ -1,15 +1,35 @@
-import { Construct } from 'constructs';
+import type { Construct } from 'constructs';
 import { CfnUserPoolDomain } from './cognito.generated';
-import { IUserPool } from './user-pool';
-import { UserPoolClient } from './user-pool-client';
-import { ICertificate } from '../../aws-certificatemanager';
-import { IResource, Resource, Stack, Token } from '../../core';
-import { AwsCustomResource, AwsCustomResourcePolicy, AwsSdkCall, PhysicalResourceId } from '../../custom-resources';
+import type { UserPoolClient } from './user-pool-client';
+import type { IResource } from '../../core';
+import { Resource, Stack, Token } from '../../core';
+import { UnscopedValidationError, ValidationError } from '../../core/lib/errors';
+import { addConstructMetadata, MethodMetadata } from '../../core/lib/metadata-resource';
+import { lit } from '../../core/lib/private/literal-string';
+import { propertyInjectable } from '../../core/lib/prop-injectable';
+import type { AwsSdkCall } from '../../custom-resources';
+import { AwsCustomResource, AwsCustomResourcePolicy, PhysicalResourceId } from '../../custom-resources';
+import type { ICertificateRef } from '../../interfaces/generated/aws-certificatemanager-interfaces.generated';
+import type { IUserPoolDomainRef, IUserPoolRef, UserPoolDomainReference } from '../../interfaces/generated/aws-cognito-interfaces.generated';
+
+/**
+ * The branding version of managed login for the domain.
+ */
+export enum ManagedLoginVersion {
+  /**
+   * The classic hosted UI.
+   */
+  CLASSIC_HOSTED_UI = 1,
+  /**
+   * The newer managed login with the branding designer.
+   */
+  NEWER_MANAGED_LOGIN = 2,
+}
 
 /**
  * Represents a user pool domain.
  */
-export interface IUserPoolDomain extends IResource {
+export interface IUserPoolDomain extends IResource, IUserPoolDomainRef {
   /**
    * The domain that was specified to be created.
    * If `customDomain` was selected, this holds the full domain name that was specified.
@@ -32,7 +52,7 @@ export interface CustomDomainOptions {
   /**
    * The certificate to associate with this domain.
    */
-  readonly certificate: ICertificate;
+  readonly certificate: ICertificateRef;
 }
 
 /**
@@ -65,6 +85,16 @@ export interface UserPoolDomainOptions {
    * @default - not set if `customDomain` is specified, otherwise, throws an error.
    */
   readonly cognitoDomain?: CognitoDomainOptions;
+
+  /**
+   * A version that indicates the state of managed login.
+   * This choice applies to all app clients that host services at the domain.
+   *
+   * @see https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pools-managed-login.html
+   *
+   * @default undefined - Cognito default setting is ManagedLoginVersion.CLASSIC_HOSTED_UI
+   */
+  readonly managedLoginVersion?: ManagedLoginVersion;
 }
 
 /**
@@ -74,19 +104,32 @@ export interface UserPoolDomainProps extends UserPoolDomainOptions {
   /**
    * The user pool to which this domain should be associated.
    */
-  readonly userPool: IUserPool;
+  readonly userPool: IUserPoolRef;
 }
 
 /**
  * Define a user pool domain
  */
+@propertyInjectable
 export class UserPoolDomain extends Resource implements IUserPoolDomain {
+  /** Uniquely identifies this class. */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-cognito.UserPoolDomain';
+
   /**
    * Import a UserPoolDomain given its domain name
    */
   public static fromDomainName(scope: Construct, id: string, userPoolDomainName: string): IUserPoolDomain {
     class Import extends Resource implements IUserPoolDomain {
       public readonly domainName = userPoolDomainName;
+
+      public get userPoolDomainRef(): UserPoolDomainReference {
+        return {
+          domain: userPoolDomainName,
+          get userPoolId(): string {
+            throw new UnscopedValidationError(lit`UserPoolDomainRefAvailable`, 'userPoolDomainRef is not available on imported UserPoolDomain.');
+          },
+        };
+      }
     }
 
     return new Import(scope, id);
@@ -94,37 +137,61 @@ export class UserPoolDomain extends Resource implements IUserPoolDomain {
 
   public readonly domainName: string;
   private isCognitoDomain: boolean;
+  private readonly _userPool: IUserPoolRef;
 
   private cloudFrontCustomResource?: AwsCustomResource;
+  private readonly resource: CfnUserPoolDomain;
+
+  public get userPoolDomainRef(): UserPoolDomainReference {
+    return {
+      userPoolId: this._userPool.userPoolRef.userPoolId,
+      domain: this.domainName,
+    };
+  }
 
   constructor(scope: Construct, id: string, props: UserPoolDomainProps) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
+
+    this._userPool = props.userPool;
 
     if (!!props.customDomain === !!props.cognitoDomain) {
-      throw new Error('One of, and only one of, cognitoDomain or customDomain must be specified');
+      throw new ValidationError(lit`ExactlyOneDomainRequired`, 'One of, and only one of, cognitoDomain or customDomain must be specified', this);
     }
 
     if (props.cognitoDomain?.domainPrefix &&
       !Token.isUnresolved(props.cognitoDomain?.domainPrefix) &&
       !/^[a-z0-9-]+$/.test(props.cognitoDomain.domainPrefix)) {
-
-      throw new Error('domainPrefix for cognitoDomain can contain only lowercase alphabets, numbers and hyphens');
+      throw new ValidationError(lit`DomainPrefixCognitoDomainContain`, 'domainPrefix for cognitoDomain can contain only lowercase alphabets, numbers and hyphens', this);
     }
 
     this.isCognitoDomain = !!props.cognitoDomain;
 
     const domainName = props.cognitoDomain?.domainPrefix || props.customDomain?.domainName!;
-    const resource = new CfnUserPoolDomain(this, 'Resource', {
-      userPoolId: props.userPool.userPoolId,
+    this.resource = new CfnUserPoolDomain(this, 'Resource', {
+      userPoolId: props.userPool.userPoolRef.userPoolId,
       domain: domainName,
-      customDomainConfig: props.customDomain ? { certificateArn: props.customDomain.certificate.certificateArn } : undefined,
+      customDomainConfig: props.customDomain ? { certificateArn: props.customDomain.certificate.certificateRef.certificateId } : undefined,
+      managedLoginVersion: props.managedLoginVersion,
     });
 
-    this.domainName = resource.ref;
+    this.domainName = this.resource.ref;
   }
 
   /**
    * The domain name of the CloudFront distribution associated with the user pool domain.
+   */
+  public get cloudFrontEndpoint(): string {
+    return this.resource.getAtt('CloudFrontDistribution').toString();
+  }
+
+  /**
+   * The domain name of the CloudFront distribution associated with the user pool domain.
+   *
+   * This method creates a custom resource internally to get the CloudFront domain name.
+   *
+   * @deprecated use `cloudFrontEndpoint` method instead.
    */
   public get cloudFrontDomainName(): string {
     if (!this.cloudFrontCustomResource) {
@@ -157,6 +224,7 @@ export class UserPoolDomain extends Resource implements IUserPoolDomain {
    *
    * @param options options to customize baseUrl
    */
+  @MethodMetadata()
   public baseUrl(options?: BaseUrlOptions): string {
     if (this.isCognitoDomain) {
       const authDomain = 'auth' + (options?.fips ? '-fips' : '');
@@ -170,6 +238,7 @@ export class UserPoolDomain extends Resource implements IUserPoolDomain {
    * @param client [disable-awslint:ref-via-interface] the user pool client that the UI will use to interact with the UserPool
    * @param options options to customize signInUrl.
    */
+  @MethodMetadata()
   public signInUrl(client: UserPoolClient, options: SignInUrlOptions): string {
     let responseType: string;
     if (client.oAuthFlows.authorizationCodeGrant) {
@@ -177,7 +246,7 @@ export class UserPoolDomain extends Resource implements IUserPoolDomain {
     } else if (client.oAuthFlows.implicitCodeGrant) {
       responseType = 'token';
     } else {
-      throw new Error('signInUrl is not supported for clients without authorizationCodeGrant or implicitCodeGrant flow enabled');
+      throw new ValidationError(lit`SignUrlSupportedClientsWithout`, 'signInUrl is not supported for clients without authorizationCodeGrant or implicitCodeGrant flow enabled', this);
     }
     const path = options.signInPath ?? '/login';
     return `${this.baseUrl(options)}${path}?client_id=${client.userPoolClientId}&response_type=${responseType}&redirect_uri=${options.redirectUri}`;

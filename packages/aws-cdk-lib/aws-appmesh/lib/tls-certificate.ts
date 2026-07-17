@@ -1,6 +1,6 @@
-import { Construct } from 'constructs';
-import { CfnVirtualNode } from './appmesh.generated';
-import * as acm from '../../aws-certificatemanager';
+import type { Construct } from 'constructs';
+import type { CfnVirtualNode } from './appmesh.generated';
+import type * as acm from '../../aws-certificatemanager';
 
 /**
  * A wrapper for the tls config returned by `TlsCertificate.bind`
@@ -41,7 +41,6 @@ export abstract class TlsCertificate {
    * Returns TLS certificate based provider.
    */
   public abstract bind(_scope: Construct): TlsCertificateConfig;
-
 }
 
 /**

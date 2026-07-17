@@ -7,12 +7,13 @@ import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as cdk from 'aws-cdk-lib';
 import * as cpactions from 'aws-cdk-lib/aws-codepipeline-actions';
 
-/* eslint-disable quote-props */
+/* eslint-disable @stylistic/quote-props */
 
 const app = new cdk.App({
   postCliContext: {
     '@aws-cdk/aws-codepipeline:defaultPipelineTypeToV2': false,
     '@aws-cdk/aws-ecs:removeDefaultDeploymentAlarm': true,
+    '@aws-cdk/pipelines:reduceStageRoleTrustScope': false,
   },
 });
 

@@ -1,6 +1,6 @@
 import { toCloudFormation } from './util';
 import { ArtifactMetadataEntryType } from '../../cloud-assembly-schema';
-import { CloudAssembly } from '../../cx-api';
+import type { CloudAssembly } from '../../cx-api';
 import { App, Aws, CfnMapping, CfnResource, CfnOutput, Fn, Stack } from '../lib';
 
 describe('mappings', () => {
@@ -147,7 +147,7 @@ describe('mappings', () => {
           'us-east-1': 12,
         },
       },
-    })).toThrowError(/Attribute name 'us-east-1' must contain only alphanumeric characters./);
+    })).toThrow(/Attribute name 'us-east-1' must contain only alphanumeric characters./);
   });
 
   test('using the value of a mapping in a different stack copies the mapping to the consuming stack', () => {
@@ -261,9 +261,9 @@ describe('lazy mapping', () => {
 
   it('throws if keys can be resolved but are not found in mapping', () => {
     expect(() => mapping.findInMap('NonExistentKey', 'SecondLevelKey1'))
-      .toThrowError(/Mapping doesn't contain top-level key .*/);
+      .toThrow(/Mapping doesn't contain top-level key .*/);
     expect(() => mapping.findInMap('TopLevelKey1', 'NonExistentKey'))
-      .toThrowError(/Mapping doesn't contain second-level key .*/);
+      .toThrow(/Mapping doesn't contain second-level key .*/);
   });
 });
 
@@ -473,7 +473,7 @@ describe('defaultValue included', () => {
 
 function getInfoAnnotations(casm: CloudAssembly) {
   const result = new Array<{ path: string; message: string }>();
-  for (const stack of Object.values(casm.manifest.artifacts ?? {})) {
+  for (const stack of casm.stacks) {
     for (const [path, md] of Object.entries(stack.metadata ?? {})) {
       for (const x of md) {
         if (x.type === ArtifactMetadataEntryType.INFO) {

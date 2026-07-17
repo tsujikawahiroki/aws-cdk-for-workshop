@@ -1,5 +1,6 @@
 import { Template, Match } from '../../assertions';
 import * as iam from '../../aws-iam';
+import * as firehose from '../../aws-kinesisfirehose';
 import * as logs from '../../aws-logs';
 import * as s3 from '../../aws-s3';
 import { RemovalPolicy, Stack } from '../../core';
@@ -27,8 +28,23 @@ describe('vpc flow logs', () => {
 
     Template.fromStack(stack).resourceCountIs('AWS::Logs::LogGroup', 1);
     Template.fromStack(stack).resourceCountIs('AWS::IAM::Role', 1);
+    Template.fromStack(stack).resourceCountIs('AWS::IAM::Policy', 1);
+    Template.fromStack(stack).hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: {
+        Statement: [{
+          Action: [
+            'logs:CreateLogStream',
+            'logs:PutLogEvents',
+            'logs:DescribeLogStreams',
+          ],
+          Effect: 'Allow',
+          Resource: {
+            'Fn::GetAtt': ['FlowLogsLogGroup9853A85F', 'Arn'],
+          },
+        }],
+      },
+    });
     Template.fromStack(stack).resourceCountIs('AWS::S3::Bucket', 0);
-
   });
   test('with cloudwatch logs as the destination, allows use of existing resources', () => {
     const stack = getTestStack();
@@ -53,7 +69,6 @@ describe('vpc flow logs', () => {
       RoleName: 'TestName',
     });
     Template.fromStack(stack).resourceCountIs('AWS::S3::Bucket', 0);
-
   });
   test('with s3 as the destination, allows use of existing resources', () => {
     const stack = getTestStack();
@@ -75,9 +90,9 @@ describe('vpc flow logs', () => {
     Template.fromStack(stack).hasResourceProperties('AWS::S3::Bucket', {
       BucketName: 'testbucket',
     });
-
   });
-  test('with kinesis data firehose as the destination, allows use of existing resources', () => {
+
+  test('with Amazon Data Firehose deliveryStreamArn as the destination, allows use of existing resources', () => {
     const stack = getTestStack();
 
     const deliveryStreamArn = Stack.of(stack).formatArn({
@@ -96,12 +111,80 @@ describe('vpc flow logs', () => {
 
     Template.fromStack(stack).hasResourceProperties('AWS::EC2::FlowLog', {
       DestinationOptions: Match.absent(),
-    });
-    Template.fromStack(stack).hasResourceProperties('AWS::EC2::FlowLog', {
       LogDestinationType: 'kinesis-data-firehose',
+      LogDestination: { 'Fn::Join': ['', ['arn:', { Ref: 'AWS::Partition' }, ':firehose:::deliverystream/testdeliverystream']] },
     });
     Template.fromStack(stack).resourceCountIs('AWS::Logs::LogGroup', 0);
     Template.fromStack(stack).resourceCountIs('AWS::S3::Bucket', 0);
+  });
+
+  test('with Amazon Data Firehose delivery stream as the destination, allows use of existing resources', () => {
+    const stack = getTestStack();
+
+    const bucket = new s3.Bucket(stack, 'Bucket');
+    const deliveryStream = new firehose.DeliveryStream(stack, 'DeliveryStream', {
+      destination: new firehose.S3Bucket(bucket, {
+        loggingConfig: new firehose.DisableLogging(),
+      }),
+    });
+    new FlowLog(stack, 'FlowLogs', {
+      resourceType: FlowLogResourceType.fromNetworkInterfaceId('eni-123456'),
+      destination: FlowLogDestination.toFirehose(deliveryStream),
+    });
+
+    Template.fromStack(stack).hasResourceProperties('AWS::EC2::FlowLog', {
+      DestinationOptions: Match.absent(),
+      LogDestinationType: 'kinesis-data-firehose',
+      LogDestination: { 'Fn::GetAtt': ['DeliveryStream58CF96DB', 'Arn'] },
+    });
+    Template.fromStack(stack).resourceCountIs('AWS::Logs::LogGroup', 0);
+    Template.fromStack(stack).resourceCountIs('AWS::S3::Bucket', 1);
+  });
+
+  test('with Amazon Data Firehose delivery stream as the destination with cross-account log delivery', () => {
+    const stack = getTestStack();
+
+    const bucket = new s3.Bucket(stack, 'Bucket');
+    const deliveryStream = new firehose.DeliveryStream(stack, 'DeliveryStream', {
+      destination: new firehose.S3Bucket(bucket, {
+        loggingConfig: new firehose.DisableLogging(),
+      }),
+    });
+    const role = new iam.Role(stack, 'Role', {
+      assumedBy: new iam.ServicePrincipal('delivery.logs.amazonaws.com'),
+    });
+    new FlowLog(stack, 'FlowLogs', {
+      resourceType: FlowLogResourceType.fromNetworkInterfaceId('eni-123456'),
+      destination: FlowLogDestination.toFirehose(deliveryStream, role),
+    });
+
+    Template.fromStack(stack).hasResourceProperties('AWS::EC2::FlowLog', {
+      DestinationOptions: Match.absent(),
+      LogDestinationType: 'kinesis-data-firehose',
+      LogDestination: { 'Fn::GetAtt': ['DeliveryStream58CF96DB', 'Arn'] },
+      DeliverLogsPermissionArn: { 'Fn::GetAtt': ['Role1ABCC5F0', 'Arn'] },
+    });
+  });
+
+  test('toFirehose() throws when cross-account delivery and iamRole is missing', () => {
+    const stack = getTestStack();
+    const bucket = new s3.Bucket(stack, 'Bucket');
+
+    const crossAccountStack = new Stack(undefined, 'CrossAccountStack', {
+      env: { account: '234567890123', region: 'us-east-1' },
+    });
+    const deliveryStream = new firehose.DeliveryStream(crossAccountStack, 'DeliveryStream', {
+      destination: new firehose.S3Bucket(bucket, {
+        loggingConfig: new firehose.DisableLogging(),
+      }),
+    });
+
+    expect(() => {
+      new FlowLog(stack, 'FlowLogs', {
+        resourceType: FlowLogResourceType.fromNetworkInterfaceId('eni-123456'),
+        destination: FlowLogDestination.toFirehose(deliveryStream),
+      });
+    }).toThrow('The iamRole is required for cross-account log delivery.');
   });
 
   test('with flowLogName, adds Name tag with the name', () => {
@@ -120,7 +203,6 @@ describe('vpc flow logs', () => {
         },
       ],
     });
-
   });
 
   test('allows setting destination options', () => {
@@ -440,7 +522,6 @@ describe('vpc flow logs', () => {
     Template.fromStack(stack).hasResourceProperties('AWS::S3::Bucket', {
       BucketName: 'testbucket',
     });
-
   });
   test('with s3 as the destination and all the defaults set, it successfully creates all the resources', () => {
     const stack = getTestStack();
@@ -461,7 +542,6 @@ describe('vpc flow logs', () => {
     Template.fromStack(stack).resourceCountIs('AWS::Logs::LogGroup', 0);
     Template.fromStack(stack).resourceCountIs('AWS::IAM::Role', 0);
     Template.fromStack(stack).resourceCountIs('AWS::S3::Bucket', 1);
-
   });
   test('create with vpc', () => {
     const stack = getTestStack();
@@ -486,7 +566,6 @@ describe('vpc flow logs', () => {
         Ref: 'VPCflowLogsLogGroupE900F980',
       },
     });
-
   });
   test('add to vpc', () => {
     const stack = getTestStack();
@@ -712,6 +791,16 @@ test('log format for built-in types is correct', () => {
       LogFormat.PKT_DST_AWS_SERVICE,
       LogFormat.FLOW_DIRECTION,
       LogFormat.TRAFFIC_PATH,
+      LogFormat.ECS_CLUSTER_ARN,
+      LogFormat.ECS_CLUSTER_NAME,
+      LogFormat.ECS_CONTAINER_INSTANCE_ARN,
+      LogFormat.ECS_CONTAINER_INSTANCE_ID,
+      LogFormat.ECS_CONTAINER_ID,
+      LogFormat.ECS_SECOND_CONTAINER_ID,
+      LogFormat.ECS_SERVICE_NAME,
+      LogFormat.ECS_TASK_DEFINITION_ARN,
+      LogFormat.ECS_TASK_ARN,
+      LogFormat.ECS_TASK_ID,
     ],
   });
 
@@ -722,7 +811,10 @@ test('log format for built-in types is correct', () => {
                 + '${dstport} ${protocol} ${packets} ${bytes} ${start} ${end} ${action} ${log-status} '
                 + '${vpc-id} ${subnet-id} ${instance-id} ${tcp-flags} ${type} ${pkt-srcaddr} '
                 + '${pkt-dstaddr} ${region} ${az-id} ${sublocation-type} ${sublocation-id} '
-                + '${pkt-src-aws-service} ${pkt-dst-aws-service} ${flow-direction} ${traffic-path}'),
+                + '${pkt-src-aws-service} ${pkt-dst-aws-service} ${flow-direction} ${traffic-path} '
+                + '${ecs-cluster-arn} ${ecs-cluster-name} ${ecs-container-instance-arn} ${ecs-container-instance-id} '
+                + '${ecs-container-id} ${ecs-second-container-id} ${ecs-service-name} ${ecs-task-definition-arn} '
+                + '${ecs-task-arn} ${ecs-task-id}'),
   });
 });
 
@@ -745,7 +837,6 @@ test('with custom log format set empty, it not creates with cloudwatch log desti
       Ref: 'FlowLogsLogGroup9853A85F',
     },
   });
-
 });
 
 function getTestStack(): Stack {
@@ -803,4 +894,3 @@ test('with custom log format set custom, it not creates with cloudwatch log dest
     },
   });
 });
-

@@ -1,4 +1,4 @@
-import { Duration } from '../../core';
+import type { Duration } from '../../core';
 
 /**
  * Interface for metrics
@@ -252,6 +252,13 @@ export interface MetricConfig {
   readonly mathExpression?: MetricExpressionConfig;
 
   /**
+   * In case the metric is a search expression, the details of the search expression
+   *
+   * @default - None
+   */
+  readonly searchExpression?: MetricExpressionConfig;
+
+  /**
    * Additional properties which will be rendered if the metric is used in a dashboard
    *
    * Examples are 'label' and 'color', but any key in here will be
@@ -323,6 +330,20 @@ export interface MetricStatConfig {
    * @default Deployment account.
    */
   readonly account?: string;
+
+  /**
+   * Region set directly on the metric, not inherited from the attached stack.
+   *
+   * @default No override.
+   */
+  readonly regionOverride?: string;
+
+  /**
+   * Account set directly on the metric, not inherited from the attached stack.
+   *
+   * @default No override.
+   */
+  readonly accountOverride?: string;
 }
 
 /**

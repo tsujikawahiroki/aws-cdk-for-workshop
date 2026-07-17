@@ -5,7 +5,12 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as path from 'path';
 import { STANDARD_NODEJS_RUNTIME } from '../../config';
 
-const app = new cdk.App();
+const app = new cdk.App({
+  postCliContext: {
+    '@aws-cdk/aws-lambda:useCdkManagedLogGroup': false,
+    '@aws-cdk/aws-lambda:createNewPoliciesWithAddToRolePolicy': false,
+  },
+});
 
 const stack = new cdk.Stack(app, 'aws-cdk-lambda-1');
 
@@ -42,6 +47,14 @@ new lambda.Function(stack, 'MySnapStartLambda', {
   code: lambda.Code.fromAsset(path.join(__dirname, 'handler-snapstart.zip')),
   handler: 'example.Handler::handleRequest',
   runtime: lambda.Runtime.JAVA_11,
+  snapStart: lambda.SnapStartConf.ON_PUBLISHED_VERSIONS,
+});
+
+new lambda.Function(stack, 'MySnapStartLambdaArm', {
+  code: lambda.Code.fromAsset(path.join(__dirname, 'handler-snapstart.zip')),
+  handler: 'example.Handler::handleRequest',
+  runtime: lambda.Runtime.JAVA_21,
+  architecture: lambda.Architecture.ARM_64,
   snapStart: lambda.SnapStartConf.ON_PUBLISHED_VERSIONS,
 });
 

@@ -1,28 +1,30 @@
 {
-  "version": "32.0.0",
+  "version": "53.0.0",
   "files": {
-    "ba598c1f1d84f7077ea9c16a6b921e4f8acf18e996100e72a8f17da980e64fdd": {
+    "55549d0bfa9628b306c349544b7d95017221e259e17875f3d38f2a3d2da5043f": {
+      "displayName": "TestStackLoadBalancer/Custom::VpcRestrictDefaultSGCustomResourceProvider Code",
       "source": {
-        "path": "asset.ba598c1f1d84f7077ea9c16a6b921e4f8acf18e996100e72a8f17da980e64fdd",
+        "path": "asset.55549d0bfa9628b306c349544b7d95017221e259e17875f3d38f2a3d2da5043f",
         "packaging": "zip"
       },
       "destinations": {
-        "current_account-current_region": {
+        "current_account-current_region-65a3ca72": {
           "bucketName": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}",
-          "objectKey": "ba598c1f1d84f7077ea9c16a6b921e4f8acf18e996100e72a8f17da980e64fdd.zip",
+          "objectKey": "55549d0bfa9628b306c349544b7d95017221e259e17875f3d38f2a3d2da5043f.zip",
           "assumeRoleArn": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cdk-hnb659fds-file-publishing-role-${AWS::AccountId}-${AWS::Region}"
         }
       }
     },
-    "30dc360b730be809046aeb72e299837d48365af22f4495e491f9d69905116cda": {
+    "41abddef8a59dd701f1f3f4adde92feb8ecd9999da861544e083c8ff4434df19": {
+      "displayName": "TestStackLoadBalancer Template",
       "source": {
         "path": "TestStackLoadBalancer.template.json",
         "packaging": "file"
       },
       "destinations": {
-        "current_account-current_region": {
+        "current_account-current_region-d86591f3": {
           "bucketName": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}",
-          "objectKey": "30dc360b730be809046aeb72e299837d48365af22f4495e491f9d69905116cda.json",
+          "objectKey": "41abddef8a59dd701f1f3f4adde92feb8ecd9999da861544e083c8ff4434df19.json",
           "assumeRoleArn": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cdk-hnb659fds-file-publishing-role-${AWS::AccountId}-${AWS::Region}"
         }
       }

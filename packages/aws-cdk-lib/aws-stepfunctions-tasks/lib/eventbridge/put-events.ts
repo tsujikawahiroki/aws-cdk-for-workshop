@@ -1,8 +1,9 @@
-import { Construct } from 'constructs';
-import * as events from '../../../aws-events';
+import type { Construct } from 'constructs';
+import type * as events from '../../../aws-events';
 import * as iam from '../../../aws-iam';
 import * as sfn from '../../../aws-stepfunctions';
 import * as cdk from '../../../core';
+import { lit } from '../../../core/lib/private/literal-string';
 import { integrationResourceArn, validatePatternSupported } from '../private/task-utils';
 
 /**
@@ -36,7 +37,7 @@ export interface EventBridgePutEventsEntry {
    *
    * @default - event is sent to account's default event bus
    */
-  readonly eventBus?: events.IEventBus;
+  readonly eventBus?: events.IEventBusRef;
 
   /**
    * The service or application that caused this event to be generated
@@ -48,10 +49,7 @@ export interface EventBridgePutEventsEntry {
   readonly source: string;
 }
 
-/**
- * Properties for sending events with PutEvents
- */
-export interface EventBridgePutEventsProps extends sfn.TaskStateBaseProps {
+interface EventBridgePutEventsOptions {
   /**
    * The entries that will be sent. Minimum number of entries is 1 and maximum is 10,
    * unless [PutEvents API limit](https://docs.aws.amazon.com/eventbridge/latest/APIReference/API_PutEvents.html#API_PutEvents_RequestSyntax) has changed.
@@ -60,9 +58,41 @@ export interface EventBridgePutEventsProps extends sfn.TaskStateBaseProps {
 }
 
 /**
+ * Properties for sending events with PutEvents using JSONPath
+ */
+export interface EventBridgePutEventsJsonPathProps extends sfn.TaskStateJsonPathBaseProps, EventBridgePutEventsOptions {}
+
+/**
+ * Properties for sending events with PutEvents using JSONata
+ */
+export interface EventBridgePutEventsJsonataProps extends sfn.TaskStateJsonataBaseProps, EventBridgePutEventsOptions {}
+
+/**
+ * Properties for sending events with PutEvents
+ */
+export interface EventBridgePutEventsProps extends sfn.TaskStateBaseProps, EventBridgePutEventsOptions {}
+
+/**
  * A StepFunctions Task to send events to an EventBridge event bus
  */
 export class EventBridgePutEvents extends sfn.TaskStateBase {
+  /**
+   * A StepFunctions Task using JSONPath to send events to an EventBridge event bus
+   */
+  public static jsonPath(scope: Construct, id: string, props: EventBridgePutEventsJsonPathProps) {
+    return new EventBridgePutEvents(scope, id, props);
+  }
+
+  /**
+   * A StepFunctions Task using JSONata to send events to an EventBridge event bus
+   */
+  public static jsonata(scope: Construct, id: string, props: EventBridgePutEventsJsonataProps) {
+    return new EventBridgePutEvents(scope, id, {
+      ...props,
+      queryLanguage: sfn.QueryLanguage.JSONATA,
+    });
+  }
+
   private static readonly SUPPORTED_INTEGRATION_PATTERNS: sfn.IntegrationPattern[] = [
     sfn.IntegrationPattern.REQUEST_RESPONSE,
     sfn.IntegrationPattern.WAIT_FOR_TASK_TOKEN,
@@ -82,7 +112,7 @@ export class EventBridgePutEvents extends sfn.TaskStateBase {
 
     if (this.integrationPattern === sfn.IntegrationPattern.WAIT_FOR_TASK_TOKEN) {
       if (!sfn.FieldUtils.containsTaskToken(props.entries.map(entry => entry.detail))) {
-        throw new Error('Task Token is required in `entries`. Use JsonPath.taskToken to set the token.');
+        throw new cdk.ValidationError(lit`TaskTokenRequired`, 'Task Token is required in `entries`. Use JsonPath.taskToken to set the token.', this);
       }
     }
 
@@ -104,7 +134,7 @@ export class EventBridgePutEvents extends sfn.TaskStateBase {
       .map(entry => {
         if (entry.eventBus) {
           // If an eventBus is provided, use the corresponding ARN
-          return entry.eventBus.eventBusArn;
+          return entry.eventBus.eventBusRef.eventBusArn;
         } else {
           // If neither an eventBus nor eventBusName is provided,
           // format the ARN for the default event bus in the account.
@@ -122,33 +152,34 @@ export class EventBridgePutEvents extends sfn.TaskStateBase {
    * Provides the EventBridge put events service integration task configuration
    * @internal
    */
-  protected _renderTask(): any {
+  protected _renderTask(topLevelQueryLanguage?: sfn.QueryLanguage): any {
+    const queryLanguage = sfn._getActualQueryLanguage(topLevelQueryLanguage, this.props.queryLanguage);
     return {
       Resource: integrationResourceArn('events', 'putEvents', this.integrationPattern),
-      Parameters: sfn.FieldUtils.renderObject({
+      ...this._renderParametersOrArguments({
         Entries: this.renderEntries(),
-      }),
+      }, queryLanguage),
     };
   }
 
   private renderEntries(): Object[] {
+    // we should have validated all entries in validateEntries()
     return this.props.entries.map(entry => {
-      if (entry.source?.startsWith('aws')) {
-        throw new Error('Event source cannot start with "aws."');
-      } else {
-        return {
-          Detail: entry.detail?.value,
-          DetailType: entry.detailType,
-          EventBusName: entry.eventBus?.eventBusArn,
-          Source: entry.source,
-        };
-      }
+      return {
+        Detail: entry.detail?.value,
+        DetailType: entry.detailType,
+        EventBusName: entry.eventBus?.eventBusRef.eventBusArn,
+        Source: entry.source,
+      };
     });
   }
 
   private validateEntries(): void {
     if (this.props.entries.length <= 0) {
-      throw new Error('Value for property `entries` must be a non-empty array.');
+      throw new cdk.ValidationError(lit`EntriesMustBeNonEmptyArray`, 'Value for property `entries` must be a non-empty array.', this);
+    }
+    if (this.props.entries.some(e => e.source.startsWith('aws.'))) {
+      throw new cdk.ValidationError(lit`EventSourceCannotStartWithAws`, 'Event source cannot start with "aws."', this);
     }
   }
 }

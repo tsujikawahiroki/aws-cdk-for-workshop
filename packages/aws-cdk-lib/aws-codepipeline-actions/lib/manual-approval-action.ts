@@ -1,9 +1,12 @@
-import { Construct } from 'constructs';
+import type { Construct } from 'constructs';
 import { Action } from './action';
 import * as codepipeline from '../../aws-codepipeline';
 import * as iam from '../../aws-iam';
 import * as sns from '../../aws-sns';
 import * as subs from '../../aws-sns-subscriptions';
+import type { Duration } from '../../core';
+import { UnscopedValidationError } from '../../core';
+import { lit } from '../../core/lib/private/literal-string';
 
 /**
  * Construction properties of the `ManualApprovalAction`.
@@ -32,6 +35,16 @@ export interface ManualApprovalActionProps extends codepipeline.CommonAwsActionP
    * @default - the approval request will not have an external link
    */
   readonly externalEntityLink?: string;
+
+  /**
+   * A timeout duration.
+   *
+   * It is configurable up to 86400 minutes (60 days) with a minimum value of 5 minutes.
+   *
+   * @default - 10080 minutes (7 days)
+   * @see https://docs.aws.amazon.com/codepipeline/latest/userguide/limits.html
+   */
+  readonly timeout?: Duration;
 }
 
 /**
@@ -55,6 +68,10 @@ export class ManualApprovalAction extends Action {
       artifactBounds: { minInputs: 0, maxInputs: 0, minOutputs: 0, maxOutputs: 0 },
     });
 
+    if (props.timeout && (props.timeout.toMinutes() < 5 || props.timeout.toMinutes() > 86400)) {
+      throw new UnscopedValidationError(lit`InvalidTimeout`, `timeout must be between 5 minutes and 86400 minutes (60 days), got ${props.timeout.toMinutes()} minutes`);
+    }
+
     this.props = props;
   }
 
@@ -68,11 +85,13 @@ export class ManualApprovalAction extends Action {
    * For more info see:
    * https://docs.aws.amazon.com/codepipeline/latest/userguide/approvals-iam-permissions.html
    *
+   * [disable-awslint:no-grants]
+   *
    * @param grantable the grantable to attach the permissions to
    */
   public grantManualApproval(grantable: iam.IGrantable): void {
     if (!this.stage) {
-      throw new Error('Cannot grant permissions before binding action to a stage');
+      throw new UnscopedValidationError(lit`ActionNotBound`, 'Cannot grant permissions before binding action to a stage');
     }
     grantable.grantPrincipal.addToPrincipalPolicy(new iam.PolicyStatement({
       actions: ['codepipeline:ListPipelines'],
@@ -112,7 +131,6 @@ export class ManualApprovalAction extends Action {
       }),
     };
   }
-
 }
 
 function undefinedIfAllValuesAreEmpty(object: object): object | undefined {

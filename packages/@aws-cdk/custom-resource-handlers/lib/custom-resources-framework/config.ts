@@ -1,14 +1,15 @@
-/* eslint-disable import/no-extraneous-dependencies */
 import * as path from 'path';
+/* eslint-disable import/no-extraneous-dependencies */
+import { MemberVisibility } from '@cdklabs/typewriter';
 
 /**
  * Handler framework runtimes used for code generation.
  */
 export enum Runtime {
   /**
-   * The NodeJs 18.x runtime
+   * The NodeJs 20.x runtime
    */
-  NODEJS_18_X = 'nodejs18.x',
+  NODEJS_20_X = 'nodejs20.x',
 
   /**
    * The Python 3.9 runtime
@@ -19,6 +20,21 @@ export enum Runtime {
    * The Python 3.10 runtime
    */
   PYTHON_3_10 = 'python3.10',
+
+  /**
+   * The Python 3.11 runtime
+   */
+  PYTHON_3_11 = 'python3.11',
+
+  /**
+   * The Python 3.13 runtime
+   */
+  PYTHON_3_13 = 'python3.13',
+
+  /**
+   * The latest Python runtime available in all regions
+   */
+  PYTHON_LATEST = PYTHON_3_13,
 }
 
 /**
@@ -65,7 +81,7 @@ export interface ComponentProps {
   /**
    * The runtime that is compatible with the framework component's source code.
    *
-   * @default Runtime.NODEJS_18_X
+   * @default The latest NodeJS runtime in all regions (not necessarily the latest NodeJS runtime).
    */
   readonly runtime?: Runtime;
 
@@ -82,16 +98,29 @@ export interface ComponentProps {
    * @default true
    */
   readonly minifyAndBundle?: boolean;
+
+  /**
+   * Visibility for the constructor.
+   *
+   * @default MemberVisibility.Public
+   */
+  readonly constructorVisibility?: MemberVisibility;
 }
 
 export type HandlerFrameworkConfig = { [module: string]: { [identifier: string]: ComponentProps[] } };
 
 export const config: HandlerFrameworkConfig = {
   'aws-amplify-alpha': {
-    'asset-deployment-handler': [
+    'asset-deployment-provider': [
       {
-        type: ComponentType.NO_OP,
+        type: ComponentType.FUNCTION,
         sourceCode: path.resolve(__dirname, '..', 'aws-amplify-alpha', 'asset-deployment-handler', 'index.ts'),
+        handler: 'index.onEvent',
+      },
+      {
+        type: ComponentType.FUNCTION,
+        sourceCode: path.resolve(__dirname, '..', 'aws-amplify-alpha', 'asset-deployment-handler', 'index.ts'),
+        handler: 'index.isComplete',
       },
     ],
   },
@@ -147,7 +176,7 @@ export const config: HandlerFrameworkConfig = {
       {
         type: ComponentType.FUNCTION,
         sourceCode: path.resolve(__dirname, '..', 'aws-ecs', 'lambda-source', 'index.py'),
-        runtime: Runtime.PYTHON_3_9,
+        runtime: Runtime.PYTHON_LATEST,
         handler: 'index.lambda_handler',
         minifyAndBundle: false,
       },
@@ -170,31 +199,65 @@ export const config: HandlerFrameworkConfig = {
       {
         type: ComponentType.FUNCTION,
         sourceCode: path.resolve(__dirname, '..', 'aws-eks', 'kubectl-handler', 'index.py'),
-        runtime: Runtime.PYTHON_3_10,
+        runtime: Runtime.PYTHON_LATEST,
         minifyAndBundle: false,
       },
       {
         type: ComponentType.NO_OP,
         sourceCode: path.resolve(__dirname, '..', 'aws-eks', 'kubectl-handler', 'apply', '__init__.py'),
-        runtime: Runtime.PYTHON_3_10,
+        runtime: Runtime.PYTHON_LATEST,
         minifyAndBundle: false,
       },
       {
         type: ComponentType.NO_OP,
         sourceCode: path.resolve(__dirname, '..', 'aws-eks', 'kubectl-handler', 'get', '__init__.py'),
-        runtime: Runtime.PYTHON_3_10,
+        runtime: Runtime.PYTHON_LATEST,
         minifyAndBundle: false,
       },
       {
         type: ComponentType.NO_OP,
         sourceCode: path.resolve(__dirname, '..', 'aws-eks', 'kubectl-handler', 'helm', '__init__.py'),
-        runtime: Runtime.PYTHON_3_10,
+        runtime: Runtime.PYTHON_LATEST,
         minifyAndBundle: false,
       },
       {
         type: ComponentType.NO_OP,
         sourceCode: path.resolve(__dirname, '..', 'aws-eks', 'kubectl-handler', 'patch', '__init__.py'),
-        runtime: Runtime.PYTHON_3_10,
+        runtime: Runtime.PYTHON_LATEST,
+        minifyAndBundle: false,
+      },
+    ],
+  },
+  'aws-eks-v2': {
+    'kubectl-provider': [
+      {
+        type: ComponentType.FUNCTION,
+        sourceCode: path.resolve(__dirname, '..', 'aws-eks-v2', 'kubectl-handler', 'index.py'),
+        runtime: Runtime.PYTHON_LATEST,
+        minifyAndBundle: false,
+      },
+      {
+        type: ComponentType.NO_OP,
+        sourceCode: path.resolve(__dirname, '..', 'aws-eks-v2', 'kubectl-handler', 'apply', '__init__.py'),
+        runtime: Runtime.PYTHON_LATEST,
+        minifyAndBundle: false,
+      },
+      {
+        type: ComponentType.NO_OP,
+        sourceCode: path.resolve(__dirname, '..', 'aws-eks-v2', 'kubectl-handler', 'get', '__init__.py'),
+        runtime: Runtime.PYTHON_LATEST,
+        minifyAndBundle: false,
+      },
+      {
+        type: ComponentType.NO_OP,
+        sourceCode: path.resolve(__dirname, '..', 'aws-eks-v2', 'kubectl-handler', 'helm', '__init__.py'),
+        runtime: Runtime.PYTHON_LATEST,
+        minifyAndBundle: false,
+      },
+      {
+        type: ComponentType.NO_OP,
+        sourceCode: path.resolve(__dirname, '..', 'aws-eks-v2', 'kubectl-handler', 'patch', '__init__.py'),
+        runtime: Runtime.PYTHON_LATEST,
         minifyAndBundle: false,
       },
     ],
@@ -256,7 +319,7 @@ export const config: HandlerFrameworkConfig = {
       {
         type: ComponentType.NO_OP,
         sourceCode: path.resolve(__dirname, '..', 'aws-s3', 'notifications-resource-handler', 'index.py'),
-        runtime: Runtime.PYTHON_3_9,
+        runtime: Runtime.PYTHON_LATEST,
         minifyAndBundle: false,
       },
     ],
@@ -266,7 +329,7 @@ export const config: HandlerFrameworkConfig = {
       {
         type: ComponentType.SINGLETON_FUNCTION,
         sourceCode: path.resolve(__dirname, '..', 'aws-s3-deployment', 'bucket-deployment-handler', 'index.py'),
-        runtime: Runtime.PYTHON_3_9,
+        runtime: Runtime.PYTHON_LATEST,
         minifyAndBundle: false,
       },
     ],
@@ -280,6 +343,12 @@ export const config: HandlerFrameworkConfig = {
     ],
   },
   'aws-stepfunctions-tasks': {
+    'cross-region-aws-sdk-provider': [
+      {
+        type: ComponentType.SINGLETON_FUNCTION,
+        sourceCode: path.resolve(__dirname, '..', 'aws-stepfunctions-tasks', 'cross-region-aws-sdk-handler', 'index.ts'),
+      },
+    ],
     'eval-nodejs-provider': [
       {
         type: ComponentType.SINGLETON_FUNCTION,
@@ -290,7 +359,7 @@ export const config: HandlerFrameworkConfig = {
       {
         type: ComponentType.SINGLETON_FUNCTION,
         sourceCode: path.resolve(__dirname, '..', 'aws-stepfunctions-tasks', 'role-policy-handler', 'index.py'),
-        runtime: Runtime.PYTHON_3_9,
+        runtime: Runtime.PYTHON_LATEST,
         minifyAndBundle: false,
       },
     ],
@@ -314,6 +383,7 @@ export const config: HandlerFrameworkConfig = {
       {
         type: ComponentType.CUSTOM_RESOURCE_PROVIDER,
         sourceCode: path.resolve(__dirname, '..', 'core', 'cross-region-ssm-writer-handler', 'index.ts'),
+        constructorVisibility: MemberVisibility.Public,
       },
     ],
     'cross-region-ssm-reader-provider': [
@@ -355,3 +425,10 @@ export const config: HandlerFrameworkConfig = {
     ],
   },
 };
+
+/* This is duplicated in aws-cdk-lib/custom-resources/lib/custom-resource-config/custom-resource-config.ts */
+export const CUSTOM_RESOURCE_PROVIDER = 'aws:cdk:is-custom-resource-handler-customResourceProvider';
+export const CUSTOM_RESOURCE_SINGLETON = 'aws:cdk:is-custom-resource-handler-singleton';
+export const CUSTOM_RESOURCE_SINGLETON_LOG_GROUP = 'aws:cdk:is-custom-resource-handler-logGroup';
+export const CUSTOM_RESOURCE_SINGLETON_LOG_RETENTION = 'aws:cdk:is-custom-resource-handler-logRetention';
+export const CUSTOM_RESOURCE_RUNTIME_FAMILY = 'aws:cdk:is-custom-resource-handler-runtime-family';

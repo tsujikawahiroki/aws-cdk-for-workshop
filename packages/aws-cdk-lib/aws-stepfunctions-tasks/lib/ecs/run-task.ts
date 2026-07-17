@@ -1,16 +1,17 @@
-import { Construct } from 'constructs';
-import { ContainerOverride } from '..';
+import type { Construct } from 'constructs';
+import type { ContainerOverride } from '..';
 import * as ec2 from '../../../aws-ec2';
 import * as ecs from '../../../aws-ecs';
 import * as iam from '../../../aws-iam';
 import * as sfn from '../../../aws-stepfunctions';
 import * as cdk from '../../../core';
+import { ValidationError } from '../../../core';
+import { lit } from '../../../core/lib/private/literal-string';
+import { propertyInjectable } from '../../../core/lib/prop-injectable';
+import { STEPFUNCTIONS_TASKS_FIX_RUN_ECS_TASK_POLICY } from '../../../cx-api';
 import { integrationResourceArn, validatePatternSupported } from '../private/task-utils';
 
-/**
- * Properties for ECS Tasks
- */
-export interface EcsRunTaskProps extends sfn.TaskStateBaseProps {
+interface EcsRunTaskOptions {
   /**
    * The ECS cluster to run the task on
    */
@@ -90,6 +91,20 @@ export interface EcsRunTaskProps extends sfn.TaskStateBaseProps {
    * @default false
    */
   readonly enableExecuteCommand?: boolean;
+
+  /**
+   * Cpu setting override
+   * @see https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_TaskOverride.html
+   * @default - No override
+   */
+  readonly cpu?: string;
+
+  /**
+   * Memory setting override
+   * @see https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_TaskOverride.html
+   * @default - No override
+   */
+  readonly memoryMiB?: string;
 }
 
 /**
@@ -144,6 +159,23 @@ export interface EcsFargateLaunchTargetOptions {
    * @see https://docs.aws.amazon.com/AmazonECS/latest/developerguide/platform_versions.html
    */
   readonly platformVersion: ecs.FargatePlatformVersion;
+
+  /**
+   * The capacity provider options to use for the task.
+   *
+   * This property allows you to set the capacity provider strategy for the task.
+   *
+   * If you want to set the capacity provider strategy for the task, specify
+   * `CapacityProviderOptions.custom()`. This is required to use the FARGATE_SPOT
+   * capacity provider.
+   *
+   * If you want to use the cluster's default capacity provider strategy, specify
+   * `CapacityProviderOptions.default()`.
+   *
+   * @default - 'FARGATE' LaunchType running tasks on AWS Fargate On-Demand
+   * infrastructure is used without the capacity provider strategy.
+   */
+  readonly capacityProviderOptions?: CapacityProviderOptions;
 }
 
 /**
@@ -163,6 +195,59 @@ export interface EcsEc2LaunchTargetOptions {
    * @default - None
    */
   readonly placementStrategies?: ecs.PlacementStrategy[];
+
+  /**
+   * The capacity provider options to use for the task.
+   *
+   * This property allows you to set the capacity provider strategy for the task.
+   *
+   * If you want to set the capacity provider strategy for the task, specify
+   * `CapacityProviderOptions.custom()`.
+   *
+   * If you want to use the cluster's default capacity provider strategy, specify
+   * `CapacityProviderOptions.default()`.
+   *
+   * @default - 'EC2' LaunchType running tasks on Amazon EC2 instances registered to
+   * your cluster is used without the capacity provider strategy.
+   */
+  readonly capacityProviderOptions?: CapacityProviderOptions;
+}
+
+/**
+ * Capacity provider options
+ */
+export class CapacityProviderOptions {
+  /**
+   * Use a custom capacity provider strategy.
+   *
+   * You can specify between 1 and 20 capacity providers.
+   *
+   * @param capacityProviderStrategy The capacity provider strategy to use for the task.
+   */
+  public static custom(capacityProviderStrategy: ecs.CapacityProviderStrategy[]): CapacityProviderOptions {
+    if (capacityProviderStrategy.length < 1 || capacityProviderStrategy.length > 20) {
+      throw new cdk.UnscopedValidationError(lit`CapacityProviderStrategyRange`,
+        `Capacity provider strategy must contain between 1 and 20 capacity providers, got ${capacityProviderStrategy.length}`,
+      );
+    }
+    return new CapacityProviderOptions(capacityProviderStrategy);
+  }
+
+  /**
+   * Use the cluster's default capacity provider strategy.
+   */
+  public static default(): CapacityProviderOptions {
+    return new CapacityProviderOptions();
+  }
+
+  private constructor(private readonly capacityProviderStrategy: ecs.CapacityProviderStrategy[] = []) {}
+
+  /**
+   * @internal
+   */
+  _bind(): ecs.CapacityProviderStrategy[] {
+    return this.capacityProviderStrategy;
+  }
 }
 
 /**
@@ -176,14 +261,25 @@ export class EcsFargateLaunchTarget implements IEcsLaunchTarget {
   /**
    * Called when the Fargate launch type configured on RunTask
    */
-  public bind(_task: EcsRunTask, launchTargetOptions: LaunchTargetBindOptions): EcsLaunchTargetConfig {
+  public bind(task: EcsRunTask, launchTargetOptions: LaunchTargetBindOptions): EcsLaunchTargetConfig {
     if (!launchTargetOptions.taskDefinition.isFargateCompatible) {
-      throw new Error('Supplied TaskDefinition is not compatible with Fargate');
+      throw new ValidationError(lit`SuppliedTaskDefinitionCompatibleFargate`, 'Supplied TaskDefinition is not compatible with Fargate', task);
     }
+
+    // If neither `launchType` nor `capacityProviderStrategy` is specified,
+    // the cluster's `defaultCapacityProviderStrategy` is used.
+    const launchType = this.options?.capacityProviderOptions ? undefined : ecs.LaunchType.FARGATE;
+    const capacityProviderStrategyList = this.options?.capacityProviderOptions?._bind();
+    const capacityProviderStrategy = capacityProviderStrategyList?.length ? capacityProviderStrategyList.map((s) => ({
+      CapacityProvider: s.capacityProvider,
+      Weight: s.weight,
+      Base: s.base,
+    })) : undefined;
 
     return {
       parameters: {
-        LaunchType: 'FARGATE',
+        LaunchType: launchType,
+        CapacityProviderStrategy: capacityProviderStrategy,
         PlatformVersion: this.options?.platformVersion,
       },
     };
@@ -200,18 +296,29 @@ export class EcsEc2LaunchTarget implements IEcsLaunchTarget {
   /**
    * Called when the EC2 launch type is configured on RunTask
    */
-  public bind(_task: EcsRunTask, launchTargetOptions: LaunchTargetBindOptions): EcsLaunchTargetConfig {
+  public bind(task: EcsRunTask, launchTargetOptions: LaunchTargetBindOptions): EcsLaunchTargetConfig {
     if (!launchTargetOptions.taskDefinition.isEc2Compatible) {
-      throw new Error('Supplied TaskDefinition is not compatible with EC2');
+      throw new ValidationError(lit`SuppliedTaskDefinitionCompatible`, 'Supplied TaskDefinition is not compatible with EC2', task);
     }
 
     if (!launchTargetOptions.cluster?.hasEc2Capacity) {
-      throw new Error('Cluster for this service needs Ec2 capacity. Call addCapacity() on the cluster.');
+      throw new ValidationError(lit`ClusterServiceNeedsCapacity`, 'Cluster for this service needs Ec2 capacity. Call addCapacity() on the cluster.', task);
     }
+
+    // If neither `launchType` nor `capacityProviderStrategy` is specified,
+    // the cluster's `defaultCapacityProviderStrategy` is used.
+    const launchType = this.options?.capacityProviderOptions ? undefined : ecs.LaunchType.EC2;
+    const capacityProviderStrategyList = this.options?.capacityProviderOptions?._bind();
+    const capacityProviderStrategy = capacityProviderStrategyList?.length ? capacityProviderStrategyList.map((s) => ({
+      CapacityProvider: s.capacityProvider,
+      Weight: s.weight,
+      Base: s.base,
+    })) : undefined;
 
     return {
       parameters: {
-        LaunchType: 'EC2',
+        LaunchType: launchType,
+        CapacityProviderStrategy: capacityProviderStrategy,
         // takes an array of placement constraints each of which contain a single item array of constraints, flattens it
         // and renders the Json to be passed as a parameter in the state machine.
         // input: [ecs.PlacementConstraint.distinctInstances()] - distinctInstances() returns [{ type: 'distinctInstance' }]
@@ -243,9 +350,47 @@ export class EcsEc2LaunchTarget implements IEcsLaunchTarget {
 }
 
 /**
+ * Properties for ECS Tasks using JSONPath
+ */
+export interface EcsRunTaskJsonPathProps extends sfn.TaskStateJsonPathBaseProps, EcsRunTaskOptions {}
+
+/**
+ * Properties for ECS Tasks using JSONata
+ */
+export interface EcsRunTaskJsonataProps extends sfn.TaskStateJsonataBaseProps, EcsRunTaskOptions {}
+
+/**
+ * Properties for ECS Tasks
+ */
+export interface EcsRunTaskProps extends sfn.TaskStateBaseProps, EcsRunTaskOptions {}
+
+/**
  * Run a Task on ECS or Fargate
  */
+@propertyInjectable
 export class EcsRunTask extends sfn.TaskStateBase implements ec2.IConnectable {
+  /**
+   * Uniquely identifies this class.
+   */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-stepfunctions-tasks.EcsRunTask';
+
+  /**
+   * Run a Task that using JSONPath on ECS or Fargate
+   */
+  public static jsonPath(scope: Construct, id: string, props: EcsRunTaskJsonPathProps) {
+    return new EcsRunTask(scope, id, props);
+  }
+
+  /**
+   * Run a Task that using JSONata on ECS or Fargate
+   */
+  public static jsonata(scope: Construct, id: string, props: EcsRunTaskJsonataProps) {
+    return new EcsRunTask(scope, id, {
+      ...props,
+      queryLanguage: sfn.QueryLanguage.JSONATA,
+    });
+  }
+
   private static readonly SUPPORTED_INTEGRATION_PATTERNS: sfn.IntegrationPattern[] = [
     sfn.IntegrationPattern.REQUEST_RESPONSE,
     sfn.IntegrationPattern.RUN_JOB,
@@ -272,11 +417,11 @@ export class EcsRunTask extends sfn.TaskStateBase implements ec2.IConnectable {
 
     if (this.integrationPattern === sfn.IntegrationPattern.WAIT_FOR_TASK_TOKEN
       && !sfn.FieldUtils.containsTaskToken(props.containerOverrides?.map(override => override.environment))) {
-      throw new Error('Task Token is required in at least one `containerOverrides.environment` for callback. Use JsonPath.taskToken to set the token.');
+      throw new ValidationError(lit`IsRequiredTaskTokenRequired`, 'Task Token is required in at least one `containerOverrides.environment` for callback. Use JsonPath.taskToken to set the token.', this);
     }
 
     if (!this.props.taskDefinition.defaultContainer) {
-      throw new Error('A TaskDefinition must have at least one essential container');
+      throw new ValidationError(lit`TaskDefinitionLeastEssentialContainer`, 'A TaskDefinition must have at least one essential container', this);
     }
 
     if (this.props.taskDefinition.networkMode === ecs.NetworkMode.AWS_VPC) {
@@ -292,7 +437,7 @@ export class EcsRunTask extends sfn.TaskStateBase implements ec2.IConnectable {
       if (!cdk.Token.isUnresolved(name)) {
         const cont = this.props.taskDefinition.findContainer(name);
         if (!cont) {
-          throw new Error(`Overrides mention container with name '${name}', but no such container in task definition`);
+          throw new ValidationError(lit`OverridesMentionContainerName`, `Overrides mention container with name '${name}', but no such container in task definition`, this);
         }
       }
     }
@@ -303,18 +448,24 @@ export class EcsRunTask extends sfn.TaskStateBase implements ec2.IConnectable {
   /**
    * @internal
    */
-  protected _renderTask(): any {
+  protected _renderTask(topLevelQueryLanguage?: sfn.QueryLanguage): any {
+    const queryLanguage = sfn._getActualQueryLanguage(topLevelQueryLanguage, this.props.queryLanguage);
     return {
       Resource: integrationResourceArn('ecs', 'runTask', this.integrationPattern),
-      Parameters: sfn.FieldUtils.renderObject({
+      ...this._renderParametersOrArguments({
         Cluster: this.props.cluster.clusterArn,
         TaskDefinition: this.props.revisionNumber === undefined ? this.props.taskDefinition.family : `${this.props.taskDefinition.family}:${this.props.revisionNumber.toString()}`,
         NetworkConfiguration: this.networkConfiguration,
-        Overrides: renderOverrides(this.props.containerOverrides),
+        Overrides: renderOverrides(
+          {
+            cpu: this.props.cpu,
+            memoryMiB: this.props.memoryMiB,
+            containerOverrides: this.props.containerOverrides,
+          }),
         PropagateTags: this.props.propagatedTagSource,
         ...this.props.launchTarget.bind(this, { taskDefinition: this.props.taskDefinition, cluster: this.props.cluster }).parameters,
         EnableExecuteCommand: this.props.enableExecuteCommand,
-      }),
+      }, queryLanguage),
     };
   }
 
@@ -322,23 +473,23 @@ export class EcsRunTask extends sfn.TaskStateBase implements ec2.IConnectable {
     const subnetSelection = this.props.subnets ??
       { subnetType: this.props.assignPublicIp ? ec2.SubnetType.PUBLIC : ec2.SubnetType.PRIVATE_WITH_EGRESS };
 
+    // Make sure we have a security group if we're using AWSVPC networking
+    this.securityGroups = this.props.securityGroups ?? [new ec2.SecurityGroup(this, 'SecurityGroup', { vpc: this.props.cluster.vpc })];
+    this.connections.addSecurityGroup(...this.securityGroups);
+
     this.networkConfiguration = {
       AwsvpcConfiguration: {
         AssignPublicIp: this.props.assignPublicIp ? (this.props.assignPublicIp ? 'ENABLED' : 'DISABLED') : undefined,
         Subnets: this.props.cluster.vpc.selectSubnets(subnetSelection).subnetIds,
-        SecurityGroups: cdk.Lazy.list({ produce: () => this.securityGroups?.map(sg => sg.securityGroupId) }),
+        SecurityGroups: this.securityGroups.map(sg => sg.securityGroupId),
       },
     };
-
-    // Make sure we have a security group if we're using AWSVPC networking
-    this.securityGroups = this.props.securityGroups ?? [new ec2.SecurityGroup(this, 'SecurityGroup', { vpc: this.props.cluster.vpc })];
-    this.connections.addSecurityGroup(...this.securityGroups);
   }
 
   private validateNoNetworkingProps() {
     if (this.props.subnets !== undefined || this.props.securityGroups !== undefined) {
-      throw new Error(
-        `Supplied TaskDefinition must have 'networkMode' of 'AWS_VPC' to use 'vpcSubnets' and 'securityGroup'. Received: ${this.props.taskDefinition.networkMode}`,
+      throw new ValidationError(lit`NetworkModeRequired`,
+        `Supplied TaskDefinition must have 'networkMode' of 'AWS_VPC' to use 'vpcSubnets' and 'securityGroup'. Received: ${this.props.taskDefinition.networkMode}`, this,
       );
     }
   }
@@ -346,15 +497,10 @@ export class EcsRunTask extends sfn.TaskStateBase implements ec2.IConnectable {
   private makePolicyStatements(): iam.PolicyStatement[] {
     const stack = cdk.Stack.of(this);
 
-    // https://docs.aws.amazon.com/step-functions/latest/dg/ecs-iam.html
-    const taskDefinitionFamilyArn = this.getTaskDefinitionFamilyArn();
     const policyStatements = [
       new iam.PolicyStatement({
         actions: ['ecs:RunTask'],
-        resources: [
-          taskDefinitionFamilyArn,
-          `${taskDefinitionFamilyArn}:*`,
-        ],
+        resources: [cdk.FeatureFlags.of(this).isEnabled(STEPFUNCTIONS_TASKS_FIX_RUN_ECS_TASK_POLICY) ? this.getTaskDefinitionArn() : this.getTaskDefinitionFamilyArn() + ':*'],
       }),
       new iam.PolicyStatement({
         actions: ['ecs:StopTask', 'ecs:DescribeTasks'],
@@ -382,6 +528,10 @@ export class EcsRunTask extends sfn.TaskStateBase implements ec2.IConnectable {
     }
 
     return policyStatements;
+  }
+
+  private getTaskDefinitionArn(): string {
+    return this.props.taskDefinition.taskDefinitionArn;
   }
 
   /**
@@ -420,26 +570,40 @@ export class EcsRunTask extends sfn.TaskStateBase implements ec2.IConnectable {
   }
 }
 
-function renderOverrides(containerOverrides?: ContainerOverride[]) {
-  if (!containerOverrides || containerOverrides.length === 0) {
+interface OverrideProps {
+  cpu?: string;
+  memoryMiB?: string;
+  containerOverrides?: ContainerOverride[];
+}
+
+function renderOverrides(props: OverrideProps) {
+  const containerOverrides = props.containerOverrides;
+  const noContainerOverrides = !containerOverrides || containerOverrides.length === 0;
+  if (noContainerOverrides && !props.cpu && !props.memoryMiB) {
     return undefined;
   }
 
   const ret = new Array<any>();
-  for (const override of containerOverrides) {
-    ret.push({
-      Name: override.containerDefinition.containerName,
-      Command: override.command,
-      Cpu: override.cpu,
-      Memory: override.memoryLimit,
-      MemoryReservation: override.memoryReservation,
-      Environment:
-        override.environment?.map((e) => ({
-          Name: e.name,
-          Value: e.value,
-        })),
-    });
+  if (!noContainerOverrides) {
+    for (const override of containerOverrides) {
+      ret.push({
+        Name: override.containerDefinition.containerName,
+        Command: override.command,
+        Cpu: override.cpu,
+        Memory: override.memoryLimit,
+        MemoryReservation: override.memoryReservation,
+        Environment:
+          override.environment?.map((e) => ({
+            Name: e.name,
+            Value: e.value,
+          })),
+      });
+    }
   }
 
-  return { ContainerOverrides: ret };
+  return {
+    Cpu: props.cpu,
+    Memory: props.memoryMiB,
+    ContainerOverrides: noContainerOverrides ? undefined : ret,
+  };
 }

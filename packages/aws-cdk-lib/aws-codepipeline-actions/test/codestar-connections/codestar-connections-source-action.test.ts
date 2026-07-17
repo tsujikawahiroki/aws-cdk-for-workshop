@@ -4,7 +4,7 @@ import * as codepipeline from '../../../aws-codepipeline';
 import { App, Stack } from '../../../core';
 import * as cpactions from '../../lib';
 
-/* eslint-disable quote-props */
+/* eslint-disable @stylistic/quote-props */
 
 describe('CodeStar Connections source Action', () => {
   describe('CodeStar Connections source Action', () => {
@@ -44,7 +44,6 @@ describe('CodeStar Connections source Action', () => {
           },
         ],
       });
-
     });
   });
 
@@ -77,7 +76,6 @@ describe('CodeStar Connections source Action', () => {
         ],
       },
     });
-
   });
 
   test('grant s3 putObjectACL to the following CodeBuild Project', () => {
@@ -106,7 +104,6 @@ describe('CodeStar Connections source Action', () => {
         ]),
       },
     });
-
   });
 
   test('setting triggerOnPush=false reflects in the configuration', () => {
@@ -146,7 +143,6 @@ describe('CodeStar Connections source Action', () => {
         },
       ],
     });
-
   });
 
   test('exposes variables', () => {

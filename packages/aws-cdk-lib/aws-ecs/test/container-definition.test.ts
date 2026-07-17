@@ -7,12 +7,14 @@ import * as cdk from '../../core';
 import { Duration, Lazy } from '../../core';
 import * as cxapi from '../../cx-api';
 import * as ecs from '../lib';
+import { acknowledgeTestValidationRules } from './util';
 
 describe('container definition', () => {
   describe('When creating a Task Definition', () => {
     test('add a container using default props', () => {
       // GIVEN
       const stack = new cdk.Stack();
+      acknowledgeTestValidationRules(stack);
       const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
 
       new ecs.ContainerDefinition(stack, 'Container', {
@@ -30,6 +32,33 @@ describe('container definition', () => {
             Memory: 2048,
             Name: 'Container',
           },
+        ],
+      });
+    });
+
+    test('container without optional array props omits those properties', () => {
+      // GIVEN
+      const stack = new cdk.Stack();
+      acknowledgeTestValidationRules(stack);
+      const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
+
+      new ecs.ContainerDefinition(stack, 'Container', {
+        image: ecs.ContainerImage.fromRegistry('/aws/aws-example-app'),
+        taskDefinition,
+        memoryLimitMiB: 2048,
+      });
+
+      // THEN
+      Template.fromStack(stack).hasResourceProperties('AWS::ECS::TaskDefinition', {
+        ContainerDefinitions: [
+          Match.objectLike({
+            MountPoints: Match.absent(),
+            PortMappings: Match.absent(),
+            VolumesFrom: Match.absent(),
+            Ulimits: Match.absent(),
+            DependsOn: Match.absent(),
+            Links: Match.absent(),
+          }),
         ],
       });
     });
@@ -276,9 +305,7 @@ describe('container definition', () => {
             portMap.validate();
           }).not.toThrow();
         });
-
       });
-
     });
 
     describe('ServiceConnect class', () => {
@@ -317,7 +344,6 @@ describe('container definition', () => {
           // THEN
           expect(serviceConnect.isServiceConnect()).toEqual(false);
         });
-
       });
 
       describe('validate', () => {
@@ -362,14 +388,13 @@ describe('container definition', () => {
             serviceConnect.validate();
           }).not.toThrow();
         });
-
       });
-
     });
 
     test('port mapping throws an error when appProtocol is set without name', () => {
       // GIVEN
       const stack = new cdk.Stack();
+      acknowledgeTestValidationRules(stack);
       const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
 
       const container = new ecs.ContainerDefinition(stack, 'Container', {
@@ -407,6 +432,7 @@ describe('container definition', () => {
     test('multiple port mappings of the same name error out', () => {
       // GIVEN
       const stack = new cdk.Stack();
+      acknowledgeTestValidationRules(stack);
       const taskDefinition = new ecs.FargateTaskDefinition(stack, 'TaskDef');
 
       const container = new ecs.ContainerDefinition(stack, 'Container', {
@@ -433,6 +459,7 @@ describe('container definition', () => {
     test('empty string port mapping name throws', () => {
       // GIVEN
       const stack = new cdk.Stack();
+      acknowledgeTestValidationRules(stack);
       const taskDefinition = new ecs.FargateTaskDefinition(stack, 'TaskDef');
 
       const container = new ecs.ContainerDefinition(stack, 'Container', {
@@ -456,6 +483,7 @@ describe('container definition', () => {
       // GIVEN
       const app = new cdk.App({ context: { [cxapi.NEW_STYLE_STACK_SYNTHESIS_CONTEXT]: false } });
       const stack = new cdk.Stack(app);
+      acknowledgeTestValidationRules(stack);
       const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
       const secret = new secretsmanager.Secret(stack, 'Secret');
       new ecs.ContainerDefinition(stack, 'Container', {
@@ -662,6 +690,7 @@ describe('container definition', () => {
     test('throws when MemoryLimit is less than MemoryReservationLimit', () => {
       // GIVEN
       const stack = new cdk.Stack();
+      acknowledgeTestValidationRules(stack);
       const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
 
       // THEN
@@ -679,6 +708,7 @@ describe('container definition', () => {
       test('throws when Host port is different from container port', () => {
         // GIVEN
         const stack = new cdk.Stack();
+        acknowledgeTestValidationRules(stack);
         const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef', {
           networkMode: ecs.NetworkMode.AWS_VPC,
         });
@@ -700,6 +730,7 @@ describe('container definition', () => {
       test('Host port is the same as container port', () => {
         // GIVEN
         const stack = new cdk.Stack();
+        acknowledgeTestValidationRules(stack);
         const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef', {
           networkMode: ecs.NetworkMode.AWS_VPC,
         });
@@ -720,6 +751,7 @@ describe('container definition', () => {
       test('Host port can be empty ', () => {
         // GIVEN
         const stack = new cdk.Stack();
+        acknowledgeTestValidationRules(stack);
         const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef', {
           networkMode: ecs.NetworkMode.AWS_VPC,
         });
@@ -742,6 +774,7 @@ describe('container definition', () => {
       test('throws when Host port is different from container port', () => {
         // GIVEN
         const stack = new cdk.Stack();
+        acknowledgeTestValidationRules(stack);
         const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef', {
           networkMode: ecs.NetworkMode.HOST,
         });
@@ -763,6 +796,7 @@ describe('container definition', () => {
       test('when host port is the same as container port', () => {
         // GIVEN
         const stack = new cdk.Stack();
+        acknowledgeTestValidationRules(stack);
         const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef', {
           networkMode: ecs.NetworkMode.HOST,
         });
@@ -783,6 +817,7 @@ describe('container definition', () => {
       test('Host port can be empty ', () => {
         // GIVEN
         const stack = new cdk.Stack();
+        acknowledgeTestValidationRules(stack);
         const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef', {
           networkMode: ecs.NetworkMode.HOST,
         });
@@ -803,6 +838,7 @@ describe('container definition', () => {
       test('errors when adding links', () => {
         // GIVEN
         const stack = new cdk.Stack();
+        acknowledgeTestValidationRules(stack);
         const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef', {
           networkMode: ecs.NetworkMode.HOST,
         });
@@ -826,6 +862,7 @@ describe('container definition', () => {
       test('service connect fields are not allowed', () => {
         // GIVEN
         const stack = new cdk.Stack();
+        acknowledgeTestValidationRules(stack);
         const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef', {
           networkMode: ecs.NetworkMode.HOST,
         });
@@ -850,6 +887,7 @@ describe('container definition', () => {
       test('host post is forcefully set to 0 when both it and containerPortRange are not set', () => {
         // GIVEN
         const stack = new cdk.Stack();
+        acknowledgeTestValidationRules(stack);
         const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef', {
           networkMode: ecs.NetworkMode.BRIDGE,
         });
@@ -869,6 +907,7 @@ describe('container definition', () => {
       test('host post is left unchanged when it is set already', () => {
         // GIVEN
         const stack = new cdk.Stack();
+        acknowledgeTestValidationRules(stack);
         const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef', {
           networkMode: ecs.NetworkMode.BRIDGE,
         });
@@ -889,6 +928,7 @@ describe('container definition', () => {
       test('host post is left undefined when containerPortRange is set', () => {
         // GIVEN
         const stack = new cdk.Stack();
+        acknowledgeTestValidationRules(stack);
         const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef', {
           networkMode: ecs.NetworkMode.BRIDGE,
         });
@@ -909,6 +949,7 @@ describe('container definition', () => {
       test('allows adding links', () => {
         // GIVEN
         const stack = new cdk.Stack();
+        acknowledgeTestValidationRules(stack);
         const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef', {
           networkMode: ecs.NetworkMode.BRIDGE,
         });
@@ -932,6 +973,7 @@ describe('container definition', () => {
       test('produces undefined CF networkMode property', () => {
         // GIVEN
         const stack = new cdk.Stack();
+        acknowledgeTestValidationRules(stack);
 
         // WHEN
         new ecs.TaskDefinition(stack, 'TD', {
@@ -951,6 +993,7 @@ describe('container definition', () => {
     test('should return the first container port in PortMappings', () => {
       // GIVEN
       const stack = new cdk.Stack();
+      acknowledgeTestValidationRules(stack);
       const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef', {
         networkMode: ecs.NetworkMode.AWS_VPC,
       });
@@ -978,6 +1021,7 @@ describe('container definition', () => {
     test('throws when calling containerPort with no PortMappings', () => {
       // GIVEN
       const stack = new cdk.Stack();
+      acknowledgeTestValidationRules(stack);
       const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef', {
         networkMode: ecs.NetworkMode.AWS_VPC,
       });
@@ -998,6 +1042,7 @@ describe('container definition', () => {
     test('throws when calling containerPort with the first PortMapping not exposing a single port', () => {
       // GIVEN
       const stack = new cdk.Stack();
+      acknowledgeTestValidationRules(stack);
       const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef', {
         networkMode: ecs.NetworkMode.AWS_VPC,
       });
@@ -1021,6 +1066,7 @@ describe('container definition', () => {
       test('Ingress port should be the same as container port', () => {
         // GIVEN
         const stack = new cdk.Stack();
+        acknowledgeTestValidationRules(stack);
         const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef', {
           networkMode: ecs.NetworkMode.AWS_VPC,
         });
@@ -1044,6 +1090,7 @@ describe('container definition', () => {
       test('throws when calling ingressPort with no PortMappings', () => {
         // GIVEN
         const stack = new cdk.Stack();
+        acknowledgeTestValidationRules(stack);
         const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef', {
           networkMode: ecs.NetworkMode.AWS_VPC,
         });
@@ -1065,6 +1112,7 @@ describe('container definition', () => {
     test('throws when calling ingressPort with the first PortMapping not exposing a single port', () => {
       // GIVEN
       const stack = new cdk.Stack();
+      acknowledgeTestValidationRules(stack);
       const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef', {
         networkMode: ecs.NetworkMode.AWS_VPC,
       });
@@ -1086,6 +1134,7 @@ describe('container definition', () => {
       test('Ingress port should be the same as container port', () => {
         // GIVEN
         const stack = new cdk.Stack();
+        acknowledgeTestValidationRules(stack);
         const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef', {
           networkMode: ecs.NetworkMode.HOST,
         });
@@ -1111,6 +1160,7 @@ describe('container definition', () => {
       test('Ingress port should be the same as host port if supplied', () => {
         // GIVEN
         const stack = new cdk.Stack();
+        acknowledgeTestValidationRules(stack);
         const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef', {
           networkMode: ecs.NetworkMode.BRIDGE,
         });
@@ -1135,6 +1185,7 @@ describe('container definition', () => {
       test('Ingress port should be 0 if not supplied', () => {
         // GIVEN
         const stack = new cdk.Stack();
+        acknowledgeTestValidationRules(stack);
         const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef', {
           networkMode: ecs.NetworkMode.BRIDGE,
         });
@@ -1160,6 +1211,7 @@ describe('container definition', () => {
   test('can add docker label to the container definition', () => {
     // GIVEN
     const stack = new cdk.Stack();
+    acknowledgeTestValidationRules(stack);
     const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
 
     // WHEN
@@ -1188,6 +1240,7 @@ describe('container definition', () => {
   test('can add docker label to container definition with no docker labels', () => {
     // GIVEN
     const stack = new cdk.Stack();
+    acknowledgeTestValidationRules(stack);
     const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
 
     // WHEN
@@ -1212,6 +1265,7 @@ describe('container definition', () => {
   test('docker labels should be absent if empty object is provided', () => {
     // GIVEN
     const stack = new cdk.Stack();
+    acknowledgeTestValidationRules(stack);
     const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
 
     // WHEN
@@ -1234,6 +1288,7 @@ describe('container definition', () => {
   test('can add environment variables to the container definition', () => {
     // GIVEN
     const stack = new cdk.Stack();
+    acknowledgeTestValidationRules(stack);
     const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
 
     // WHEN
@@ -1266,6 +1321,7 @@ describe('container definition', () => {
   test('can add environment variables to container definition with no environment', () => {
     // GIVEN
     const stack = new cdk.Stack();
+    acknowledgeTestValidationRules(stack);
     const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
 
     // WHEN
@@ -1291,6 +1347,7 @@ describe('container definition', () => {
   test('can add port mappings to the container definition by props', () => {
     // GIVEN
     const stack = new cdk.Stack();
+    acknowledgeTestValidationRules(stack);
     const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
 
     // WHEN
@@ -1313,6 +1370,7 @@ describe('container definition', () => {
   test('can add port mappings using props and addPortMappings and both are included', () => {
     // GIVEN
     const stack = new cdk.Stack();
+    acknowledgeTestValidationRules(stack);
     const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
 
     // WHEN
@@ -1340,6 +1398,7 @@ describe('container definition', () => {
   test('can specify system controls', () => {
     // GIVEN
     const stack = new cdk.Stack();
+    acknowledgeTestValidationRules(stack);
     const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
 
     // WHEN
@@ -1377,6 +1436,7 @@ describe('container definition', () => {
         // GIVEN
         const app = new cdk.App({ context: { [cxapi.NEW_STYLE_STACK_SYNTHESIS_CONTEXT]: false } });
         const stack = new cdk.Stack(app);
+        acknowledgeTestValidationRules(stack);
         const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
 
         // WHEN
@@ -1443,6 +1503,7 @@ describe('container definition', () => {
       test('can add s3 bucket environment file to the container definition', () => {
         // GIVEN
         const stack = new cdk.Stack();
+        acknowledgeTestValidationRules(stack);
         const bucket = new s3.Bucket(stack, 'Bucket', {
           bucketName: 'test-bucket',
         });
@@ -1489,6 +1550,7 @@ describe('container definition', () => {
         // GIVEN
         const app = new cdk.App({ context: { [cxapi.NEW_STYLE_STACK_SYNTHESIS_CONTEXT]: false } });
         const stack = new cdk.Stack(app);
+        acknowledgeTestValidationRules(stack);
         const taskDefinition = new ecs.FargateTaskDefinition(stack, 'TaskDef');
 
         // WHEN
@@ -1555,6 +1617,7 @@ describe('container definition', () => {
       test('can add s3 bucket environment file to the container definition', () => {
         // GIVEN
         const stack = new cdk.Stack();
+        acknowledgeTestValidationRules(stack);
         const bucket = new s3.Bucket(stack, 'Bucket', {
           bucketName: 'test-bucket',
         });
@@ -1601,6 +1664,7 @@ describe('container definition', () => {
     test('will add resource requirements to container definition', () => {
       // GIVEN
       const stack = new cdk.Stack();
+      acknowledgeTestValidationRules(stack);
       const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
 
       // WHEN
@@ -1631,6 +1695,7 @@ describe('container definition', () => {
     test('correctly adds resource requirements to container definition using inference accelerator resource property', () => {
       // GIVEN
       const stack = new cdk.Stack();
+      acknowledgeTestValidationRules(stack);
 
       const inferenceAccelerators = [{
         deviceName: 'device1',
@@ -1674,6 +1739,7 @@ describe('container definition', () => {
     test('correctly adds resource requirements to container definition using both props and addInferenceAcceleratorResource method', () => {
       // GIVEN
       const stack = new cdk.Stack();
+      acknowledgeTestValidationRules(stack);
 
       const inferenceAccelerators = [{
         deviceName: 'device1',
@@ -1729,6 +1795,7 @@ describe('container definition', () => {
     test('throws when the value of inference accelerator resource does not match any inference accelerators defined in the Task Definition', () => {
       // GIVEN
       const stack = new cdk.Stack();
+      acknowledgeTestValidationRules(stack);
 
       const inferenceAccelerators = [{
         deviceName: 'device1',
@@ -1755,6 +1822,7 @@ describe('container definition', () => {
   test('adds resource requirements when both inference accelerator and gpu count are defined in the container definition', () => {
     // GIVEN
     const stack = new cdk.Stack();
+    acknowledgeTestValidationRules(stack);
 
     const inferenceAccelerators = [{
       deviceName: 'device1',
@@ -1799,6 +1867,7 @@ describe('container definition', () => {
   test('can add secret environment variables to the container definition', () => {
     // GIVEN
     const stack = new cdk.Stack();
+    acknowledgeTestValidationRules(stack);
     const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
 
     const secret = new secretsmanager.Secret(stack, 'Secret');
@@ -1952,6 +2021,7 @@ describe('container definition', () => {
   test('use a specific secret JSON key as environment variable', () => {
     // GIVEN
     const stack = new cdk.Stack();
+    acknowledgeTestValidationRules(stack);
     const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
 
     const secret = new secretsmanager.Secret(stack, 'Secret');
@@ -1993,6 +2063,7 @@ describe('container definition', () => {
   test('use a specific secret JSON field as environment variable for a Fargate task', () => {
     // GIVEN
     const stack = new cdk.Stack();
+    acknowledgeTestValidationRules(stack);
     const taskDefinition = new ecs.FargateTaskDefinition(stack, 'TaskDef');
 
     const secret = new secretsmanager.Secret(stack, 'Secret');
@@ -2064,6 +2135,7 @@ describe('container definition', () => {
   test('can add AWS logging to container definition', () => {
     // GIVEN
     const stack = new cdk.Stack();
+    acknowledgeTestValidationRules(stack);
     const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
 
     // WHEN
@@ -2106,6 +2178,7 @@ describe('container definition', () => {
   test('can set Health Check with defaults', () => {
     // GIVEN
     const stack = new cdk.Stack();
+    acknowledgeTestValidationRules(stack);
     const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
     const hcCommand = 'curl localhost:8000';
 
@@ -2136,6 +2209,7 @@ describe('container definition', () => {
   test('throws when setting Health Check with no commands', () => {
     // GIVEN
     const stack = new cdk.Stack();
+    acknowledgeTestValidationRules(stack);
     const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
 
     // WHEN
@@ -2167,6 +2241,7 @@ describe('container definition', () => {
   test('throws when setting Health Check with invalid interval because of too short', () => {
     // GIVEN
     const stack = new cdk.Stack();
+    acknowledgeTestValidationRules(stack);
     const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
 
     // WHEN
@@ -2198,6 +2273,7 @@ describe('container definition', () => {
   test('throws when setting Health Check with invalid interval because of too long', () => {
     // GIVEN
     const stack = new cdk.Stack();
+    acknowledgeTestValidationRules(stack);
     const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
 
     // WHEN
@@ -2229,6 +2305,7 @@ describe('container definition', () => {
   test('throws when setting Health Check with invalid timeout because of too short', () => {
     // GIVEN
     const stack = new cdk.Stack();
+    acknowledgeTestValidationRules(stack);
     const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
 
     // WHEN
@@ -2260,6 +2337,7 @@ describe('container definition', () => {
   test('throws when setting Health Check with invalid timeout because of too long', () => {
     // GIVEN
     const stack = new cdk.Stack();
+    acknowledgeTestValidationRules(stack);
     const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
 
     // WHEN
@@ -2291,6 +2369,7 @@ describe('container definition', () => {
   test('throws when setting Health Check with invalid interval and timeout because timeout is longer than interval', () => {
     // GIVEN
     const stack = new cdk.Stack();
+    acknowledgeTestValidationRules(stack);
     const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
 
     // WHEN
@@ -2322,6 +2401,7 @@ describe('container definition', () => {
   test('can specify Health Check values in shell form', () => {
     // GIVEN
     const stack = new cdk.Stack();
+    acknowledgeTestValidationRules(stack);
     const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
     const hcCommand = 'curl localhost:8000';
 
@@ -2356,6 +2436,7 @@ describe('container definition', () => {
   test('can specify Health Check values in array form starting with CMD-SHELL', () => {
     // GIVEN
     const stack = new cdk.Stack();
+    acknowledgeTestValidationRules(stack);
     const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
     const hcCommand = 'curl localhost:8000';
 
@@ -2390,6 +2471,7 @@ describe('container definition', () => {
   test('can specify Health Check values in array form starting with CMD', () => {
     // GIVEN
     const stack = new cdk.Stack();
+    acknowledgeTestValidationRules(stack);
     const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
     const hcCommand = 'curl localhost:8000';
 
@@ -2424,6 +2506,7 @@ describe('container definition', () => {
   test('can specify private registry credentials', () => {
     // GIVEN
     const stack = new cdk.Stack();
+    acknowledgeTestValidationRules(stack);
     const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
     const mySecretArn = 'arn:aws:secretsmanager:region:1234567890:secret:MyRepoSecret-6f8hj3';
 
@@ -2469,6 +2552,7 @@ describe('container definition', () => {
     test('when the props passed in is an essential container', () => {
       // GIVEN
       const stack = new cdk.Stack();
+      acknowledgeTestValidationRules(stack);
       const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
 
       // WHEN
@@ -2480,12 +2564,12 @@ describe('container definition', () => {
 
       // THEN
       expect(taskDefinition.defaultContainer).toEqual(container);
-
     });
 
     test('when the props passed in is not an essential container', () => {
       // GIVEN
       const stack = new cdk.Stack();
+      acknowledgeTestValidationRules(stack);
       const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
 
       // WHEN
@@ -2504,16 +2588,18 @@ describe('container definition', () => {
     test('validation throws with out of range params', () => {
       // GIVEN
       const stack = new cdk.Stack();
+      acknowledgeTestValidationRules(stack);
 
       const swappinessValues = [-1, 30.5, 101];
       swappinessValues.forEach(swappiness => expect(() =>
         new ecs.LinuxParameters(stack, `LinuxParametersWithSwappiness(${swappiness})`, { swappiness }))
-        .toThrowError(`swappiness: Must be an integer between 0 and 100; received ${swappiness}.`));
+        .toThrow(`swappiness: Must be an integer between 0 and 100; received ${swappiness}.`));
     });
 
     test('with only required properties set, it correctly sets default properties', () => {
       // GIVEN
       const stack = new cdk.Stack();
+      acknowledgeTestValidationRules(stack);
       const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
 
       const linuxParameters = new ecs.LinuxParameters(stack, 'LinuxParameters');
@@ -2541,6 +2627,7 @@ describe('container definition', () => {
     test('before calling addContainer', () => {
       // GIVEN
       const stack = new cdk.Stack();
+      acknowledgeTestValidationRules(stack);
       const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
 
       const linuxParameters = new ecs.LinuxParameters(stack, 'LinuxParameters', {
@@ -2583,6 +2670,7 @@ describe('container definition', () => {
     test('after calling addContainer', () => {
       // GIVEN
       const stack = new cdk.Stack();
+      acknowledgeTestValidationRules(stack);
       const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
 
       const linuxParameters = new ecs.LinuxParameters(stack, 'LinuxParameters', {
@@ -2627,6 +2715,7 @@ describe('container definition', () => {
     test('with one or more host devices', () => {
       // GIVEN
       const stack = new cdk.Stack();
+      acknowledgeTestValidationRules(stack);
       const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
 
       const linuxParameters = new ecs.LinuxParameters(stack, 'LinuxParameters', {
@@ -2671,6 +2760,7 @@ describe('container definition', () => {
     test('with the tmpfs mount for a container', () => {
       // GIVEN
       const stack = new cdk.Stack();
+      acknowledgeTestValidationRules(stack);
       const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
 
       const linuxParameters = new ecs.LinuxParameters(stack, 'LinuxParameters', {
@@ -2718,6 +2808,7 @@ describe('container definition', () => {
   test('can specify interactive parameter', () => {
     // GIVEN
     const stack = new cdk.Stack();
+    acknowledgeTestValidationRules(stack);
     const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
 
     new ecs.ContainerDefinition(stack, 'Container', {
@@ -2744,6 +2835,7 @@ describe('container definition', () => {
   test('fails if more than one credentialSpec is provided', () => {
     // GIVEN
     const stack = new cdk.Stack();
+    acknowledgeTestValidationRules(stack);
     const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
     const containerDefinitionProps = {
       image: ecs.ContainerImage.fromRegistry('/aws/aws-example-app'),
@@ -2757,5 +2849,325 @@ describe('container definition', () => {
 
     // THEN
     expect(() => new ecs.ContainerDefinition(stack, 'Container', containerDefinitionProps)).toThrow(/Only one credential spec is allowed per container definition/);
+  });
+
+  test('can specify restart policy', () => {
+    // GIVEN
+    const stack = new cdk.Stack();
+    acknowledgeTestValidationRules(stack);
+    const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
+
+    // WHEN
+    new ecs.ContainerDefinition(stack, 'Container', {
+      image: ecs.ContainerImage.fromRegistry('/aws/aws-example-app'),
+      taskDefinition,
+      memoryLimitMiB: 2048,
+      enableRestartPolicy: true,
+      restartIgnoredExitCodes: [0, 127],
+      restartAttemptPeriod: cdk.Duration.seconds(360),
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::ECS::TaskDefinition', {
+      ContainerDefinitions: [
+        {
+          Image: '/aws/aws-example-app',
+          Name: 'Container',
+          Memory: 2048,
+          RestartPolicy: {
+            Enabled: true,
+            IgnoredExitCodes: [0, 127],
+            RestartAttemptPeriod: 360,
+          },
+        },
+      ],
+    });
+  });
+
+  test('restart policy will not be set if not specified', () => {
+    // GIVEN
+    const stack = new cdk.Stack();
+    acknowledgeTestValidationRules(stack);
+    const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
+
+    // WHEN
+    new ecs.ContainerDefinition(stack, 'Container', {
+      image: ecs.ContainerImage.fromRegistry('/aws/aws-example-app'),
+      taskDefinition,
+      memoryLimitMiB: 2048,
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::ECS::TaskDefinition', {
+      ContainerDefinitions: [
+        {
+          Image: '/aws/aws-example-app',
+          Name: 'Container',
+          Memory: 2048,
+          RestartPolicy: Match.absent(),
+        },
+      ],
+    });
+  });
+
+  test('enable restart policy when enableRestartPolicy is not specified but restartIgnoredExitCodes is specified', () => {
+    // GIVEN
+    const stack = new cdk.Stack();
+    acknowledgeTestValidationRules(stack);
+    const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
+
+    // WHEN
+    new ecs.ContainerDefinition(stack, 'Container', {
+      image: ecs.ContainerImage.fromRegistry('/aws/aws-example-app'),
+      taskDefinition,
+      memoryLimitMiB: 2048,
+      restartIgnoredExitCodes: [0, 127],
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::ECS::TaskDefinition', {
+      ContainerDefinitions: [
+        {
+          Image: '/aws/aws-example-app',
+          Name: 'Container',
+          Memory: 2048,
+          RestartPolicy: {
+            Enabled: true,
+            IgnoredExitCodes: [0, 127],
+          },
+        },
+      ],
+    });
+  });
+
+  test('enable restart policy when enableRestartPolicy is not specified but restartAttemptPeriod is specified', () => {
+    // GIVEN
+    const stack = new cdk.Stack();
+    acknowledgeTestValidationRules(stack);
+    const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
+
+    // WHEN
+    new ecs.ContainerDefinition(stack, 'Container', {
+      image: ecs.ContainerImage.fromRegistry('/aws/aws-example-app'),
+      taskDefinition,
+      memoryLimitMiB: 2048,
+      restartAttemptPeriod: cdk.Duration.seconds(360),
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::ECS::TaskDefinition', {
+      ContainerDefinitions: [
+        {
+          Image: '/aws/aws-example-app',
+          Name: 'Container',
+          Memory: 2048,
+          RestartPolicy: {
+            Enabled: true,
+            RestartAttemptPeriod: 360,
+          },
+        },
+      ],
+    });
+  });
+
+  test('throws when enableRestartPolicy is set to false but restartIgnoredExitCodes is specified', () => {
+    // GIVEN
+    const stack = new cdk.Stack();
+    acknowledgeTestValidationRules(stack);
+    const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
+
+    // THEN
+    expect(() => {
+      new ecs.ContainerDefinition(stack, 'Container', {
+        image: ecs.ContainerImage.fromRegistry('/aws/aws-example-app'),
+        taskDefinition,
+        memoryLimitMiB: 2048,
+        enableRestartPolicy: false,
+        restartIgnoredExitCodes: [0, 127],
+      });
+    }).toThrow(/The restartIgnoredExitCodes and restartAttemptPeriod cannot be specified if enableRestartPolicy is false/);
+  });
+
+  test('throws when enableRestartPolicy is set to false but restartAttemptPeriod is specified', () => {
+    // GIVEN
+    const stack = new cdk.Stack();
+    acknowledgeTestValidationRules(stack);
+    const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
+
+    // THEN
+    expect(() => {
+      new ecs.ContainerDefinition(stack, 'Container', {
+        image: ecs.ContainerImage.fromRegistry('/aws/aws-example-app'),
+        taskDefinition,
+        memoryLimitMiB: 2048,
+        enableRestartPolicy: false,
+        restartAttemptPeriod: cdk.Duration.seconds(360),
+      });
+    }).toThrow(/The restartIgnoredExitCodes and restartAttemptPeriod cannot be specified if enableRestartPolicy is false/);
+  });
+
+  test('throws when there are more than 50 in restartIgnoredExitCodes', () => {
+    // GIVEN
+    const stack = new cdk.Stack();
+    acknowledgeTestValidationRules(stack);
+    const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
+
+    // WHEN
+    const restartIgnoredExitCodes = Array.from({ length: 51 }, (_, i) => i);
+
+    // THEN
+    expect(() => {
+      new ecs.ContainerDefinition(stack, 'Container', {
+        image: ecs.ContainerImage.fromRegistry('/aws/aws-example-app'),
+        taskDefinition,
+        memoryLimitMiB: 2048,
+        enableRestartPolicy: true,
+        restartIgnoredExitCodes,
+      });
+    }).toThrow(/Only up to 50 can be specified for restartIgnoredExitCodes, got: 51/);
+  });
+
+  test('throws when restartAttemptPeriod is greater than 1800 seconds', () => {
+    // GIVEN
+    const stack = new cdk.Stack();
+    acknowledgeTestValidationRules(stack);
+    const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
+
+    // THEN
+    expect(() => {
+      new ecs.ContainerDefinition(stack, 'Container', {
+        image: ecs.ContainerImage.fromRegistry('/aws/aws-example-app'),
+        taskDefinition,
+        memoryLimitMiB: 2048,
+        enableRestartPolicy: true,
+        restartAttemptPeriod: cdk.Duration.seconds(1801),
+      });
+    }).toThrow(/The restartAttemptPeriod must be between 60 seconds and 1800 seconds, got 1801 seconds/);
+  });
+
+  test('throws when restartAttemptPeriod is less than 60 seconds', () => {
+    // GIVEN
+    const stack = new cdk.Stack();
+    acknowledgeTestValidationRules(stack);
+    const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
+
+    // THEN
+    expect(() => {
+      new ecs.ContainerDefinition(stack, 'Container', {
+        image: ecs.ContainerImage.fromRegistry('/aws/aws-example-app'),
+        taskDefinition,
+        memoryLimitMiB: 2048,
+        enableRestartPolicy: true,
+        restartAttemptPeriod: cdk.Duration.seconds(59),
+      });
+    }).toThrow(/The restartAttemptPeriod must be between 60 seconds and 1800 seconds, got 59 seconds/);
+  });
+
+  test('can specify version consistency', () => {
+    // GIVEN
+    const stack = new cdk.Stack();
+    acknowledgeTestValidationRules(stack);
+    const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
+
+    // WHEN
+    new ecs.ContainerDefinition(stack, 'Container', {
+      image: ecs.ContainerImage.fromRegistry('/aws/aws-example-app'),
+      taskDefinition,
+      memoryLimitMiB: 2048,
+      versionConsistency: ecs.VersionConsistency.ENABLED,
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::ECS::TaskDefinition', {
+      ContainerDefinitions: [
+        {
+          Image: '/aws/aws-example-app',
+          Name: 'Container',
+          Memory: 2048,
+          VersionConsistency: 'enabled',
+        },
+      ],
+    });
+  });
+
+  test('version consistency will not be set if not specified', () => {
+    // GIVEN
+    const stack = new cdk.Stack();
+    acknowledgeTestValidationRules(stack);
+    const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
+
+    // WHEN
+    new ecs.ContainerDefinition(stack, 'Container', {
+      image: ecs.ContainerImage.fromRegistry('/aws/aws-example-app'),
+      taskDefinition,
+      memoryLimitMiB: 2048,
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::ECS::TaskDefinition', {
+      ContainerDefinitions: [
+        {
+          Image: '/aws/aws-example-app',
+          Name: 'Container',
+          Memory: 2048,
+          VersionConsistency: Match.absent(),
+        },
+      ],
+    });
+  });
+
+  test('version consistency can be default disabled if appropriate', () => {
+    // GIVEN
+    const stack = new cdk.Stack();
+    acknowledgeTestValidationRules(stack);
+    const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
+
+    // WHEN
+    const container = new ecs.ContainerDefinition(stack, 'Container', {
+      image: ecs.ContainerImage.fromRegistry('/aws/aws-example-app'),
+      taskDefinition,
+      memoryLimitMiB: 2048,
+    });
+    container._defaultDisableVersionConsistency();
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::ECS::TaskDefinition', {
+      ContainerDefinitions: [
+        {
+          Image: '/aws/aws-example-app',
+          Name: 'Container',
+          Memory: 2048,
+          VersionConsistency: 'disabled',
+        },
+      ],
+    });
+  });
+
+  test('version consistency default disable does not override props', () => {
+    // GIVEN
+    const stack = new cdk.Stack();
+    acknowledgeTestValidationRules(stack);
+    const taskDefinition = new ecs.Ec2TaskDefinition(stack, 'TaskDef');
+
+    // WHEN
+    const container = new ecs.ContainerDefinition(stack, 'Container', {
+      image: ecs.ContainerImage.fromRegistry('/aws/aws-example-app'),
+      taskDefinition,
+      memoryLimitMiB: 2048,
+      versionConsistency: ecs.VersionConsistency.ENABLED,
+    });
+    container._defaultDisableVersionConsistency();
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::ECS::TaskDefinition', {
+      ContainerDefinitions: [
+        {
+          Image: '/aws/aws-example-app',
+          Name: 'Container',
+          Memory: 2048,
+          VersionConsistency: 'enabled',
+        },
+      ],
+    });
   });
 });

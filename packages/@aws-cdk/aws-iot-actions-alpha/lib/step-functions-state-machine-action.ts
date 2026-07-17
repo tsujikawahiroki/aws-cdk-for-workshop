@@ -1,9 +1,10 @@
+import type * as iot from '@aws-cdk/aws-iot-alpha';
+import { ArnFormat, Stack, ValidationError } from 'aws-cdk-lib';
 import * as iam from 'aws-cdk-lib/aws-iam';
-import * as iot from '@aws-cdk/aws-iot-alpha';
-import * as stepfunctions from 'aws-cdk-lib/aws-stepfunctions';
-import { CommonActionProps } from './common-action-props';
+import type * as stepfunctions from 'aws-cdk-lib/aws-stepfunctions';
+import { lit } from 'aws-cdk-lib/core/lib/helpers-internal';
+import type { CommonActionProps } from './common-action-props';
 import { singletonActionRole } from './private/role';
-import { ArnFormat, Stack } from 'aws-cdk-lib';
 
 /**
  * Configuration properties of an action for the Step Functions State Machine.
@@ -28,7 +29,7 @@ export class StepFunctionsStateMachineAction implements iot.IAction {
   private readonly role?: iam.IRole;
 
   /**
-   * @param stateMachine The Step Functions Start Machine which shoud be executed.
+   * @param stateMachine The Step Functions Start Machine which should be executed.
    * @param props Optional properties to not use default
    */
   constructor(private readonly stateMachine: stepfunctions.IStateMachine, props?: StepFunctionsStateMachineActionProps) {
@@ -44,7 +45,7 @@ export class StepFunctionsStateMachineAction implements iot.IAction {
     const stateMachineName = Stack.of(this.stateMachine).splitArn(this.stateMachine.stateMachineArn, ArnFormat.COLON_RESOURCE_NAME).resourceName;
 
     if (!stateMachineName) {
-      throw new Error(`No state machine name found in ARN: '${this.stateMachine.stateMachineArn}'`);
+      throw new ValidationError(lit`StateMachineNameNotFound`, `No state machine name found in ARN: '${this.stateMachine.stateMachineArn}'`, rule);
     }
 
     role.addToPrincipalPolicy(new iam.PolicyStatement({

@@ -1,4 +1,4 @@
-import * as constructs from 'constructs';
+import type * as constructs from 'constructs';
 import { Annotations, Template, Match } from '../../../assertions';
 import * as events from '../../../aws-events';
 import * as lambda from '../../../aws-lambda';
@@ -320,13 +320,9 @@ test('must display a warning when using a Dead Letter Queue from another account
 
   Template.fromStack(stack1).resourceCountIs('AWS::SQS::QueuePolicy', 0);
 
-  Annotations.fromStack(stack1).hasWarning('/Stack1/Rule', Match.objectLike({
-    'Fn::Join': Match.arrayWith([
-      Match.arrayWith([
-        'Cannot add a resource policy to your dead letter queue associated with rule ',
-      ]),
-    ]),
-  }));
+  Annotations.fromStack(stack1).hasWarning('/Stack1/Rule', Match.stringLikeRegexp(
+    'Cannot add a resource policy to your dead letter queue associated with rule \\${Token\\[TOKEN\\.[0-9]+\\]} because the queue is in a different account\\. You must add the resource policy manually to the dead letter queue in account 444455556666\\. \\[ack: @aws-cdk/aws-events-targets:manuallyAddDLQResourcePolicy\\]',
+  ));
 });
 
 test('specifying retry policy', () => {

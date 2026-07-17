@@ -5,7 +5,7 @@ import { runBumpHooks } from './lifecycles/bumphooks';
 import { writeChangelogs } from './lifecycles/changelog';
 import { commit } from './lifecycles/commit';
 import { debug, debugObject } from './private/print';
-import { PackageInfo, ReleaseOptions } from './types';
+import type { PackageInfo, ReleaseOptions } from './types';
 import { readVersion } from './versions';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const lerna_project = require('@lerna/project');
@@ -47,7 +47,7 @@ export async function createRelease(opts: ReleaseOptions): Promise<void> {
     ...changelogResults.map(r => r.filePath),
     ...bumpHookedFiles,
   ]);
-};
+}
 
 function getProjectPackageInfos(): PackageInfo[] {
   const packages = lerna_project.Project.getPackagesSync();

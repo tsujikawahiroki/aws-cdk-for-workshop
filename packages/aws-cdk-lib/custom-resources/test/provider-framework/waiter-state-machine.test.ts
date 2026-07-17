@@ -4,13 +4,18 @@ import * as lambda from '../../../aws-lambda';
 import { Code, Function as lambdaFn } from '../../../aws-lambda';
 import { LogGroup, RetentionDays } from '../../../aws-logs';
 import { LogLevel } from '../../../aws-stepfunctions';
-import { Duration, Stack } from '../../../core';
+import { App, Duration, Stack } from '../../../core';
 import { WaiterStateMachine } from '../../lib/provider-framework/waiter-state-machine';
 
 describe('state machine', () => {
   test('contains the needed resources', () => {
     // GIVEN
-    const stack = new Stack();
+    const app = new App({
+      postCliContext: {
+        '@aws-cdk/aws-lambda:useCdkManagedLogGroup': false,
+      },
+    });
+    const stack = new Stack(app, 'MyStack');
     Node.of(stack).setContext('@aws-cdk/core:target-partitions', ['aws', 'aws-cn']);
 
     const isCompleteHandler = new lambdaFn(stack, 'isComplete', {
@@ -88,16 +93,7 @@ describe('state machine', () => {
             Action: 'sts:AssumeRole',
             Effect: 'Allow',
             Principal: {
-              Service: {
-                'Fn::Join': [
-                  '',
-                  [
-                    'states.',
-                    stack.resolve(stack.region),
-                    '.amazonaws.com',
-                  ],
-                ],
-              },
+              Service: 'states.amazonaws.com',
             },
           },
         ],
@@ -145,7 +141,12 @@ describe('state machine', () => {
 
   test('disable logging', () => {
     // GIVEN
-    const stack = new Stack();
+    const app = new App({
+      postCliContext: {
+        '@aws-cdk/aws-lambda:useCdkManagedLogGroup': true,
+      },
+    });
+    const stack = new Stack(app, 'MyStack');
     Node.of(stack).setContext('@aws-cdk/core:target-partitions', ['aws', 'aws-cn']);
 
     const isCompleteHandler = new lambdaFn(stack, 'isComplete', {
@@ -173,7 +174,7 @@ describe('state machine', () => {
     });
 
     // THEN
-    Template.fromStack(stack).resourceCountIs('AWS::Logs::LogGroup', 0);
+    Template.fromStack(stack).resourceCountIs('AWS::Logs::LogGroup', 2);
   });
 
   test('default logOptions and required policies will be created if logging is enabled without logOptions specified', () => {

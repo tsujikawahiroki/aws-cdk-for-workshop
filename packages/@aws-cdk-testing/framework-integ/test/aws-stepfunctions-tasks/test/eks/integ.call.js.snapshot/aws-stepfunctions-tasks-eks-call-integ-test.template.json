@@ -1,5 +1,18 @@
 {
  "Resources": {
+  "KubectlLayer600207B5": {
+   "Type": "AWS::Lambda::LayerVersion",
+   "Properties": {
+    "Content": {
+     "S3Bucket": {
+      "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
+     },
+     "S3Key": "77675805670406a68c1baf43392c7e699bee435fe9b667ef4f9f1134b8c41d0e.zip"
+    },
+    "Description": "/opt/kubectl/kubectl 1.31.9; /opt/helm/helm 3.17.3",
+    "LicenseInfo": "Apache-2.0"
+   }
+  },
   "EksClusterDefaultVpcB24550B2": {
    "Type": "AWS::EC2::VPC",
    "Properties": {
@@ -487,7 +500,7 @@
         {
          "Ref": "AWS::Partition"
         },
-        ":iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+        ":iam::aws:policy/AmazonEC2ContainerRegistryPullOnly"
        ]
       ]
      },
@@ -819,7 +832,7 @@
     },
     "Config": {
      "name": "eksCluster",
-     "version": "1.22",
+     "version": "1.30",
      "roleArn": {
       "Fn::GetAtt": [
        "EksClusterRoleC84B376F",
@@ -854,7 +867,8 @@
       ],
       "endpointPublicAccess": true,
       "endpointPrivateAccess": true
-     }
+     },
+     "accessConfig": {}
     },
     "AssumeRoleArn": {
      "Fn::GetAtt": [
@@ -862,7 +876,7 @@
       "Arn"
      ]
     },
-    "AttributesRevision": 2
+    "AttributesRevision": 5
    },
    "DependsOn": [
     "EksClusterDefaultVpcIGWCA6A3220",
@@ -1068,7 +1082,7 @@
        {
         "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
        },
-       "/f9d506f0f889c20e071319c8f1b9ee5cdfbab831e0d314b4a5be409a48485cb8.json"
+       "/6a19e999f1805520864149d0a6b67578535547154b9c194d17f3f3d4520e8e66.json"
       ]
      ]
     }
@@ -1080,6 +1094,9 @@
    "Type": "AWS::CloudFormation::Stack",
    "Properties": {
     "Parameters": {
+     "referencetoawsstepfunctionstasksekscallintegtestKubectlLayer0B270356Ref": {
+      "Ref": "KubectlLayer600207B5"
+     },
      "referencetoawsstepfunctionstasksekscallintegtestEksClusterKubectlHandlerRole61616EA6Arn": {
       "Fn::GetAtt": [
        "EksClusterKubectlHandlerRole4A986A70",
@@ -1115,7 +1132,7 @@
        {
         "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
        },
-       "/cf3d9b6e792958a3ecc1d2053925437f1c9fe75870c05995fec7b25150b735ce.json"
+       "/cd6d770f981032b5d6fb448c3cdc96efdabbec5259d5cbcf9978a725e7509eec.json"
       ]
      ]
     }

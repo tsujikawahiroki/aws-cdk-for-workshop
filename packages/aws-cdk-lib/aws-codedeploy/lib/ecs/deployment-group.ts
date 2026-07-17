@@ -1,21 +1,32 @@
 import { Construct } from 'constructs';
-import { IEcsApplication, EcsApplication } from './application';
-import { EcsDeploymentConfig, IEcsDeploymentConfig } from './deployment-config';
-import * as cloudwatch from '../../../aws-cloudwatch';
+import type { IEcsApplication } from './application';
+import { EcsApplication } from './application';
+import type { IEcsDeploymentConfig } from './deployment-config';
+import { EcsDeploymentConfig } from './deployment-config';
 import * as ecs from '../../../aws-ecs';
-import * as elbv2 from '../../../aws-elasticloadbalancingv2';
+import type * as elbv2 from '../../../aws-elasticloadbalancingv2';
 import * as iam from '../../../aws-iam';
 import * as cdk from '../../../core';
+import { ValidationError } from '../../../core';
+import type { IArrayBox } from '../../../core/lib/helpers-internal';
+import { Box } from '../../../core/lib/helpers-internal';
+import { addConstructMetadata, MethodMetadata } from '../../../core/lib/metadata-resource';
+import { noBoxStackTraces } from '../../../core/lib/no-box-stack-traces';
+import { lit } from '../../../core/lib/private/literal-string';
+import { propertyInjectable } from '../../../core/lib/prop-injectable';
 import { CODEDEPLOY_REMOVE_ALARMS_FROM_DEPLOYMENT_GROUP } from '../../../cx-api';
+import type { IAlarmRef } from '../../../interfaces/generated/aws-cloudwatch-interfaces.generated';
+import type { IDeploymentGroupRef, IApplicationRef, IDeploymentConfigRef } from '../../../interfaces/generated/aws-codedeploy-interfaces.generated';
 import { CfnDeploymentGroup } from '../codedeploy.generated';
 import { ImportedDeploymentGroupBase, DeploymentGroupBase } from '../private/base-deployment-group';
+import { toIBaseDeploymentConfig, toIEcsApplication } from '../private/ref-utils';
 import { renderAlarmConfiguration, renderAutoRollbackConfiguration } from '../private/utils';
-import { AutoRollbackConfig } from '../rollback-config';
+import type { AutoRollbackConfig } from '../rollback-config';
 
 /**
  * Interface for an ECS deployment group.
  */
-export interface IEcsDeploymentGroup extends cdk.IResource {
+export interface IEcsDeploymentGroup extends cdk.IResource, IDeploymentGroupRef {
   /**
    * The reference to the CodeDeploy ECS Application that this Deployment Group belongs to.
    */
@@ -60,13 +71,13 @@ export interface EcsBlueGreenDeploymentConfig {
    * The load balancer listener used to serve production traffic and to shift production traffic from the
    * 'blue' ECS task set to the 'green' ECS task set during a blue-green deployment.
    */
-  readonly listener: elbv2.IListener;
+  readonly listener: elbv2.IListenerRef;
 
   /**
    * The load balancer listener used to route test traffic to the 'green' ECS task set during a blue-green deployment.
    *
    * During a blue-green deployment, validation can occur after test traffic has been re-routed and before production
-   * traffic has been re-routed to the 'green' ECS task set.  You can specify one or more Lambda funtions in the
+   * traffic has been re-routed to the 'green' ECS task set.  You can specify one or more Lambda functions in the
    * deployment's AppSpec file that run during the AfterAllowTestTraffic hook. The functions can run validation tests.
    * If a validation test fails, a deployment rollback is triggered. If the validation tests succeed, the next hook in
    * the deployment lifecycle, BeforeAllowTraffic, is triggered.
@@ -76,7 +87,7 @@ export interface EcsBlueGreenDeploymentConfig {
    *
    * @default No test listener will be added
    */
-  readonly testListener?: elbv2.IListener;
+  readonly testListener?: elbv2.IListenerRef;
 
   /**
    * Specify how long CodeDeploy waits for approval to continue a blue-green deployment before it stops the deployment.
@@ -97,17 +108,17 @@ export interface EcsBlueGreenDeploymentConfig {
   readonly deploymentApprovalWaitTime?: cdk.Duration;
 
   /**
-    * Specify how long CodeDeploy waits before it terminates the original 'blue' ECS task set when a blue-green deployment is complete.
-    *
-    * During this wait time, CodeDeploy will continue to monitor any CloudWatch alarms specified for the deployment group,
-    * and the deployment group can be configured to automatically roll back if those alarms fire.  Once CodeDeploy begins to
-    * terminate the 'blue' ECS task set, the deployment can no longer be rolled back, manually or automatically.
-    *
-    * By default, the deployment will immediately terminate the 'blue' ECS task set after production traffic is successfully
-    * routed to the 'green' ECS task set.
-    *
-    * @default 0
-    */
+   * Specify how long CodeDeploy waits before it terminates the original 'blue' ECS task set when a blue-green deployment is complete.
+   *
+   * During this wait time, CodeDeploy will continue to monitor any CloudWatch alarms specified for the deployment group,
+   * and the deployment group can be configured to automatically roll back if those alarms fire.  Once CodeDeploy begins to
+   * terminate the 'blue' ECS task set, the deployment can no longer be rolled back, manually or automatically.
+   *
+   * By default, the deployment will immediately terminate the 'blue' ECS task set after production traffic is successfully
+   * routed to the 'green' ECS task set.
+   *
+   * @default 0
+   */
   readonly terminationWaitTime?: cdk.Duration;
 }
 
@@ -120,7 +131,7 @@ export interface EcsDeploymentGroupProps {
    *
    * @default One will be created for you.
    */
-  readonly application?: IEcsApplication;
+  readonly application?: IApplicationRef;
 
   /**
    * The physical, human-readable name of the CodeDeploy Deployment Group.
@@ -134,7 +145,7 @@ export interface EcsDeploymentGroupProps {
    *
    * @default EcsDeploymentConfig.ALL_AT_ONCE
    */
-  readonly deploymentConfig?: IEcsDeploymentConfig;
+  readonly deploymentConfig?: IDeploymentConfigRef;
 
   /**
    * The CloudWatch alarms associated with this Deployment Group.
@@ -146,7 +157,7 @@ export interface EcsDeploymentGroupProps {
    * @default []
    * @see https://docs.aws.amazon.com/codedeploy/latest/userguide/monitoring-create-alarms.html
    */
-  readonly alarms?: cloudwatch.IAlarm[];
+  readonly alarms?: IAlarmRef[];
 
   /**
    * The service Role of this Deployment Group.
@@ -191,7 +202,12 @@ export interface EcsDeploymentGroupProps {
  * A CodeDeploy deployment group that orchestrates ECS blue-green deployments.
  * @resource AWS::CodeDeploy::DeploymentGroup
  */
+@propertyInjectable
+@noBoxStackTraces
 export class EcsDeploymentGroup extends DeploymentGroupBase implements IEcsDeploymentGroup {
+  /** Uniquely identifies this class. */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-codedeploy.EcsDeploymentGroup';
+
   /**
    * Reference an ECS Deployment Group defined outside the CDK app.
    *
@@ -203,20 +219,20 @@ export class EcsDeploymentGroup extends DeploymentGroupBase implements IEcsDeplo
    * @returns a Construct representing a reference to an existing Deployment Group
    */
   public static fromEcsDeploymentGroupAttributes(
-    scope:Construct,
+    scope: Construct,
     id: string,
     attrs: EcsDeploymentGroupAttributes): IEcsDeploymentGroup {
     return new ImportedEcsDeploymentGroup(scope, id, attrs);
   }
 
-  public readonly application: IEcsApplication;
-  public readonly deploymentConfig: IEcsDeploymentConfig;
+  private readonly _application: IApplicationRef;
+  private readonly _deploymentConfig: IDeploymentConfigRef;
   /**
    * The service Role of this Deployment Group.
    */
   public readonly role: iam.IRole;
 
-  private readonly alarms: cloudwatch.IAlarm[];
+  private readonly alarms: IArrayBox<IAlarmRef>;
 
   constructor(scope: Construct, id: string, props: EcsDeploymentGroupProps) {
     super(scope, id, {
@@ -224,27 +240,25 @@ export class EcsDeploymentGroup extends DeploymentGroupBase implements IEcsDeplo
       role: props.role,
       roleConstructId: 'ServiceRole',
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
     this.role = this._role;
 
-    this.application = props.application || new EcsApplication(this, 'Application');
-    this.alarms = props.alarms || [];
+    this._application = props.application || new EcsApplication(this, 'Application');
+    this.alarms = Box.fromArray(props.alarms || [], { omitEmpty: false });
 
     this.role.addManagedPolicy(iam.ManagedPolicy.fromAwsManagedPolicyName('AWSCodeDeployRoleForECS'));
-    this.deploymentConfig = this._bindDeploymentConfig(props.deploymentConfig || EcsDeploymentConfig.ALL_AT_ONCE);
+    this._deploymentConfig = this._bindDeploymentConfig(props.deploymentConfig || EcsDeploymentConfig.ALL_AT_ONCE);
 
     if (cdk.Resource.isOwnedResource(props.service)) {
       const cfnSvc = (props.service as ecs.BaseService).node.defaultChild as ecs.CfnService;
       if (cfnSvc.deploymentController === undefined ||
         (cfnSvc.deploymentController! as ecs.CfnService.DeploymentControllerProperty).type !== ecs.DeploymentControllerType.CODE_DEPLOY) {
-        throw new Error(
-          'The ECS service associated with the deployment group must use the CODE_DEPLOY deployment controller type',
-        );
+        throw new ValidationError(lit`ServiceAssociatedDeploymentGroupDe`, 'The ECS service associated with the deployment group must use the CODE_DEPLOY deployment controller type', this);
       }
 
       if (cfnSvc.taskDefinition !== (props.service as ecs.BaseService).taskDefinition.family) {
-        throw new Error(
-          'The ECS service associated with the deployment group must specify the task definition using the task definition family name only. Otherwise, the task definition cannot be updated in the stack',
-        );
+        throw new ValidationError(lit`ServiceAssociatedDeploymentGroupSpecify`, 'The ECS service associated with the deployment group must specify the task definition using the task definition family name only. Otherwise, the task definition cannot be updated in the stack', this);
       }
     }
 
@@ -267,15 +281,13 @@ export class EcsDeploymentGroup extends DeploymentGroupBase implements IEcsDeplo
         produce: () => this.renderBlueGreenDeploymentConfiguration(props.blueGreenDeploymentConfig),
       }),
       loadBalancerInfo: cdk.Lazy.any({ produce: () => this.renderLoadBalancerInfo(props.blueGreenDeploymentConfig) }),
-      alarmConfiguration: cdk.Lazy.any({
-        produce: () => renderAlarmConfiguration({
-          alarms: this.alarms,
-          ignorePollAlarmFailure: props.ignorePollAlarmsFailure,
-          removeAlarms: removeAlarmsFromDeploymentGroup,
-          ignoreAlarmConfiguration: props.ignoreAlarmConfiguration,
-        }),
-      }),
-      autoRollbackConfiguration: cdk.Lazy.any({ produce: () => renderAutoRollbackConfiguration(this.alarms, props.autoRollback) }),
+      alarmConfiguration: this.alarms.derive(alarms => renderAlarmConfiguration({
+        alarms: [...alarms],
+        ignorePollAlarmFailure: props.ignorePollAlarmsFailure,
+        removeAlarms: removeAlarmsFromDeploymentGroup,
+        ignoreAlarmConfiguration: props.ignoreAlarmConfiguration,
+      })),
+      autoRollbackConfiguration: this.alarms.derive(alarms => renderAutoRollbackConfiguration(this, [...alarms], props.autoRollback)),
     });
 
     this._setNameAndArn(resource, this.application);
@@ -287,12 +299,21 @@ export class EcsDeploymentGroup extends DeploymentGroupBase implements IEcsDeplo
     }
   }
 
+  public get application(): IEcsApplication {
+    return toIEcsApplication(this._application);
+  }
+
+  public get deploymentConfig(): IEcsDeploymentConfig {
+    return toIBaseDeploymentConfig(this._deploymentConfig);
+  }
+
   /**
    * Associates an additional alarm with this Deployment Group.
    *
    * @param alarm the alarm to associate with this Deployment Group
    */
-  public addAlarm(alarm: cloudwatch.IAlarm): void {
+  @MethodMetadata()
+  public addAlarm(alarm: IAlarmRef): void {
     this.alarms.push(alarm);
   }
 
@@ -324,12 +345,12 @@ export class EcsDeploymentGroup extends DeploymentGroupBase implements IEcsDeplo
           ],
           prodTrafficRoute: {
             listenerArns: [
-              options.listener.listenerArn,
+              options.listener.listenerRef.listenerArn,
             ],
           },
           testTrafficRoute: options.testListener ? {
             listenerArns: [
-              options.testListener.listenerArn,
+              options.testListener.listenerRef.listenerArn,
             ],
           } : undefined,
         },
@@ -348,7 +369,7 @@ export interface EcsDeploymentGroupAttributes {
    * The reference to the CodeDeploy ECS Application
    * that this Deployment Group belongs to.
    */
-  readonly application: IEcsApplication;
+  readonly application: IApplicationRef;
 
   /**
    * The physical, human-readable name of the CodeDeploy ECS Deployment Group
@@ -361,20 +382,33 @@ export interface EcsDeploymentGroupAttributes {
    *
    * @default EcsDeploymentConfig.ALL_AT_ONCE
    */
-  readonly deploymentConfig?: IEcsDeploymentConfig;
+  readonly deploymentConfig?: IDeploymentConfigRef;
 }
 
+@propertyInjectable
 class ImportedEcsDeploymentGroup extends ImportedDeploymentGroupBase implements IEcsDeploymentGroup {
-  public readonly application: IEcsApplication;
-  public readonly deploymentConfig: IEcsDeploymentConfig;
+  /** Uniquely identifies this class. */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-codedeploy.ImportedEcsDeploymentGroup';
+  private readonly _application: IApplicationRef;
+  private readonly _deploymentConfig: IDeploymentConfigRef;
 
   constructor(scope: Construct, id: string, props: EcsDeploymentGroupAttributes) {
     super(scope, id, {
       application: props.application,
       deploymentGroupName: props.deploymentGroupName,
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
-    this.application = props.application;
-    this.deploymentConfig = this._bindDeploymentConfig(props.deploymentConfig || EcsDeploymentConfig.ALL_AT_ONCE);
+    this._application = props.application;
+    this._deploymentConfig = this._bindDeploymentConfig(props.deploymentConfig || EcsDeploymentConfig.ALL_AT_ONCE);
+  }
+
+  public get application(): IEcsApplication {
+    return toIEcsApplication(this._application);
+  }
+
+  public get deploymentConfig(): IEcsDeploymentConfig {
+    return toIBaseDeploymentConfig(this._deploymentConfig);
   }
 }

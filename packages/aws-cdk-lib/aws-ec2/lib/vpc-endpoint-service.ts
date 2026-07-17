@@ -1,8 +1,34 @@
-import { Construct } from 'constructs';
-import { CfnVPCEndpointService, CfnVPCEndpointServicePermissions } from './ec2.generated';
-import { ArnPrincipal } from '../../aws-iam';
-import { Aws, Fn, IResource, Resource, Stack, Token } from '../../core';
-import { Default, RegionInfo } from '../../region-info';
+import type { Construct } from 'constructs';
+import type {
+  IVPCEndpointServiceRef,
+  VPCEndpointServiceReference,
+} from './ec2.generated';
+import {
+  CfnVPCEndpointService,
+  CfnVPCEndpointServicePermissions,
+} from './ec2.generated';
+import type { ArnPrincipal } from '../../aws-iam';
+import type { IResource } from '../../core';
+import { Aws, Fn, Resource, Stack, Token, ValidationError } from '../../core';
+import { addConstructMetadata } from '../../core/lib/metadata-resource';
+import { lit } from '../../core/lib/private/literal-string';
+import { propertyInjectable } from '../../core/lib/prop-injectable';
+import { RegionInfo } from '../../region-info';
+
+/**
+ * IP address types supported for VPC endpoint service.
+ */
+export enum IpAddressType {
+  /**
+   * ipv4 address type.
+   */
+  IPV4 = 'ipv4',
+
+  /**
+   * ipv6 address type.
+   */
+  IPV6 = 'ipv6',
+}
 
 /**
  * A load balancer that can host a VPC Endpoint Service
@@ -21,7 +47,7 @@ export interface IVpcEndpointServiceLoadBalancer {
  * A VPC endpoint service.
  *
  */
-export interface IVpcEndpointService extends IResource {
+export interface IVpcEndpointService extends IResource, IVPCEndpointServiceRef {
   /**
    * The service name of the VPC Endpoint Service that clients use to connect to,
    * like com.amazonaws.vpce.<region>.vpce-svc-xxxxxxxxxxxxxxxx
@@ -44,7 +70,16 @@ export interface IVpcEndpointService extends IResource {
  * @resource AWS::EC2::VPCEndpointService
  *
  */
+@propertyInjectable
 export class VpcEndpointService extends Resource implements IVpcEndpointService {
+  /** Uniquely identifies this class. */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-ec2.VpcEndpointService';
+  /**
+   * The default value for a VPC Endpoint Service name prefix, useful if you do
+   * not have a synthesize-time region literal available (all you have is
+   * `{ "Ref": "AWS::Region" }`)
+   */
+  public static readonly DEFAULT_PREFIX = 'com.amazonaws.vpce';
 
   /**
    * One or more network load balancers to host the service.
@@ -77,6 +112,16 @@ export class VpcEndpointService extends Resource implements IVpcEndpointService 
   public readonly allowedPrincipals: ArnPrincipal[];
 
   /**
+   * IP address types supported for this VPC endpoint service.
+   */
+  private readonly supportedIpAddressTypes?: IpAddressType[];
+
+  /**
+   * The Regions from which service consumers can access the service.
+   */
+  private readonly allowedRegions?: string[];
+
+  /**
    * The id of the VPC Endpoint Service, like vpce-svc-xxxxxxxxxxxxxxxx.
    * @attribute
    */
@@ -94,17 +139,21 @@ export class VpcEndpointService extends Resource implements IVpcEndpointService 
 
   constructor(scope: Construct, id: string, props: VpcEndpointServiceProps) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     if (props.vpcEndpointServiceLoadBalancers === undefined || props.vpcEndpointServiceLoadBalancers.length === 0) {
-      throw new Error('VPC Endpoint Service must have at least one load balancer specified.');
+      throw new ValidationError(lit`EndpointServiceLeastOneLoad`, 'VPC Endpoint Service must have at least one load balancer specified.', this);
     }
 
     this.vpcEndpointServiceLoadBalancers = props.vpcEndpointServiceLoadBalancers;
     this.acceptanceRequired = props.acceptanceRequired ?? true;
     this.contributorInsightsEnabled = props.contributorInsights;
+    this.supportedIpAddressTypes = props.supportedIpAddressTypes;
+    this.allowedRegions = props.allowedRegions;
 
     if (props.allowedPrincipals && props.whitelistedPrincipals) {
-      throw new Error('`whitelistedPrincipals` is deprecated; please use `allowedPrincipals` instead');
+      throw new ValidationError(lit`DeprecatedPleaseInstead`, '`whitelistedPrincipals` is deprecated; please use `allowedPrincipals` instead', this);
     }
     this.allowedPrincipals = props.allowedPrincipals ?? props.whitelistedPrincipals ?? [];
     this.whitelistedPrincipals = this.allowedPrincipals;
@@ -113,14 +162,16 @@ export class VpcEndpointService extends Resource implements IVpcEndpointService 
       networkLoadBalancerArns: this.vpcEndpointServiceLoadBalancers.map(lb => lb.loadBalancerArn),
       acceptanceRequired: this.acceptanceRequired,
       contributorInsightsEnabled: this.contributorInsightsEnabled,
+      supportedIpAddressTypes: this.supportedIpAddressTypes?.map(type => type.toString()),
+      supportedRegions: this.allowedRegions,
     });
 
     this.vpcEndpointServiceId = this.endpointService.ref;
 
     const { region } = Stack.of(this);
     const serviceNamePrefix = !Token.isUnresolved(region) ?
-      (RegionInfo.get(region).vpcEndpointServiceNamePrefix ?? Default.VPC_ENDPOINT_SERVICE_NAME_PREFIX) :
-      Default.VPC_ENDPOINT_SERVICE_NAME_PREFIX;
+      (RegionInfo.get(region).vpcEndpointServiceNamePrefix ?? VpcEndpointService.DEFAULT_PREFIX) :
+      VpcEndpointService.DEFAULT_PREFIX;
 
     this.vpcEndpointServiceName = Fn.join('.', [serviceNamePrefix, Aws.REGION, this.vpcEndpointServiceId]);
     if (this.allowedPrincipals.length > 0) {
@@ -129,6 +180,10 @@ export class VpcEndpointService extends Resource implements IVpcEndpointService 
         allowedPrincipals: this.allowedPrincipals.map(x => x.arn),
       });
     }
+  }
+
+  public get vpcEndpointServiceRef(): VPCEndpointServiceReference {
+    return this.endpointService.vpcEndpointServiceRef;
   }
 }
 
@@ -183,4 +238,16 @@ export interface VpcEndpointServiceProps {
    *
    */
   readonly allowedPrincipals?: ArnPrincipal[];
+
+  /**
+   * Specify which IP address types are supported for VPC endpoint service.
+   * @default - No specific IP address types configured
+   */
+  readonly supportedIpAddressTypes?: IpAddressType[];
+
+  /**
+   * The Regions from which service consumers can access the service.
+   * @default - No Region restrictions
+   */
+  readonly allowedRegions?: string[];
 }

@@ -1,14 +1,18 @@
 import * as fs from 'fs';
-import { Construct } from 'constructs';
+import type { Construct } from 'constructs';
+import type { FunctionReference, IFunctionRef, IKeyValueStoreRef } from './cloudfront.generated';
 import { CfnFunction } from './cloudfront.generated';
-import { IKeyValueStore } from './key-value-store';
-import { IResource, Names, Resource, Stack } from '../../core';
+import type { IResource } from '../../core';
+import { FeatureFlags, Lazy, Names, Resource, Stack, ValidationError } from '../../core';
+import { addConstructMetadata } from '../../core/lib/metadata-resource';
+import { lit } from '../../core/lib/private/literal-string';
+import { propertyInjectable } from '../../core/lib/prop-injectable';
+import * as cxapi from '../../cx-api';
 
 /**
  * Represents the function's source code
  */
 export abstract class FunctionCode {
-
   /**
    * Inline code for function
    * @returns code object with inline code.
@@ -47,7 +51,6 @@ export interface FileCodeOptions {
  * Represents the function's source code as inline code
  */
 class InlineCode extends FunctionCode {
-
   constructor(private code: string) {
     super();
   }
@@ -61,7 +64,6 @@ class InlineCode extends FunctionCode {
  * Represents the function's source code loaded from an external file
  */
 class FileCode extends FunctionCode {
-
   constructor(private options: FileCodeOptions) {
     super();
   }
@@ -74,7 +76,7 @@ class FileCode extends FunctionCode {
 /**
  * Represents a CloudFront Function
  */
-export interface IFunction extends IResource {
+export interface IFunction extends IResource, IFunctionRef {
   /**
    * The name of the function.
    * @attribute
@@ -145,7 +147,7 @@ export interface FunctionProps {
    *
    * @default - no key value store is associated
    */
-  readonly keyValueStore?: IKeyValueStore;
+  readonly keyValueStore?: IKeyValueStoreRef;
 
   /**
    * A flag that determines whether to automatically publish the function to the LIVE stage when it’s created.
@@ -160,7 +162,10 @@ export interface FunctionProps {
  *
  * @resource AWS::CloudFront::Function
  */
+@propertyInjectable
 export class Function extends Resource implements IFunction {
+  /** Uniquely identifies this class. */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-cloudfront.Function';
 
   /** Imports a function by its name and ARN */
   public static fromFunctionAttributes(scope: Construct, id: string, attrs: FunctionAttributes): IFunction {
@@ -168,6 +173,9 @@ export class Function extends Resource implements IFunction {
       public readonly functionName = attrs.functionName;
       public readonly functionArn = attrs.functionArn;
       public readonly functionRuntime = attrs.functionRuntime ?? FunctionRuntime.JS_1_0.value;
+      public readonly functionRef = {
+        functionArn: attrs.functionArn,
+      };
     }(scope, id);
   }
 
@@ -192,18 +200,23 @@ export class Function extends Resource implements IFunction {
    */
   public readonly functionRuntime: string;
 
+  public readonly functionRef: FunctionReference;
+
   constructor(scope: Construct, id: string, props: FunctionProps) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     this.functionName = props.functionName ?? this.generateName();
 
-    const defaultFunctionRuntime = props.keyValueStore ? FunctionRuntime.JS_2_0.value : FunctionRuntime.JS_1_0.value;
+    const useV2Runtime = FeatureFlags.of(this).isEnabled(cxapi.CLOUDFRONT_FUNCTION_DEFAULT_RUNTIME_V2_0);
+    const defaultFunctionRuntime = props.keyValueStore
+      ? FunctionRuntime.JS_2_0.value
+      : (useV2Runtime ? FunctionRuntime.JS_2_0.value : FunctionRuntime.JS_1_0.value);
     this.functionRuntime = props.runtime?.value ?? defaultFunctionRuntime;
 
     if (props.keyValueStore && this.functionRuntime === FunctionRuntime.JS_1_0.value) {
-      throw new Error(
-        `Key Value Stores cannot be associated to functions using the ${this.functionRuntime} runtime`,
-      );
+      throw new ValidationError(lit`KeyValueStoresCannotBeAssociatedWithRuntime`, `Key Value Stores cannot be associated to functions using the ${this.functionRuntime} runtime`, this);
     }
 
     const resource = new CfnFunction(this, 'Resource', {
@@ -212,21 +225,30 @@ export class Function extends Resource implements IFunction {
       functionConfig: {
         comment: props.comment ?? this.functionName,
         runtime: this.functionRuntime,
-        keyValueStoreAssociations: props.keyValueStore ? [{ keyValueStoreArn: props.keyValueStore.keyValueStoreArn }] : undefined,
+        keyValueStoreAssociations: props.keyValueStore ? [{ keyValueStoreArn: props.keyValueStore.keyValueStoreRef.keyValueStoreArn }] : undefined,
       },
       name: this.functionName,
     });
 
     this.functionArn = resource.attrFunctionArn;
     this.functionStage = resource.attrStage;
+    this.functionRef = {
+      functionArn: this.functionArn,
+    };
   }
 
   private generateName(): string {
-    const name = Stack.of(this).region + Names.uniqueId(this);
-    if (name.length > 64) {
-      return name.substring(0, 32) + name.substring(name.length - 32);
+    /**
+     * Since token string can be single- or double-digit region name, it may
+     * lead to non-deterministic behaviour.
+     */
+    const idLength = 64 - '${Token[AWS.Region.00]}'.length;
+    if (Names.uniqueId(this).length <= idLength) {
+      return Stack.of(this).region + Names.uniqueId(this);
     }
-    return name;
+    return Stack.of(this).region + Lazy.string({
+      produce: () => Names.uniqueResourceName(this, { maxLength: 40, allowedSpecialCharacters: '-_' }),
+    });
   }
 }
 
@@ -254,7 +276,7 @@ export interface FunctionAssociation {
   /**
    * The CloudFront function that will be invoked.
    */
-  readonly function: IFunction;
+  readonly function: IFunctionRef;
 
   /** The type of event which should invoke the function. */
   readonly eventType: FunctionEventType;

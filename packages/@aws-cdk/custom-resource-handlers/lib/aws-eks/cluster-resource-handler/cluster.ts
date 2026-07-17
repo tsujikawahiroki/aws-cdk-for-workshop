@@ -1,9 +1,9 @@
-/* eslint-disable no-console */
-// eslint-disable-next-line import/no-extraneous-dependencies
-import * as EKS from '@aws-sdk/client-eks';
-import { EksClient, ResourceEvent, ResourceHandler } from './common';
+
+import type * as EKS from '@aws-sdk/client-eks';
+import type { EksClient, ResourceEvent } from './common';
+import { ResourceHandler } from './common';
 import { compareLoggingProps } from './compareLogging';
-import { IsCompleteResponse, OnEventResponse } from 'aws-cdk-lib/custom-resources/lib/provider-framework/types';
+import type { IsCompleteResponse, OnEventResponse } from '../../copied-from-aws-cdk-lib/provider-framework-types';
 
 const MAX_CLUSTER_NAME_LEN = 100;
 
@@ -44,7 +44,10 @@ export class ClusterResourceHandler extends ResourceHandler {
     const resp = await this.eks.createCluster({
       ...this.newProps,
       name: clusterName,
-    });
+      // deletionProtection is not yet in the SDK types, so we need to explicitly
+      // pass it to prevent SDK v3 from stripping the unknown property during serialization.
+      deletionProtection: (this.newProps as any).deletionProtection,
+    } as any);
 
     if (!resp.cluster) {
       throw new Error(`Error when trying to create cluster ${clusterName}: CreateCluster returned without cluster information`);
@@ -116,8 +119,8 @@ export class ClusterResourceHandler extends ResourceHandler {
     // if there is an update that requires replacement, go ahead and just create
     // a new cluster with the new config. The old cluster will automatically be
     // deleted by cloudformation upon success.
-    if (updates.replaceName || updates.replaceRole ) {
-
+    if (updates.replaceName || updates.replaceRole ||
+          updates.updateBootstrapClusterCreatorAdminPermissions || updates.updateBootstrapSelfManagedAddons) {
       // if we are replacing this cluster and the cluster has an explicit
       // physical name, the creation of the new cluster will fail with "there is
       // already a cluster with that name". this is a common behavior for
@@ -127,6 +130,17 @@ export class ClusterResourceHandler extends ResourceHandler {
       }
 
       return this.onCreate();
+    }
+
+    // validate updates
+    const updateTypes = Object.keys(updates).filter(type => type !== 'updateTags') as (keyof UpdateMap)[];
+    const enabledUpdateTypes = updateTypes.filter((type) => updates[type]);
+    console.log(enabledUpdateTypes);
+
+    if (enabledUpdateTypes.length > 1) {
+      throw new Error(
+        `Only one type of update - ${updateTypes.join(', ')} can be allowed`,
+      );
     }
 
     // Update tags
@@ -185,18 +199,13 @@ export class ClusterResourceHandler extends ResourceHandler {
       return this.updateClusterVersion(this.newProps.version);
     }
 
-    if ((updates.updateLogging && updates.updateAccess) || (updates.updateLogging && updates.updateVpc) ||
-      (updates.updateVpc && updates.updateAccess)) {
-      throw new Error('Only one type of update - VpcConfigUpdate, LoggingUpdate or EndpointAccessUpdate can be allowed');
-    }
-
-    if (updates.updateLogging || updates.updateAccess || updates.updateVpc) {
+    if (updates.updateLogging || updates.updateAccess || updates.updateVpc || updates.updateAuthMode || updates.updateDeletionProtection) {
       const config: EKS.UpdateClusterConfigCommandInput = {
         name: this.clusterName,
       };
       if (updates.updateLogging) {
         config.logging = this.newProps.logging;
-      };
+      }
       if (updates.updateAccess) {
         config.resourcesVpcConfig = {
           endpointPrivateAccess: this.newProps.resourcesVpcConfig?.endpointPrivateAccess,
@@ -204,12 +213,63 @@ export class ClusterResourceHandler extends ResourceHandler {
           publicAccessCidrs: this.newProps.resourcesVpcConfig?.publicAccessCidrs,
         };
       }
+
+      if (updates.updateAuthMode) {
+        // update-authmode will fail if we try to update to the same mode,
+        // so skip in this case.
+        try {
+          const cluster = (await this.eks.describeCluster({ name: this.clusterName })).cluster;
+          if (cluster?.accessConfig?.authenticationMode === this.newProps.accessConfig?.authenticationMode) {
+            console.log(`cluster already at ${cluster?.accessConfig?.authenticationMode}, skipping authMode update`);
+            return;
+          }
+        } catch (e: any) {
+          throw e;
+        }
+
+        // the update path must be
+        // `undefined or CONFIG_MAP` -> `API_AND_CONFIG_MAP` -> `API`
+        // and it's one way path.
+        // old value is API - cannot fallback backwards
+        if (this.oldProps.accessConfig?.authenticationMode === 'API' &&
+          this.newProps.accessConfig?.authenticationMode !== 'API') {
+          throw new Error(`Cannot fallback authenticationMode from API to ${this.newProps.accessConfig?.authenticationMode}`);
+        }
+        // old value is API_AND_CONFIG_MAP - cannot fallback to CONFIG_MAP
+        if (this.oldProps.accessConfig?.authenticationMode === 'API_AND_CONFIG_MAP' &&
+          this.newProps.accessConfig?.authenticationMode === 'CONFIG_MAP') {
+          throw new Error(`Cannot fallback authenticationMode from API_AND_CONFIG_MAP to ${this.newProps.accessConfig?.authenticationMode}`);
+        }
+        // cannot fallback from defined to undefined
+        if (this.oldProps.accessConfig?.authenticationMode !== undefined &&
+          this.newProps.accessConfig?.authenticationMode === undefined) {
+          throw new Error('Cannot fallback authenticationMode from defined to undefined');
+        }
+        // cannot update from undefined to API because undefined defaults CONFIG_MAP which
+        // can only change to API_AND_CONFIG_MAP
+        if (this.oldProps.accessConfig?.authenticationMode === undefined &&
+          this.newProps.accessConfig?.authenticationMode === 'API') {
+          throw new Error('Cannot update from undefined(CONFIG_MAP) to API');
+        }
+        // cannot update from CONFIG_MAP to API
+        if (this.oldProps.accessConfig?.authenticationMode === 'CONFIG_MAP' &&
+          this.newProps.accessConfig?.authenticationMode === 'API') {
+          throw new Error('Cannot update from CONFIG_MAP to API');
+        }
+        config.accessConfig = this.newProps.accessConfig;
+      }
+
       if (updates.updateVpc) {
         config.resourcesVpcConfig = {
           subnetIds: this.newProps.resourcesVpcConfig?.subnetIds,
           securityGroupIds: this.newProps.resourcesVpcConfig?.securityGroupIds,
         };
       }
+
+      if (updates.updateDeletionProtection) {
+        (config as any).deletionProtection = (this.newProps as any).deletionProtection;
+      }
+
       const updateResponse = await this.eks.updateClusterConfig(config);
 
       return { EksUpdateId: updateResponse.update?.id };
@@ -331,7 +391,6 @@ export class ClusterResourceHandler extends ResourceHandler {
 }
 
 function parseProps(props: any): EKS.CreateClusterCommandInput {
-
   const parsed = props?.Config ?? {};
 
   // this is weird but these boolean properties are passed by CFN as a string, and we need them to be booleanic for the SDK.
@@ -349,8 +408,23 @@ function parseProps(props: any): EKS.CreateClusterCommandInput {
     parsed.logging.clusterLogging[0].enabled = parsed.logging.clusterLogging[0].enabled === 'true';
   }
 
-  return parsed;
+  if (parsed.bootstrapSelfManagedAddons) {
+    if (typeof (parsed.bootstrapSelfManagedAddons) === 'string') {
+      parsed.bootstrapSelfManagedAddons = parsed.bootstrapSelfManagedAddons === 'true';
+    }
+  }
 
+  if (parsed.accessConfig?.bootstrapClusterCreatorAdminPermissions) {
+    if (typeof (parsed.accessConfig.bootstrapClusterCreatorAdminPermissions) === 'string') {
+      parsed.accessConfig.bootstrapClusterCreatorAdminPermissions = parsed.accessConfig.bootstrapClusterCreatorAdminPermissions === 'true';
+    }
+  }
+
+  if (typeof (parsed.deletionProtection) === 'string') {
+    parsed.deletionProtection = parsed.deletionProtection === 'true';
+  }
+
+  return parsed;
 }
 
 interface UpdateMap {
@@ -361,8 +435,12 @@ interface UpdateMap {
   updateLogging: boolean; // logging
   updateEncryption: boolean; // encryption (cannot be updated)
   updateAccess: boolean; // resourcesVpcConfig.endpointPrivateAccess and endpointPublicAccess
+  updateAuthMode: boolean; // accessConfig.authenticationMode
+  updateBootstrapClusterCreatorAdminPermissions: boolean; // accessConfig.bootstrapClusterCreatorAdminPermissions
   updateVpc: boolean; // resourcesVpcConfig.subnetIds and securityGroupIds
   updateTags: boolean; // tags
+  updateBootstrapSelfManagedAddons: boolean; // cluster with default networking add-ons
+  updateDeletionProtection: boolean; // deletionProtection
 }
 
 function analyzeUpdate(oldProps: Partial<EKS.CreateClusterCommandInput>, newProps: EKS.CreateClusterCommandInput): UpdateMap {
@@ -376,6 +454,13 @@ function analyzeUpdate(oldProps: Partial<EKS.CreateClusterCommandInput>, newProp
   const newPublicAccessCidrs = new Set(newVpcProps.publicAccessCidrs ?? []);
   const newEnc = newProps.encryptionConfig || {};
   const oldEnc = oldProps.encryptionConfig || {};
+  const newAccessConfig = newProps.accessConfig || {};
+  const oldAccessConfig = oldProps.accessConfig || {};
+
+  // Helper function to compare values where undefined and true are considered equal
+  const compareUndefinedOrTrue = (val1: boolean | undefined, val2: boolean | undefined): boolean => {
+    return (val1 ?? true) === (val2 ?? true);
+  };
 
   return {
     replaceName: newProps.name !== oldProps.name,
@@ -390,7 +475,17 @@ function analyzeUpdate(oldProps: Partial<EKS.CreateClusterCommandInput>, newProp
     updateVersion: newProps.version !== oldProps.version,
     updateEncryption: JSON.stringify(newEnc) !== JSON.stringify(oldEnc),
     updateLogging: JSON.stringify(newProps.logging) !== JSON.stringify(oldProps.logging),
+    updateAuthMode: JSON.stringify(newAccessConfig.authenticationMode) !== JSON.stringify(oldAccessConfig.authenticationMode),
+    updateBootstrapClusterCreatorAdminPermissions: !compareUndefinedOrTrue(
+      newAccessConfig.bootstrapClusterCreatorAdminPermissions,
+      oldAccessConfig.bootstrapClusterCreatorAdminPermissions,
+    ),
     updateTags: JSON.stringify(newProps.tags) !== JSON.stringify(oldProps.tags),
+    updateBootstrapSelfManagedAddons: !compareUndefinedOrTrue(
+      newProps.bootstrapSelfManagedAddons,
+      oldProps.bootstrapSelfManagedAddons,
+    ),
+    updateDeletionProtection: (newProps as any).deletionProtection !== (oldProps as any).deletionProtection,
   };
 }
 
@@ -416,7 +511,7 @@ function getTagsToUpdate<T extends Record<string, string>>(oldTags: T, newTags: 
 
 function getTagsToRemove<T extends Record<string, string>>(oldTags: T, newTags: T): string[] {
   const missingKeys: string[] = [];
-  //Get all tag keys to remove
+  // Get all tag keys to remove
   for (const key in oldTags) {
     if (oldTags.hasOwnProperty(key) && !newTags.hasOwnProperty(key)) {
       missingKeys.push(key);

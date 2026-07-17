@@ -1,15 +1,23 @@
-import { Construct } from 'constructs';
+import type { Construct } from 'constructs';
 import { CfnApiKey, CfnGraphQLApi, CfnGraphQLSchema, CfnDomainName, CfnDomainNameApiAssociation, CfnSourceApiAssociation } from './appsync.generated';
-import { IGraphqlApi, GraphqlApiBase, Visibility, AuthorizationType } from './graphqlapi-base';
-import { ISchema, SchemaFile } from './schema';
+import type { IGraphqlApi } from './graphqlapi-base';
+import { GraphqlApiBase, Visibility, AuthorizationType } from './graphqlapi-base';
+import type { ISchema } from './schema';
+import { SchemaFile } from './schema';
 import { MergeType, addSourceApiAutoMergePermission, addSourceGraphQLPermission } from './source-api-association';
-import { ICertificate } from '../../aws-certificatemanager';
-import { IUserPool } from '../../aws-cognito';
-import { ManagedPolicy, Role, IRole, ServicePrincipal } from '../../aws-iam';
-import { IFunction } from '../../aws-lambda';
-import { ILogGroup, LogGroup, LogRetention, RetentionDays } from '../../aws-logs';
-import { CfnResource, Duration, Expiration, FeatureFlags, IResolvable, Lazy, Stack, Token } from '../../core';
+import type { IUserPool } from '../../aws-cognito';
+import type { IRole, IRoleRef } from '../../aws-iam';
+import { ManagedPolicy, Role, ServicePrincipal } from '../../aws-iam';
+import type { IFunction } from '../../aws-lambda';
+import type { ILogGroup } from '../../aws-logs';
+import { LogGroup, LogRetention, RetentionDays } from '../../aws-logs';
+import type { CfnResource, Expiration, IResolvable } from '../../core';
+import { Annotations, Duration, FeatureFlags, Lazy, Stack, Token, ValidationError } from '../../core';
+import { addConstructMetadata, MethodMetadata } from '../../core/lib/metadata-resource';
+import { lit } from '../../core/lib/private/literal-string';
+import { propertyInjectable } from '../../core/lib/prop-injectable';
 import * as cxapi from '../../cx-api';
+import type { ICertificateRef } from '../../interfaces/generated/aws-certificatemanager-interfaces.generated';
 
 /**
  * Interface to specify default or additional authorization(s)
@@ -186,15 +194,23 @@ export interface AuthorizationConfig {
  */
 export enum FieldLogLevel {
   /**
-   * No logging
+   * Resolver logging is disabled
    */
   NONE = 'NONE',
   /**
-   * Error logging
+   * Only Error messages appear in logs
    */
   ERROR = 'ERROR',
   /**
-   * All logging
+   * Info and Error messages appear in logs
+   */
+  INFO = 'INFO',
+  /**
+   * Debug, Info, and Error messages, appear in logs
+   */
+  DEBUG = 'DEBUG',
+  /**
+   * All messages (Debug, Error, Info, and Trace) appear in logs
    */
   ALL = 'ALL',
 }
@@ -221,17 +237,77 @@ export interface LogConfig {
    *
    * @default - None
    */
-  readonly role?: IRole;
+  readonly role?: IRoleRef;
 
   /**
-  * The number of days log events are kept in CloudWatch Logs.
-  * By default AppSync keeps the logs infinitely. When updating this property,
-  * unsetting it doesn't remove the log retention policy.
-  * To remove the retention policy, set the value to `INFINITE`
-  *
-  * @default RetentionDays.INFINITE
-  */
+   * The number of days log events are kept in CloudWatch Logs.
+   * By default AppSync keeps the logs infinitely. When updating this property,
+   * unsetting it doesn't remove the log retention policy.
+   * To remove the retention policy, set the value to `INFINITE`
+   *
+   * @default RetentionDays.INFINITE
+   */
   readonly retention?: RetentionDays;
+}
+
+/**
+ * Controls how data source metrics will be emitted to CloudWatch.
+ */
+export enum DataSourceLevelMetricsBehavior {
+  /**
+   * Records and emits metric data for all data sources in the request.
+   */
+  FULL_REQUEST_DATA_SOURCE_METRICS = 'FULL_REQUEST_DATA_SOURCE_METRICS',
+  /**
+   * Records and emits metric data for data sources that have the MetricsConfig value set to ENABLED.
+   */
+  PER_DATA_SOURCE_METRICS = 'PER_DATA_SOURCE_METRICS',
+}
+
+/**
+ * Controls how operation metrics will be emitted to CloudWatch.
+ */
+export enum OperationLevelMetricsConfig {
+  /**
+   * Sends operation metrics to CloudWatch.
+   */
+  ENABLED = 'ENABLED',
+  /**
+   * Does not send operation metrics to CloudWatch.
+   */
+  DISABLED = 'DISABLED',
+}
+
+/**
+ * Controls how resolver metrics will be emitted to CloudWatch.
+ */
+export enum ResolverLevelMetricsBehavior {
+  /**
+   * Records and emits metric data for all resolvers in the request.
+   */
+  FULL_REQUEST_RESOLVER_METRICS = 'FULL_REQUEST_RESOLVER_METRICS',
+  /**
+   * Records and emits metric data for resolvers that have the MetricsConfig value set to ENABLED.
+   */
+  PER_RESOLVER_METRICS = 'PER_RESOLVER_METRICS',
+}
+
+/**
+ * Enhanced metrics configuration for AppSync
+ */
+export interface EnhancedMetricsConfig {
+  /**
+   * Controls how data source metrics will be emitted to CloudWatch.
+   */
+  readonly dataSourceLevelMetricsBehavior: DataSourceLevelMetricsBehavior;
+  /**
+   * Controls how operation metrics will be emitted to CloudWatch.
+   */
+  readonly operationLevelMetricsConfig: OperationLevelMetricsConfig;
+  /**
+   * Controls how resolver metrics will be emitted to CloudWatch.
+   */
+  readonly resolverLevelMetricsBehavior: ResolverLevelMetricsBehavior;
 }
 
 /**
@@ -241,7 +317,7 @@ export interface DomainOptions {
   /**
    * The certificate to use with the domain name.
    */
-  readonly certificate: ICertificate;
+  readonly certificate: ICertificateRef;
 
   /**
    * The actual domain name. For example, `api.example.com`.
@@ -268,10 +344,12 @@ export interface SourceApiOptions {
 
 /**
  * Configuration of source API
-*/
+ */
 export interface SourceApi {
   /**
    * Source API that is associated with the merged API
+   *
+   * @jsii suppress JSII5019 For historic reasons
    */
   readonly sourceApi: IGraphqlApi;
 
@@ -431,6 +509,22 @@ export interface GraphqlApiProps {
    * @default - No environment variables.
    */
   readonly environmentVariables?: { [key: string]: string };
+
+  /**
+   * The owner contact information for an API resource.
+   *
+   * This field accepts any string input with a length of 0 - 256 characters.
+   *
+   * @default - No owner contact.
+   */
+  readonly ownerContact?: string;
+
+  /**
+   * Enables and controls the enhanced metrics feature.
+   *
+   * @default - Enhanced metrics disabled.
+   */
+  readonly enhancedMetricsConfig?: EnhancedMetricsConfig;
 }
 
 /**
@@ -438,7 +532,7 @@ export interface GraphqlApiProps {
  */
 export interface GraphqlApiAttributes {
   /**
-   * an unique AWS AppSync GraphQL API identifier
+   * a unique AWS AppSync GraphQL API identifier
    * i.e. 'lxz775lwdrgcndgz3nurvac7oa'
    */
   readonly graphqlApiId: string;
@@ -491,7 +585,13 @@ export enum IntrospectionConfig {
  *
  * @resource AWS::AppSync::GraphQLApi
  */
+@propertyInjectable
 export class GraphqlApi extends GraphqlApiBase {
+  /**
+   * Uniquely identifies this class.
+   */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-appsync.GraphqlApi';
+
   /**
    * Import a GraphQL API through this function
    *
@@ -512,7 +612,7 @@ export class GraphqlApi extends GraphqlApiBase {
       // this value is only needed to construct event rules.
       public readonly graphQLEndpointArn = attrs.graphQLEndpointArn ?? '';
       public readonly visibility = attrs.visibility ?? Visibility.GLOBAL;
-      public readonly modes = attrs.modes ?? []
+      public readonly modes = attrs.modes ?? [];
 
       constructor(s: Construct, i: string) {
         super(s, i);
@@ -522,7 +622,7 @@ export class GraphqlApi extends GraphqlApiBase {
   }
 
   /**
-   * an unique AWS AppSync GraphQL API identifier
+   * a unique AWS AppSync GraphQL API identifier
    * i.e. 'lxz775lwdrgcndgz3nurvac7oa'
    */
   public readonly apiId: string;
@@ -561,7 +661,7 @@ export class GraphqlApi extends GraphqlApiBase {
     if (this.definition.schema) {
       return this.definition.schema;
     }
-    throw new Error('Schema does not exist for AppSync merged APIs.');
+    throw new ValidationError(lit`SchemaExistAppSyncMerged`, 'Schema does not exist for AppSync merged APIs.', this);
   }
 
   /**
@@ -591,6 +691,8 @@ export class GraphqlApi extends GraphqlApiBase {
 
   constructor(scope: Construct, id: string, props: GraphqlApiProps) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     const defaultMode = props.authorizationConfig?.defaultAuthorization ??
       { authorizationType: AuthorizationType.API_KEY };
@@ -602,16 +704,19 @@ export class GraphqlApi extends GraphqlApiBase {
     this.validateAuthorizationProps(modes);
 
     if (!props.schema && !props.definition) {
-      throw new Error('You must specify a GraphQL schema or source APIs in property definition.');
+      throw new ValidationError(lit`SpecifyGraphSchemaSourceProperty`, 'You must specify a GraphQL schema or source APIs in property definition.', this);
     }
     if ((props.schema !== undefined) === (props.definition !== undefined)) {
-      throw new Error('You cannot specify both properties schema and definition.');
+      throw new ValidationError(lit`CannotSpecifyPropertiesSchemaDefinition`, 'You cannot specify both properties schema and definition.', this);
     }
     if (props.queryDepthLimit !== undefined && (props.queryDepthLimit < 0 || props.queryDepthLimit > 75)) {
-      throw new Error('You must specify a query depth limit between 0 and 75.');
+      throw new ValidationError(lit`SpecifyQueryDepthLimit`, 'You must specify a query depth limit between 0 and 75.', this);
     }
     if (props.resolverCountLimit !== undefined && (props.resolverCountLimit < 0 || props.resolverCountLimit > 10000)) {
-      throw new Error('You must specify a resolver count limit between 0 and 10000.');
+      throw new ValidationError(lit`SpecifyResolverCountLimit`, 'You must specify a resolver count limit between 0 and 10000.', this);
+    }
+    if (!Token.isUnresolved(props.ownerContact) && props.ownerContact !== undefined && (props.ownerContact.length > 256)) {
+      throw new ValidationError(lit`SpecifyStringCharactersLess`, 'You must specify `ownerContact` as a string of 256 characters or less.', this);
     }
 
     this.definition = props.schema ? Definition.fromSchema(props.schema) : props.definition!;
@@ -645,6 +750,8 @@ export class GraphqlApi extends GraphqlApiBase {
       queryDepthLimit: props.queryDepthLimit,
       resolverCountLimit: props.resolverCountLimit,
       environmentVariables: Lazy.any({ produce: () => this.renderEnvironmentVariables() }),
+      ownerContact: props.ownerContact,
+      enhancedMetricsConfig: this.setupEnhancedMetricsConfig(props.enhancedMetricsConfig),
     });
 
     this.apiId = this.api.attrApiId;
@@ -662,7 +769,7 @@ export class GraphqlApi extends GraphqlApiBase {
     if (props.domainName) {
       this.domainNameResource = new CfnDomainName(this, 'DomainName', {
         domainName: props.domainName.domainName,
-        certificateArn: props.domainName.certificate.certificateArn,
+        certificateArn: props.domainName.certificate.certificateRef.certificateId,
         description: `domain for ${this.name} at ${this.graphqlUrl}`,
       });
       const domainNameAssociation = new CfnDomainNameApiAssociation(this, 'DomainAssociation', {
@@ -688,10 +795,19 @@ export class GraphqlApi extends GraphqlApiBase {
       const config = modes.find((mode: AuthorizationMode) => {
         return mode.authorizationType === AuthorizationType.LAMBDA && mode.lambdaAuthorizerConfig;
       })?.lambdaAuthorizerConfig;
-      config?.handler.addPermission(`${id}-appsync`, {
-        principal: new ServicePrincipal('appsync.amazonaws.com'),
-        action: 'lambda:InvokeFunction',
-      });
+
+      if (FeatureFlags.of(this).isEnabled(cxapi.APPSYNC_GRAPHQLAPI_SCOPE_LAMBDA_FUNCTION_PERMISSION)) {
+        config?.handler.addPermission(`${id}-appsync`, {
+          principal: new ServicePrincipal('appsync.amazonaws.com'),
+          action: 'lambda:InvokeFunction',
+          sourceArn: this.arn,
+        });
+      } else {
+        config?.handler.addPermission(`${id}-appsync`, {
+          principal: new ServicePrincipal('appsync.amazonaws.com'),
+          action: 'lambda:InvokeFunction',
+        });
+      }
     }
 
     const logGroupName = `/aws/appsync/apis/${this.apiId}`;
@@ -705,7 +821,6 @@ export class GraphqlApi extends GraphqlApiBase {
     } else {
       this.logGroup = LogGroup.fromLogGroupName(this, 'LogGroup', logGroupName);
     }
-
   }
 
   private setupSourceApiAssociations() {
@@ -756,24 +871,24 @@ export class GraphqlApi extends GraphqlApiBase {
 
   private validateAuthorizationProps(modes: AuthorizationMode[]) {
     if (modes.filter((mode) => mode.authorizationType === AuthorizationType.LAMBDA).length > 1) {
-      throw new Error('You can only have a single AWS Lambda function configured to authorize your API.');
+      throw new ValidationError(lit`SingleLambdaFunctionConfiguredAuthorize`, 'You can only have a single AWS Lambda function configured to authorize your API.', this);
     }
     modes.map((mode) => {
       if (mode.authorizationType === AuthorizationType.OIDC && !mode.openIdConnectConfig) {
-        throw new Error('Missing OIDC Configuration');
+        throw new ValidationError(lit`MissingConfiguration`, 'Missing OIDC Configuration', this);
       }
       if (mode.authorizationType === AuthorizationType.USER_POOL && !mode.userPoolConfig) {
-        throw new Error('Missing User Pool Configuration');
+        throw new ValidationError(lit`MissingUserPoolConfiguration`, 'Missing User Pool Configuration', this);
       }
       if (mode.authorizationType === AuthorizationType.LAMBDA && !mode.lambdaAuthorizerConfig) {
-        throw new Error('Missing Lambda Configuration');
+        throw new ValidationError(lit`MissingLambdaConfiguration`, 'Missing Lambda Configuration', this);
       }
     });
     if (modes.filter((mode) => mode.authorizationType === AuthorizationType.API_KEY).length > 1) {
-      throw new Error('You can\'t duplicate API_KEY configuration. See https://docs.aws.amazon.com/appsync/latest/devguide/security.html');
+      throw new ValidationError(lit`CanTDuplicateApiKeyConfiguration`, 'You can\'t duplicate API_KEY configuration. See https://docs.aws.amazon.com/appsync/latest/devguide/security.html', this);
     }
     if (modes.filter((mode) => mode.authorizationType === AuthorizationType.IAM).length > 1) {
-      throw new Error('You can\'t duplicate IAM configuration. See https://docs.aws.amazon.com/appsync/latest/devguide/security.html');
+      throw new ValidationError(lit`CanTDuplicateConfiguration`, 'You can\'t duplicate IAM configuration. See https://docs.aws.amazon.com/appsync/latest/devguide/security.html', this);
     }
   }
 
@@ -782,28 +897,30 @@ export class GraphqlApi extends GraphqlApiBase {
    *
    * @param construct the dependee
    */
+  @MethodMetadata()
   public addSchemaDependency(construct: CfnResource): boolean {
     if (this.schemaResource) {
       construct.addDependency(this.schemaResource);
-    };
+    }
     return true;
   }
 
   /**
    * Add an environment variable to the construct.
    */
+  @MethodMetadata()
   public addEnvironmentVariable(key: string, value: string) {
     if (this.definition.sourceApiOptions) {
-      throw new Error('Environment variables are not supported for merged APIs');
+      throw new ValidationError(lit`EnvironmentVariablesSupportedMerged`, 'Environment variables are not supported for merged APIs', this);
     }
     if (!Token.isUnresolved(key) && !/^[A-Za-z]+\w*$/.test(key)) {
-      throw new Error(`Key '${key}' must begin with a letter and can only contain letters, numbers, and underscores`);
+      throw new ValidationError(lit`MustBeBeginLetterOnly`, `Key '${key}' must begin with a letter and can only contain letters, numbers, and underscores`, this);
     }
     if (!Token.isUnresolved(key) && (key.length < 2 || key.length > 64)) {
-      throw new Error(`Key '${key}' must be between 2 and 64 characters long, got ${key.length}`);
+      throw new ValidationError(lit`MustBeBetweenCharactersLong`, `Key '${key}' must be between 2 and 64 characters long, got ${key.length}`, this);
     }
     if (!Token.isUnresolved(value) && value.length > 512) {
-      throw new Error(`Value for '${key}' is too long. Values can be up to 512 characters long, got ${value.length}`);
+      throw new ValidationError(lit`ValueLong`, `Value for '${key}' is too long. Values can be up to 512 characters long, got ${value.length}`, this);
     }
 
     this.environmentVariables[key] = value;
@@ -824,7 +941,7 @@ export class GraphqlApi extends GraphqlApiBase {
 
   private setupLogConfig(config?: LogConfig) {
     if (!config) return undefined;
-    const logsRoleArn: string = config.role?.roleArn ?? new Role(this, 'ApiLogsRole', {
+    const logsRoleArn: string = config.role?.roleRef.roleArn ?? new Role(this, 'ApiLogsRole', {
       assumedBy: new ServicePrincipal('appsync.amazonaws.com'),
       managedPolicies: [
         ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSAppSyncPushToCloudWatchLogs'),
@@ -879,6 +996,24 @@ export class GraphqlApi extends GraphqlApiBase {
     ], []);
   }
 
+  private setupEnhancedMetricsConfig(config?: EnhancedMetricsConfig) {
+    if (!config) return undefined;
+    const dataSourceLevelMetricsBehavior = config.dataSourceLevelMetricsBehavior;
+    if (dataSourceLevelMetricsBehavior === DataSourceLevelMetricsBehavior.FULL_REQUEST_DATA_SOURCE_METRICS ) {
+      Annotations.of(this).addWarningV2('@aws-cdk/aws-appsync:fullRequestDataSourceMetrics', 'When DataSourceLevelMetricsBehavior is set to FULL_REQUEST_DATA_SOURCE_METRICS, metrics are sent to CloudWatch for all data sources used in the request, regardless of whether a data source’s MetricsConfig is set to ENABLED or DISABLED.');
+    }
+    const operationLevelMetricsEnabled = config.operationLevelMetricsConfig;
+    const resolverLevelMetricsBehavior = config.resolverLevelMetricsBehavior;
+    if (resolverLevelMetricsBehavior === ResolverLevelMetricsBehavior.FULL_REQUEST_RESOLVER_METRICS ) {
+      Annotations.of(this).addWarningV2('@aws-cdk/aws-appsync:fullRequestResolverMetrics', 'When ResolverLevelMetricsBehavior is set to FULL_REQUEST_RESOLVER_METRICS, metrics are sent to CloudWatch for all resolvers used in the request, regardless of whether a resolver’s MetricsConfig is set to ENABLED or DISABLED.');
+    }
+    return {
+      dataSourceLevelMetricsBehavior: dataSourceLevelMetricsBehavior,
+      operationLevelMetricsConfig: operationLevelMetricsEnabled,
+      resolverLevelMetricsBehavior: resolverLevelMetricsBehavior,
+    };
+  }
+
   private createAPIKey(config?: ApiKeyConfig) {
     if (config?.expires?.isBefore(Duration.days(1)) || config?.expires?.isAfter(Duration.days(365))) {
       throw Error('API key expiration must be between 1 and 365 days.');
@@ -896,7 +1031,7 @@ export class GraphqlApi extends GraphqlApiBase {
    */
   public get appSyncDomainName(): string {
     if (!this.domainNameResource) {
-      throw new Error('Cannot retrieve the appSyncDomainName without a domainName configuration');
+      throw new ValidationError(lit`CannotRetrieveAppSyncDomain`, 'Cannot retrieve the appSyncDomainName without a domainName configuration', this);
     }
     return this.domainNameResource.attrAppSyncDomainName;
   }

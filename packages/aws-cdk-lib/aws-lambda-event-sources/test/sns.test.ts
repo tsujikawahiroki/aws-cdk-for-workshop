@@ -5,7 +5,7 @@ import * as sqs from '../../aws-sqs';
 import * as cdk from '../../core';
 import * as sources from '../lib';
 
-/* eslint-disable quote-props */
+/* eslint-disable @stylistic/quote-props */
 
 describe('SNSEventSource', () => {
   test('sufficiently complex example', () => {
@@ -44,7 +44,6 @@ describe('SNSEventSource', () => {
         'Ref': 'TD925BC7E',
       },
     });
-
   });
 
   test('props are passed to subscription', () => {
@@ -106,6 +105,5 @@ describe('SNSEventSource', () => {
         },
       },
     });
-
   });
 });

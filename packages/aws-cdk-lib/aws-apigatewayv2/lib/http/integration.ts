@@ -1,11 +1,18 @@
-import { Construct } from 'constructs';
-import { IHttpApi } from './api';
-import { HttpMethod, IHttpRoute } from './route';
+import type { Construct } from 'constructs';
+import type { IHttpApi, IHttpApiRef } from './api';
+import { toIHttpApi } from './api';
+import type { HttpMethod, IHttpRoute } from './route';
+import type { IntegrationReference } from '.././index';
 import { CfnIntegration } from '.././index';
-import { IRole } from '../../../aws-iam';
+import type { IRoleRef } from '../../../aws-iam';
+import type { Duration } from '../../../core';
 import { Aws, Resource } from '../../../core';
-import { IIntegration } from '../common';
-import { ParameterMapping } from '../parameter-mapping';
+import { ValidationError } from '../../../core/lib/errors';
+import { addConstructMetadata } from '../../../core/lib/metadata-resource';
+import { lit } from '../../../core/lib/private/literal-string';
+import { propertyInjectable } from '../../../core/lib/prop-injectable';
+import type { IIntegration } from '../common';
+import type { ParameterMapping } from '../parameter-mapping';
 
 /**
  * Represents an Integration for an HTTP API.
@@ -97,8 +104,8 @@ export abstract class IntegrationCredentials {
   /**
    * Use the specified role for integration requests
    */
-  public static fromRole(role: IRole): IntegrationCredentials {
-    return { credentialsArn: role.roleArn };
+  public static fromRole(role: IRoleRef): IntegrationCredentials {
+    return { credentialsArn: role.roleRef.roleArn };
   }
 
   /** Use the calling user's identity to call the integration */
@@ -159,7 +166,7 @@ export interface HttpIntegrationProps {
   /**
    * The HTTP API to which this integration should be bound.
    */
-  readonly httpApi: IHttpApi;
+  readonly httpApi: IHttpApiRef;
 
   /**
    * Integration type
@@ -219,6 +226,14 @@ export interface HttpIntegrationProps {
   readonly secureServerName?: string;
 
   /**
+   * The maximum amount of time an integration will run before it returns without a response.
+   * Must be between 50 milliseconds and 29 seconds.
+   *
+   *  @default Duration.seconds(29)
+   */
+  readonly timeout?: Duration;
+
+  /**
    * Specifies how to transform HTTP requests before sending them to the backend
    * @see https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-parameter-mapping.html
    * @default undefined requests are sent to the backend unmodified
@@ -237,20 +252,29 @@ export interface HttpIntegrationProps {
  * The integration for an API route.
  * @resource AWS::ApiGatewayV2::Integration
  */
+@propertyInjectable
 export class HttpIntegration extends Resource implements IHttpIntegration {
+  /** Uniquely identifies this class. */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-apigatewayv2.HttpIntegration';
   public readonly integrationId: string;
 
-  public readonly httpApi: IHttpApi;
+  private readonly _httpApi: IHttpApiRef;
 
   constructor(scope: Construct, id: string, props: HttpIntegrationProps) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     if (!props.integrationSubtype && !props.integrationUri) {
-      throw new Error('Either `integrationSubtype` or `integrationUri` must be specified.');
+      throw new ValidationError(lit`MustBeEitherSpecified`, 'Either `integrationSubtype` or `integrationUri` must be specified.', scope);
+    }
+
+    if (props.timeout && !props.timeout.isUnresolved() && (props.timeout.toMilliseconds() < 50 || props.timeout.toMilliseconds() > 29000)) {
+      throw new ValidationError(lit`IntegrationTimeoutMillisecondsSeconds`, 'Integration timeout must be between 50 milliseconds and 29 seconds.', scope);
     }
 
     const integ = new CfnIntegration(this, 'Resource', {
-      apiId: props.httpApi.apiId,
+      apiId: props.httpApi.apiRef.apiId,
       integrationType: props.integrationType,
       integrationSubtype: props.integrationSubtype,
       integrationUri: props.integrationUri,
@@ -260,6 +284,7 @@ export class HttpIntegration extends Resource implements IHttpIntegration {
       payloadFormatVersion: props.payloadFormatVersion?.version,
       requestParameters: props.parameterMapping?.mappings,
       credentialsArn: props.credentials?.credentialsArn,
+      timeoutInMillis: props.timeout?.toMilliseconds(),
     });
 
     if (props.secureServerName) {
@@ -269,7 +294,18 @@ export class HttpIntegration extends Resource implements IHttpIntegration {
     }
 
     this.integrationId = integ.ref;
-    this.httpApi = props.httpApi;
+    this._httpApi = props.httpApi;
+  }
+
+  public get httpApi(): IHttpApi {
+    return toIHttpApi(this._httpApi);
+  }
+
+  public get integrationRef(): IntegrationReference {
+    return {
+      apiId: this._httpApi.apiRef.apiId,
+      integrationId: this.integrationId,
+    };
   }
 }
 
@@ -308,7 +344,7 @@ export abstract class HttpRouteIntegration {
    */
   public _bindToRoute(options: HttpRouteIntegrationBindOptions): { readonly integrationId: string } {
     if (this.integration && this.integration.httpApi.node.addr !== options.route.httpApi.node.addr) {
-      throw new Error('A single integration cannot be associated with multiple APIs.');
+      throw new ValidationError(lit`SingleIntegrationCannotAssociatedMultiple`, 'A single integration cannot be associated with multiple APIs.', options.scope);
     }
 
     if (!this.integration) {
@@ -326,6 +362,7 @@ export abstract class HttpRouteIntegration {
         secureServerName: config.secureServerName,
         parameterMapping: config.parameterMapping,
         credentials: config.credentials,
+        timeout: config.timeout,
       });
     }
     this.completeBind(options);
@@ -409,10 +446,18 @@ export interface HttpRouteIntegrationConfig {
   readonly secureServerName?: string;
 
   /**
-  * Specifies how to transform HTTP requests before sending them to the backend
-  * @see https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-parameter-mapping.html
-  * @default undefined requests are sent to the backend unmodified
-  */
+   * The maximum amount of time an integration will run before it returns without a response.
+   * Must be between 50 milliseconds and 29 seconds.
+   *
+   * @default Duration.seconds(29)
+   */
+  readonly timeout?: Duration;
+
+  /**
+   * Specifies how to transform HTTP requests before sending them to the backend
+   * @see https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-parameter-mapping.html
+   * @default undefined requests are sent to the backend unmodified
+   */
   readonly parameterMapping?: ParameterMapping;
 
   /**

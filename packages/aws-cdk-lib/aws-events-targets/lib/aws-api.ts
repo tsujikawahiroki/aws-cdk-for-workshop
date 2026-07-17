@@ -1,15 +1,16 @@
-import { metadata } from './sdk-api-metadata.generated';
 import { addLambdaPermission } from './util';
 import * as events from '../../aws-events';
 import * as iam from '../../aws-iam';
-import * as lambda from '../../aws-lambda';
+import type * as lambda from '../../aws-lambda';
 import { Annotations, Duration } from '../../core';
 import { AwsApiSingletonFunction } from '../../custom-resource-handlers/dist/aws-events-targets/aws-api-provider.generated';
+import * as metadata from '../../custom-resources/lib/helpers-internal/sdk-v3-metadata.json';
 
+type AwsSdkMetadataItem = { iamPrefix: string };
 /**
  * AWS SDK service metadata.
  */
-export type AwsSdkMetadata = {[key: string]: any};
+export type AwsSdkMetadata = {[key: string]: AwsSdkMetadataItem | {}};
 
 const awsSdkMetadata: AwsSdkMetadata = metadata;
 
@@ -80,7 +81,7 @@ export class AwsApi implements events.IRuleTarget {
    * Returns a RuleTarget that can be used to trigger this AwsApi as a
    * result from an EventBridge event.
    */
-  public bind(rule: events.IRule, id?: string): events.RuleTargetConfig {
+  public bind(rule: events.IRuleRef, id?: string): events.RuleTargetConfig {
     const handler = new AwsApiSingletonFunction(rule as events.Rule, `${rule.node.id}${id}Handler`, {
       timeout: Duration.seconds(60),
       memorySize: 256,
@@ -135,7 +136,7 @@ services and actions from https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/in
  */
 function awsSdkToIamAction(service: string, action: string): string {
   const srv = service.toLowerCase();
-  const iamService = awsSdkMetadata[srv].prefix || srv;
+  const iamService = (awsSdkMetadata[srv] as AwsSdkMetadataItem).iamPrefix || srv;
   const iamAction = action.charAt(0).toUpperCase() + action.slice(1);
   return `${iamService}:${iamAction}`;
 }

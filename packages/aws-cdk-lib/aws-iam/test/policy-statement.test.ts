@@ -1,8 +1,8 @@
+import * as cdk from '../../core';
 import { Stack } from '../../core';
 import { AnyPrincipal, Group, PolicyDocument, PolicyStatement, Effect } from '../lib';
 
 describe('IAM policy statement', () => {
-
   describe('from JSON', () => {
     test('parses with no principal', () => {
       // given
@@ -81,7 +81,6 @@ describe('IAM policy statement', () => {
       const doc2 = PolicyDocument.fromJson(doc1.toJSON());
 
       expect(stack.resolve(doc2)).toEqual(stack.resolve(doc1));
-
     });
 
     test('parses with notAction', () => {
@@ -97,7 +96,6 @@ describe('IAM policy statement', () => {
       const doc2 = PolicyDocument.fromJson(doc1.toJSON());
 
       expect(stack.resolve(doc2)).toEqual(stack.resolve(doc1));
-
     });
 
     test('parses with notActions', () => {
@@ -113,7 +111,6 @@ describe('IAM policy statement', () => {
       const doc2 = PolicyDocument.fromJson(doc1.toJSON());
 
       expect(stack.resolve(doc2)).toEqual(stack.resolve(doc1));
-
     });
 
     test('parses with notResource', () => {
@@ -129,7 +126,6 @@ describe('IAM policy statement', () => {
       const doc2 = PolicyDocument.fromJson(doc1.toJSON());
 
       expect(stack.resolve(doc2)).toEqual(stack.resolve(doc1));
-
     });
 
     test('parses with notResources', () => {
@@ -145,7 +141,6 @@ describe('IAM policy statement', () => {
       const doc2 = PolicyDocument.fromJson(doc1.toJSON());
 
       expect(stack.resolve(doc2)).toEqual(stack.resolve(doc1));
-
     });
 
     test('the kitchen sink', () => {
@@ -265,5 +260,63 @@ describe('IAM policy statement', () => {
     for (const mod of modifications) {
       expect(mod).toThrow(/can no longer be modified/);
     }
+  });
+
+  describe('SID validation', () => {
+    test('validates alphanumeric SID for identity policies', () => {
+      const statement = new PolicyStatement({
+        sid: 'ValidSID123',
+        actions: ['s3:GetObject'],
+        resources: ['*'],
+      });
+
+      expect(statement.validateForIdentityPolicy()).toEqual([]);
+    });
+
+    test('fails for non-alphanumeric SID in identity policies', () => {
+      const statement = new PolicyStatement({
+        sid: 'Invalid-SID',
+        actions: ['s3:GetObject'],
+        resources: ['*'],
+      });
+
+      expect(statement.validateForIdentityPolicy()).toEqual([
+        "Statement ID (sid) 'Invalid-SID' must be alphanumeric (A-Z, a-z, 0-9) when used in an identity-based policy. See https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_sid.html",
+      ]);
+    });
+
+    test('does not validate SID characters for resource policies', () => {
+      const statement = new PolicyStatement({
+        sid: 'Allowed SID for resource policy.',
+        actions: ['s3:GetObject'],
+        resources: ['*'],
+        principals: [new AnyPrincipal()],
+      });
+
+      expect(statement.validateForResourcePolicy()).toEqual([]);
+    });
+
+    test.each([
+      ['empty', ''],
+      ['undefined', undefined],
+    ])('allows %s SID in identity policies', (_description, sid) => {
+      const statement = new PolicyStatement({
+        sid,
+        actions: ['s3:GetObject'],
+        resources: ['*'],
+      });
+
+      expect(statement.validateForIdentityPolicy()).toEqual([]);
+    });
+
+    test('allows tokens in identity policy SID', () => {
+      const statement = new PolicyStatement({
+        sid: cdk.Fn.ref('SomeParameter'),
+        actions: ['s3:GetObject'],
+        resources: ['*'],
+      });
+
+      expect(statement.validateForIdentityPolicy()).toEqual([]);
+    });
   });
 });

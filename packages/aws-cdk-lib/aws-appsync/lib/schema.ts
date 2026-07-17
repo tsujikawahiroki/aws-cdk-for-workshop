@@ -1,20 +1,21 @@
 import { readFileSync } from 'fs';
-import { IGraphqlApi } from './graphqlapi-base';
+import { extractApiIdFromGraphQLApiRef } from './private/ref-utils';
+import type { IGraphQLApiRef } from '../../interfaces/generated/aws-appsync-interfaces.generated';
 
 /**
-  * Configuration for bound graphql schema
-  *
-  * Returned from ISchema.bind allowing late binding of schemas to graphqlapi-base
-  */
+ * Configuration for bound graphql schema
+ *
+ * Returned from ISchema.bind allowing late binding of schemas to graphqlapi-base
+ */
 export interface ISchemaConfig {
   /**
-    * The ID of the api the schema is bound to
-    */
+   * The ID of the api the schema is bound to
+   */
   apiId: string;
 
   /**
-    * The schema definition string
-    */
+   * The schema definition string
+   */
   definition: string;
 }
 
@@ -27,19 +28,19 @@ export interface ISchemaConfig {
 export interface SchemaBindOptions {}
 
 /**
-  * Interface for implementing your own schema
-  *
-  * Useful for providing schema's from sources other than assets
-  */
+ * Interface for implementing your own schema
+ *
+ * Useful for providing schema's from sources other than assets
+ */
 export interface ISchema {
   /**
-    * Binds a schema string to a GraphQlApi
-    *
-    * @returns ISchemaConfig with apiId and schema definition string
-    * @param api the api to bind the schema to
-    * @param options configuration for bind behavior
-    */
-  bind(api: IGraphqlApi, options?: SchemaBindOptions): ISchemaConfig;
+   * Binds a schema string to a GraphQlApi
+   *
+   * @returns ISchemaConfig with apiId and schema definition string
+   * @param api the api to bind the schema to
+   * @param options configuration for bind behavior
+   */
+  bind(api: IGraphQLApiRef, options?: SchemaBindOptions): ISchemaConfig;
 }
 
 /**
@@ -52,7 +53,7 @@ export interface SchemaProps {
    * existing file from disk.
    */
   readonly filePath: string;
-};
+}
 
 /**
  * The Schema for a GraphQL Api
@@ -64,7 +65,7 @@ export class SchemaFile implements ISchema {
   /**
    * Generate a Schema from file
    *
-   * @returns `SchemaAsset` with immutable schema defintion
+   * @returns `SchemaAsset` with immutable schema definition
    * @param filePath the file path of the schema file
    */
   public static fromAsset(filePath: string): SchemaFile {
@@ -86,9 +87,9 @@ export class SchemaFile implements ISchema {
    *
    * @param api The binding GraphQL Api
    */
-  public bind(api: IGraphqlApi, _options?: SchemaBindOptions): ISchemaConfig {
+  public bind(api: IGraphQLApiRef, _options?: SchemaBindOptions): ISchemaConfig {
     return {
-      apiId: api.apiId,
+      apiId: extractApiIdFromGraphQLApiRef(api),
       definition: this.definition,
     };
   }

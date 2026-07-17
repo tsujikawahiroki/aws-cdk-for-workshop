@@ -1,12 +1,14 @@
 /* eslint-disable object-curly-newline */
-import { Construct, IConstruct } from 'constructs';
+import type { IConstruct } from 'constructs';
+import { Construct } from 'constructs';
 import { Annotations, Match, Template } from '../../assertions';
 import * as iam from '../../aws-iam';
 import * as cdk from '../../core';
-import { EventBus, EventField, IRule, IRuleTarget, RuleTargetConfig, RuleTargetInput, Schedule, Match as m } from '../lib';
+import type { EventPattern, IRule, IRuleTarget, RuleTargetConfig } from '../lib';
+import { CfnRule, EventBus, EventField, RuleTargetInput, Schedule, Match as m } from '../lib';
 import { Rule } from '../lib/rule';
 
-/* eslint-disable quote-props */
+/* eslint-disable @stylistic/quote-props */
 
 describe('rule', () => {
   test('default rule', () => {
@@ -72,6 +74,25 @@ describe('rule', () => {
     });
   });
 
+  test('rule cannot have more than 5 targets', () => {
+    const app = new cdk.App();
+    const stack = new cdk.Stack(app);
+    const resource = new Construct(stack, 'Resource');
+    new Rule(stack, 'MyRule', {
+      schedule: Schedule.rate(cdk.Duration.minutes(10)),
+      targets: [
+        new SomeTarget('T1', resource),
+        new SomeTarget('T2', resource),
+        new SomeTarget('T3', resource),
+        new SomeTarget('T4', resource),
+        new SomeTarget('T5', resource),
+        new SomeTarget('T6', resource),
+      ],
+    });
+
+    expect(() => app.synth()).toThrow(/Event rule cannot have more than 5 targets./);
+  });
+
   test('get rate as token', () => {
     const app = new cdk.App();
     const stack = new cdk.Stack(app, 'MyScheduledStack');
@@ -117,34 +138,72 @@ describe('rule', () => {
     });
   });
 
-  test('eventPattern is rendered properly', () => {
+  test.each([
+    ['L1', (scope: Construct, eventPattern: EventPattern) => {
+      new CfnRule(scope, 'MyRule', { eventPattern, state: 'ENABLED' });
+    }],
+    ['L2', (scope: Construct, eventPattern: EventPattern) => {
+      new Rule(scope, 'MyRule', { eventPattern });
+    }],
+  ] satisfies Array<[string, (scope: Construct, pattern: EventPattern) => void]>)('eventPattern is rendered properly for %p', (_, ctr) => {
     const stack = new cdk.Stack();
 
-    new Rule(stack, 'MyRule', {
-      eventPattern: {
+    ctr(stack, {
+      account: ['account1', 'account2'],
+      detail: {
+        foo: [1, 2],
+        strings: ['foo', 'bar'],
+        rangeMatcher: m.interval(-1, 1),
+        stringMatcher: m.exactString('I am just a string'),
+        prefixMatcher: m.prefix('aws.'),
+        ipAddress: m.ipAddressRange('192.0.2.0/24'),
+        shouldExist: m.exists(),
+        shouldNotExist: m.doesNotExist(),
+        numbers: m.allOf(m.greaterThan(0), m.lessThan(5)),
+        topLevel: {
+          deeper: m.equal(42),
+          oneMoreLevel: {
+            deepest: m.anyOf(m.lessThanOrEqual(-1), m.greaterThanOrEqual(1)),
+          },
+        },
+        state: m.anythingBut('initializing'),
+        limit: m.anythingBut(100, 200, 300),
+        notPrefixedBy: m.anythingButPrefix('sensitive-'),
+        bar: undefined,
+      },
+      detailType: ['detailType1'],
+      id: ['id1', 'id2'],
+      region: ['region1', 'region2', 'region3'],
+      resources: ['r1'],
+      source: ['src1', 'src2'],
+      time: ['t1'],
+      version: ['0'],
+    });
+
+    Template.fromStack(stack).hasResourceProperties('AWS::Events::Rule', {
+      'EventPattern': {
         account: ['account1', 'account2'],
         detail: {
           foo: [1, 2],
           strings: ['foo', 'bar'],
-          rangeMatcher: m.interval(-1, 1),
-          stringMatcher: m.exactString('I am just a string'),
-          prefixMatcher: m.prefix('aws.'),
-          ipAddress: m.ipAddressRange('192.0.2.0/24'),
-          shouldExist: m.exists(),
-          shouldNotExist: m.doesNotExist(),
-          numbers: m.allOf(m.greaterThan(0), m.lessThan(5)),
+          rangeMatcher: [{ numeric: ['>=', -1, '<=', 1] }],
+          stringMatcher: ['I am just a string'],
+          prefixMatcher: [{ prefix: 'aws.' }],
+          ipAddress: [{ cidr: '192.0.2.0/24' }],
+          shouldExist: [{ exists: true }],
+          shouldNotExist: [{ exists: false }],
+          numbers: [{ numeric: ['>', 0, '<', 5] }],
           topLevel: {
-            deeper: m.equal(42),
+            deeper: [{ numeric: ['=', 42] }],
             oneMoreLevel: {
-              deepest: m.anyOf(m.lessThanOrEqual(-1), m.greaterThanOrEqual(1)),
+              deepest: [{ numeric: ['<=', -1] }, { numeric: ['>=', 1] }],
             },
           },
-          state: m.anythingBut('initializing'),
-          limit: m.anythingBut(100, 200, 300),
-          notPrefixedBy: m.anythingButPrefix('sensitive-'),
-          bar: undefined,
+          state: [{ 'anything-but': ['initializing'] }],
+          limit: [{ 'anything-but': [100, 200, 300] }],
+          notPrefixedBy: [{ 'anything-but': { 'prefix': 'sensitive-' } }],
         },
-        detailType: ['detailType1'],
+        'detail-type': ['detailType1'],
         id: ['id1', 'id2'],
         region: ['region1', 'region2', 'region3'],
         resources: ['r1'],
@@ -152,47 +211,7 @@ describe('rule', () => {
         time: ['t1'],
         version: ['0'],
       },
-    });
-
-    Template.fromStack(stack).templateMatches({
-      'Resources': {
-        'MyRuleA44AB831': {
-          'Type': 'AWS::Events::Rule',
-          'Properties': {
-            'EventPattern': {
-              account: ['account1', 'account2'],
-              detail: {
-                foo: [1, 2],
-                strings: ['foo', 'bar'],
-                rangeMatcher: [{ numeric: ['>=', -1, '<=', 1] }],
-                stringMatcher: ['I am just a string'],
-                prefixMatcher: [{ prefix: 'aws.' }],
-                ipAddress: [{ cidr: '192.0.2.0/24' }],
-                shouldExist: [{ exists: true }],
-                shouldNotExist: [{ exists: false }],
-                numbers: [{ numeric: ['>', 0, '<', 5] }],
-                topLevel: {
-                  deeper: [{ numeric: ['=', 42] }],
-                  oneMoreLevel: {
-                    deepest: [{ numeric: ['<=', -1] }, { numeric: ['>=', 1] }],
-                  },
-                },
-                state: [{ 'anything-but': ['initializing'] }],
-                limit: [{ 'anything-but': [100, 200, 300] }],
-                notPrefixedBy: [{ 'anything-but': { 'prefix': 'sensitive-' } }],
-              },
-              'detail-type': ['detailType1'],
-              id: ['id1', 'id2'],
-              region: ['region1', 'region2', 'region3'],
-              resources: ['r1'],
-              source: ['src1', 'src2'],
-              time: ['t1'],
-              version: ['0'],
-            },
-            'State': 'ENABLED',
-          },
-        },
-      },
+      'State': 'ENABLED',
     });
   });
 
@@ -578,6 +597,34 @@ describe('rule', () => {
     expect(importedRule.ruleName).toEqual('example');
   });
 
+  test('can specify roleArn', () => {
+    const stack = new cdk.Stack();
+
+    const role = new iam.Role(stack, 'SomeRole', {
+      assumedBy: new iam.ServicePrincipal('nobody'),
+    });
+
+    new Rule(stack, 'MyRule', {
+      schedule: Schedule.rate(cdk.Duration.minutes(10)),
+      role,
+    });
+
+    Template.fromStack(stack).templateMatches({
+      'Resources': {
+        'MyRuleA44AB831': {
+          'Type': 'AWS::Events::Rule',
+          'Properties': {
+            'ScheduleExpression': 'rate(10 minutes)',
+            'State': 'ENABLED',
+            'RoleArn': {
+              'Fn::GetAtt': ['SomeRole6DDC54DD', 'Arn'],
+            },
+          },
+        },
+      },
+    });
+  });
+
   test('sets account for imported rule env by fromEventRuleArn', () => {
     const stack = new cdk.Stack();
     const importedRule = Rule.fromEventRuleArn(stack, 'Imported', 'arn:aws:events:us-west-2:999999999999:rule/example');
@@ -661,6 +708,48 @@ describe('rule', () => {
           'Id': 'Target0',
           'SqsParameters': {
             'MessageGroupId': 'messageGroupId',
+          },
+        },
+      ],
+    });
+  });
+
+  test('redshiftDataParameters are generated when they are specified in target props', () => {
+    const stack = new cdk.Stack();
+    const t1: IRuleTarget = {
+      bind: () => ({
+        id: '',
+        arn: 'ARN1',
+        redshiftDataParameters: {
+          database: 'database',
+          dbUser: 'dbUser',
+          secretManagerArn: 'secretManagerArn',
+          sqls: ['sqls'],
+          statementName: 'statementName',
+          withEvent: true,
+        },
+      }),
+    };
+
+    new Rule(stack, 'EventRule', {
+      schedule: Schedule.rate(cdk.Duration.minutes(5)),
+      targets: [t1],
+    });
+
+    console.log(Template.fromStack(stack).toJSON().Resources.EventRule5A491D2C.Properties.Targets[0]);
+
+    Template.fromStack(stack).hasResourceProperties('AWS::Events::Rule', {
+      Targets: [
+        {
+          'Arn': 'ARN1',
+          'Id': 'Target0',
+          'RedshiftDataParameters': {
+            'Database': 'database',
+            'DbUser': 'dbUser',
+            'SecretManagerArn': 'secretManagerArn',
+            'Sqls': ['sqls'],
+            'StatementName': 'statementName',
+            'WithEvent': true,
           },
         },
       ],
@@ -1132,7 +1221,6 @@ describe('rule', () => {
 });
 
 class SomeTarget implements IRuleTarget {
-  // eslint-disable-next-line @aws-cdk/no-core-construct
   public constructor(private readonly id?: string, private readonly resource?: IConstruct) {
   }
 

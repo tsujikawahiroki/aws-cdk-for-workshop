@@ -1,6 +1,6 @@
 import { FakeSourceAction } from './fake-source-action';
 import * as cdk from '../../core';
-import { IStage } from '../lib/action';
+import type { IStage } from '../lib/action';
 import { Artifact } from '../lib/artifact';
 import { Pipeline } from '../lib/pipeline';
 import { validateName } from '../lib/private/validation';
@@ -22,7 +22,7 @@ describe('general validation', () => {
 
     cases.forEach(testCase => {
       const name = testCase.name;
-      const validationBlock = () => { validateName('test thing', name); };
+      const validationBlock = () => { validateName(new cdk.Stack(), 'test thing', name); };
       if (testCase.shouldPassValidation) {
         expect(validationBlock).not.toThrow();
       } else {

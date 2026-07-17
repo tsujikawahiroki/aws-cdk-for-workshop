@@ -1,5 +1,7 @@
-import { Construct } from 'constructs';
-import * as cloudfront from '../../aws-cloudfront';
+import type { Construct } from 'constructs';
+import type * as cloudfront from '../../aws-cloudfront';
+import { ValidationError } from '../../core';
+import { lit } from '../../core/lib/private/literal-string';
 
 /** Construction properties for `OriginGroup`. */
 export interface OriginGroupProps {
@@ -21,6 +23,15 @@ export interface OriginGroupProps {
    * @default - 500, 502, 503 and 504
    */
   readonly fallbackStatusCodes?: number[];
+
+  /**
+   * The selection criteria for the origin group.
+   *
+   * @see https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/high_availability_origin_failover.html#concept_origin_groups.creating
+   *
+   * @default - OriginSelectionCriteria.DEFAULT
+   */
+  readonly selectionCriteria?: cloudfront.OriginSelectionCriteria;
 }
 
 /**
@@ -35,7 +46,7 @@ export class OriginGroup implements cloudfront.IOrigin {
   public bind(scope: Construct, options: cloudfront.OriginBindOptions): cloudfront.OriginBindConfig {
     const primaryOriginConfig = this.props.primaryOrigin.bind(scope, options);
     if (primaryOriginConfig.failoverConfig) {
-      throw new Error('An OriginGroup cannot use an Origin with its own failover configuration as its primary origin!');
+      throw new ValidationError(lit`OriginGroupCannotUseOriginWithFailover`, 'An OriginGroup cannot use an Origin with its own failover configuration as its primary origin!', scope);
     }
 
     return {
@@ -44,6 +55,7 @@ export class OriginGroup implements cloudfront.IOrigin {
         failoverOrigin: this.props.fallbackOrigin,
         statusCodes: this.props.fallbackStatusCodes,
       },
+      selectionCriteria: this.props.selectionCriteria,
     };
   }
 }

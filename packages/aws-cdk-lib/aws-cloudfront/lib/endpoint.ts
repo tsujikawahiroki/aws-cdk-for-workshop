@@ -1,18 +1,17 @@
-import { Construct } from 'constructs';
+import type { Construct } from 'constructs';
 import * as iam from '../../aws-iam';
-import * as kinesis from '../../aws-kinesis';
+import type * as kinesis from '../../aws-kinesis';
 import { PhysicalName } from '../../core';
 
 /**
  * Represents the endpoints available for targetting within a realtime log config resource
  */
 export abstract class Endpoint {
-
   /**
-    * Configure a Kinesis Stream Endpoint for Realtime Log Config
-    *
-    * @default - a role will be created and used across your endpoints
-    */
+   * Configure a Kinesis Stream Endpoint for Realtime Log Config
+   *
+   * @default - a role will be created and used across your endpoints
+   */
   public static fromKinesisStream(stream: kinesis.IStream, role?: iam.IRole): Endpoint {
     return new (class extends Endpoint {
       public _renderEndpoint(scope: Construct) {

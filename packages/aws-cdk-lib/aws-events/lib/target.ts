@@ -1,8 +1,8 @@
-import { IConstruct } from 'constructs';
-import { CfnRule } from './events.generated';
-import { RuleTargetInput } from './input';
-import { IRule } from './rule-ref';
-import * as iam from '../../aws-iam';
+import type { IConstruct } from 'constructs';
+import type { CfnRule } from './events.generated';
+import type { RuleTargetInput } from './input';
+import type * as iam from '../../aws-iam';
+import type { IRuleRef } from '../../interfaces/generated/aws-events-interfaces.generated';
 
 /**
  * An abstract target for EventRules.
@@ -15,7 +15,7 @@ export interface IRuleTarget {
    * @param rule The EventBridge Rule that would trigger this target.
    * @param id The id of the target that will be attached to the rule.
    */
-  bind(rule: IRule, id?: string): RuleTargetConfig;
+  bind(rule: IRuleRef, id?: string): RuleTargetConfig;
 }
 
 /**
@@ -97,6 +97,13 @@ export interface RuleTargetConfig {
    * rule.
    */
   readonly sqsParameters?: CfnRule.SqsParametersProperty;
+
+  /**
+   * Parameters used when the rule invokes Amazon Redshift Queries
+   *
+   * @default - no parameters set
+   */
+  readonly redshiftDataParameters?: CfnRule.RedshiftDataParametersProperty;
 
   /**
    * What input to send to the event target

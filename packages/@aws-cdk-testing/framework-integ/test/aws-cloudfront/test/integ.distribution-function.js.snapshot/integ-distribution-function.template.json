@@ -3,12 +3,32 @@
   "Function76856677": {
    "Type": "AWS::CloudFront::Function",
    "Properties": {
-    "Name": "eu-west-1integdistributionfunctionFunctionDCD62A02",
     "AutoPublish": true,
     "FunctionCode": "function handler(event) { return event.request }",
     "FunctionConfig": {
-     "Comment": "eu-west-1integdistributionfunctionFunctionDCD62A02",
-     "Runtime": "cloudfront-js-1.0"
+     "Comment": {
+      "Fn::Join": [
+       "",
+       [
+        {
+         "Ref": "AWS::Region"
+        },
+        "integdistributionfunctionFunctionDCD62A02"
+       ]
+      ]
+     },
+     "Runtime": "cloudfront-js-2.0"
+    },
+    "Name": {
+     "Fn::Join": [
+      "",
+      [
+       {
+        "Ref": "AWS::Region"
+       },
+       "integdistributionfunctionFunctionDCD62A02"
+      ]
+     ]
     }
    }
   },

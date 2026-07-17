@@ -2,7 +2,7 @@ import { Template } from '../../assertions';
 import { Stack } from '../../core';
 import { ReceiptRuleSet } from '../lib';
 
-/* eslint-disable quote-props */
+/* eslint-disable @stylistic/quote-props */
 
 describe('receipt rule set', () => {
   test('can create a receipt rule set', () => {
@@ -18,7 +18,6 @@ describe('receipt rule set', () => {
     Template.fromStack(stack).hasResourceProperties('AWS::SES::ReceiptRuleSet', {
       RuleSetName: 'MyRuleSet',
     });
-
   });
 
   test('can create a receipt rule set with drop spam', () => {
@@ -52,7 +51,6 @@ describe('receipt rule set', () => {
     });
 
     Template.fromStack(stack).resourceCountIs('AWS::Lambda::Function', 1);
-
   });
 
   test('drop spam rule should always appear first', () => {
@@ -86,7 +84,6 @@ describe('receipt rule set', () => {
     });
 
     Template.fromStack(stack).resourceCountIs('AWS::Lambda::Function', 1);
-
   });
 
   test('import receipt rule set', () => {
@@ -112,6 +109,5 @@ describe('receipt rule set', () => {
         },
       },
     });
-
   });
 });

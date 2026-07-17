@@ -145,7 +145,7 @@ test('endpointgroup with all parameters', () => {
     healthCheckPath: '/ping',
     healthCheckPort: 123,
     healthCheckProtocol: ga.HealthCheckProtocol.HTTPS,
-    healthCheckThreshold: 23,
+    healthCheckThreshold: 10,
     trafficDialPercentage: 86,
     portOverrides: [
       {
@@ -168,7 +168,7 @@ test('endpointgroup with all parameters', () => {
         ListenerPort: 80,
       },
     ],
-    ThresholdCount: 23,
+    ThresholdCount: 10,
     TrafficDialPercentage: 86,
   });
 });
@@ -230,7 +230,7 @@ test('create accelerator with IpAddresses and IpAddressType', () => {
   const { stack } = testFixture();
 
   // WHEN
-  const acc = new ga.Accelerator(stack, 'Accelerator', {
+  new ga.Accelerator(stack, 'Accelerator', {
     ipAddresses: [
       '1.1.1.1',
       '2.2.2.2',
@@ -273,12 +273,12 @@ test('should validate acceleratorName minimum and maximum length', () => {
     new ga.Accelerator(stack, 'AcceleratorShort', {
       acceleratorName: '',
     });
-  }).toThrowError(/must have length between 1 and 64/);
+  }).toThrow(/must have length between 1 and 64/);
   expect(() => {
     new ga.Accelerator(stack, 'AcceleratorLong', {
       acceleratorName: 'a'.repeat(100),
     });
-  }).toThrowError(/must have length between 1 and 64/);
+  }).toThrow(/must have length between 1 and 64/);
 });
 
 test('should validate ipAddresses minimum and maximum length', () => {

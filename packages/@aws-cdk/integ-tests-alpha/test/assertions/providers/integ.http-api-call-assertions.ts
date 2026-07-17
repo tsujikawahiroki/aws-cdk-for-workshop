@@ -1,10 +1,14 @@
 import { App, Stack } from 'aws-cdk-lib';
-import { ExpectedResult, IntegTest } from '../../../lib';
 import * as apigwv2 from 'aws-cdk-lib/aws-apigatewayv2';
-import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as integrations from 'aws-cdk-lib/aws-apigatewayv2-integrations';
+import * as lambda from 'aws-cdk-lib/aws-lambda';
+import { ExpectedResult, IntegTest } from '../../../lib';
 
-const app = new App();
+const app = new App({
+  postCliContext: {
+    '@aws-cdk/aws-lambda:useCdkManagedLogGroup': true,
+  },
+});
 const stack = new Stack(app, 'InvokeFunctionAssertions');
 const integ = new IntegTest(app, 'AssertionsTest', {
   testCases: [stack],
@@ -17,7 +21,7 @@ httpApi.addRoutes({
   methods: [apigwv2.HttpMethod.GET],
   integration: new integrations.HttpLambdaIntegration('GetIntegration',
     new lambda.Function(stack, 'GetHandler', {
-      runtime: lambda.Runtime.NODEJS_20_X,
+      runtime: lambda.Runtime.NODEJS_LATEST,
       handler: 'index.handler',
       code: new lambda.InlineCode(`
         exports.handler = async () => ({
@@ -32,7 +36,7 @@ httpApi.addRoutes({
   methods: [apigwv2.HttpMethod.POST],
   integration: new integrations.HttpLambdaIntegration('PostIntegration',
     new lambda.Function(stack, 'PostHandler', {
-      runtime: lambda.Runtime.NODEJS_20_X,
+      runtime: lambda.Runtime.NODEJS_LATEST,
       handler: 'index.handler',
       code: new lambda.InlineCode(`
         exports.handler = async ({ body }) => ({
@@ -47,11 +51,26 @@ httpApi.addRoutes({
   methods: [apigwv2.HttpMethod.GET],
   integration: new integrations.HttpLambdaIntegration('ForbiddenIntegration',
     new lambda.Function(stack, 'ForbiddenHandler', {
-      runtime: lambda.Runtime.NODEJS_20_X,
+      runtime: lambda.Runtime.NODEJS_LATEST,
       handler: 'index.handler',
       code: new lambda.InlineCode(`
         exports.handler = async ({ body }) => ({
           statusCode: 403,
+        });`),
+    })),
+});
+
+httpApi.addRoutes({
+  path: '/echo/{echo}',
+  methods: [apigwv2.HttpMethod.GET],
+  integration: new integrations.HttpLambdaIntegration('EchoIntegration',
+    new lambda.Function(stack, 'EchoHandler', {
+      runtime: lambda.Runtime.NODEJS_LATEST,
+      handler: 'index.handler',
+      code: new lambda.InlineCode(`
+        exports.handler = async ({ pathParameters: { echo } }) => ({
+          statusCode: 200,
+          body: echo,
         });`),
     })),
 });
@@ -96,6 +115,28 @@ integ.assertions.httpApiCall(
   }),
 );
 
+// FIXME expectations broken by flattenResult, see https://github.com/aws/aws-cdk/issues/30477
+const echoCall = integ.assertions.httpApiCall(
+  `${stage.url}/echo/HelloWorld`,
+)/* .expect(
+  ExpectedResult.objectLike({
+    status: 200,
+    ok: true,
+    body: 'HelloWorld',
+  }),
+) */;
+const echo = echoCall.getAttString('body');
+
+integ.assertions.httpApiCall(
+  `${stage.url}/echo/${echo}`,
+).expect(
+  ExpectedResult.objectLike({
+    status: 200,
+    ok: true,
+    body: echo,
+  }),
+);
+
 // We are also using httpbin.org to test the assertions with a fixed URL
 // See https://github.com/aws/aws-cdk/issues/29700
 
@@ -136,5 +177,28 @@ integ.assertions.httpApiCall(
   ExpectedResult.objectLike({
     status: 403,
     ok: false,
+  }),
+);
+
+// FIXME expectations broken by flattenResult, see https://github.com/aws/aws-cdk/issues/30477
+const uuidCall = integ.assertions.httpApiCall(
+  'https://httpbin.org/uuid',
+)/* .expect(
+  ExpectedResult.objectLike({
+    status: 200,
+    ok: true,
+  }),
+) */;
+const uuid = uuidCall.getAttString('body.uuid');
+
+integ.assertions.httpApiCall(
+  `https://httpbin.org/anything/${uuid}`,
+).expect(
+  ExpectedResult.objectLike({
+    status: 200,
+    ok: true,
+    body: {
+      url: `https://httpbin.org/anything/${uuid}`,
+    },
   }),
 );

@@ -1,4 +1,3 @@
-/* eslint-disable import/no-extraneous-dependencies */
 process.env.AWS_REGION = 'us-east-1';
 
 import { CloudWatchClient, GetMetricDataCommand } from '@aws-sdk/client-cloudwatch';
@@ -6,10 +5,10 @@ import { EncryptCommand, KMSClient } from '@aws-sdk/client-kms';
 import * as S3 from '@aws-sdk/client-s3';
 import { mockClient } from 'aws-sdk-client-mock';
 import * as fs from 'fs-extra';
-import * as nock from 'nock';
-import { v3handler as handler } from '../../../lib/custom-resources/aws-custom-resource-handler';
-import { forceSdkInstallation } from '../../../lib/custom-resources/aws-custom-resource-handler/aws-sdk-v3-handler';
-import { AwsSdkCall } from '../../../lib/custom-resources/aws-custom-resource-handler/construct-types';
+import nock from 'nock';
+import { handler } from '../../../lib/custom-resources/aws-custom-resource-handler';
+import type { AwsSdkCall } from '../../../lib/custom-resources/aws-custom-resource-handler/construct-types';
+import { forceSdkInstallation } from '../../../lib/custom-resources/aws-custom-resource-handler/load-sdk';
 import 'aws-sdk-client-mock-jest' ;
 
 // This test performs an 'npm install' which may take longer than the default
@@ -30,7 +29,6 @@ beforeEach(() => {
   mockExecSync.mockReset();
 });
 
-/* eslint-disable no-console */
 console.log = jest.fn();
 
 const eventCommon = {
@@ -108,7 +106,6 @@ test('create event with physical resource id path', async () => {
           Bucket: 'my-bucket',
         },
         physicalResourceId: { responsePath: 'Contents.1.ETag' },
-        logApiResponseData: true,
       } satisfies AwsSdkCall),
     },
   };
@@ -135,7 +132,7 @@ test('update event with physical resource id', async () => {
     ...eventCommon,
     RequestType: 'Update',
     PhysicalResourceId: 'physicalResourceId',
-    OldResourceProperties: {},
+    OldResourceProperties: { ServiceToken: 'x' },
     ResourceProperties: {
       ServiceToken: 'token',
       Update: JSON.stringify({
@@ -146,7 +143,6 @@ test('update event with physical resource id', async () => {
           Key: 'key',
         },
         physicalResourceId: { id: 'key' },
-        logApiResponseData: true,
       } satisfies AwsSdkCall),
     },
   };
@@ -177,7 +173,6 @@ test('delete event', async () => {
           Bucket: 'my-bucket',
         },
         physicalResourceId: { responsePath: 'Contents.1.ETag' },
-        logApiResponseData: true,
       } satisfies AwsSdkCall),
     },
   };
@@ -212,7 +207,6 @@ test('delete event with Delete call and no physical resource id in call', async 
           Bucket: 'my-bucket',
           Key: 'my-object',
         },
-        logApiResponseData: true,
       } satisfies AwsSdkCall),
     },
   };
@@ -248,7 +242,6 @@ test('create event with Delete call only', async () => {
           Bucket: 'my-bucket',
           Key: 'my-object',
         },
-        logApiResponseData: true,
       } satisfies AwsSdkCall),
     },
   };
@@ -284,7 +277,6 @@ test('catch errors - name property', async () => {
         },
         physicalResourceId: { id: 'physicalResourceId' },
         ignoreErrorCodesMatching: 'NoSuchBucket',
-        logApiResponseData: true,
       } satisfies AwsSdkCall),
     },
   };
@@ -322,7 +314,6 @@ test('catch errors - constructor name', async () => {
         },
         physicalResourceId: { id: 'physicalResourceId' },
         ignoreErrorCodesMatching: 'S3ServiceException',
-        logApiResponseData: true,
       } satisfies AwsSdkCall),
     },
   };
@@ -365,7 +356,6 @@ test('restrict output path', async () => {
         },
         physicalResourceId: { id: 'id' },
         outputPath: 'Contents.0',
-        logApiResponseData: true,
       } satisfies AwsSdkCall),
     },
   };
@@ -409,7 +399,6 @@ test('restrict output paths', async () => {
         },
         physicalResourceId: { id: 'id' },
         outputPaths: ['Contents.0.Key', 'Contents.1.Key'],
-        logApiResponseData: true,
       } satisfies AwsSdkCall),
     },
   };
@@ -446,7 +435,6 @@ test('can specify apiVersion and region', async () => {
         apiVersion: '2010-03-31',
         region: 'eu-west-1',
         physicalResourceId: { id: 'id' },
-        logApiResponseData: true,
       } satisfies AwsSdkCall),
     },
   };
@@ -462,6 +450,34 @@ test('can specify apiVersion and region', async () => {
   expect(request.isDone()).toBeTruthy();
 });
 
+test('logApiResponseData can be false', async () => {
+  s3MockClient.on(S3.GetObjectCommand).resolves({});
+
+  const event: AWSLambda.CloudFormationCustomResourceCreateEvent = {
+    ...eventCommon,
+    RequestType: 'Create',
+    ResourceProperties: {
+      ServiceToken: 'token',
+      Create: JSON.stringify({
+        service: '@aws-sdk/client-s3',
+        action: 'GetObjectCommand',
+        parameters: {
+          Bucket: 'my-bucket',
+          Key: 'key',
+        },
+        logApiResponseData: false,
+        physicalResourceId: { id: 'id' },
+      } satisfies AwsSdkCall),
+    },
+  };
+
+  const request = createRequest(body => body.Status === 'SUCCESS');
+
+  await handler(event, {} as AWSLambda.Context);
+
+  expect(request.isDone()).toBeTruthy();
+});
+
 test('installs the latest SDK', async () => {
   const tmpPath = '/tmp/node_modules/@aws-sdk/client-s3';
 
@@ -469,7 +485,8 @@ test('installs the latest SDK', async () => {
   await fs.ensureDir('/tmp/node_modules/@aws-sdk');
   await fs.symlink(require.resolve('@aws-sdk/client-s3'), tmpPath);
 
-  const localAwsSdk: typeof S3 = await import(tmpPath);
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const localAwsSdk: typeof S3 = require(tmpPath);
   const localS3MockClient = mockClient(localAwsSdk.S3Client);
 
   // Now remove the symlink and let the handler install it
@@ -490,7 +507,6 @@ test('installs the latest SDK', async () => {
           Key: 'key',
         },
         physicalResourceId: { id: 'id' },
-        logApiResponseData: true,
       } satisfies AwsSdkCall),
       InstallLatestAwsSdk: 'true',
     },
@@ -532,7 +548,6 @@ test('falls back to installed sdk if installation fails', async () => {
           Key: 'key',
         },
         physicalResourceId: { id: 'id' },
-        logApiResponseData: true,
       } satisfies AwsSdkCall),
       InstallLatestAwsSdk: 'true',
     },
@@ -552,7 +567,8 @@ test('falls back to installed sdk if installation fails', async () => {
 test('SDK credentials are not persisted across subsequent invocations', async () => {
   // GIVEN
   s3MockClient.on(S3.GetObjectCommand).resolves({});
-  const credentialProviders = await import('@aws-sdk/credential-providers' as string);
+  // eslint-disable-next-line @typescript-eslint/no-require-imports, import/no-extraneous-dependencies
+  const credentialProviders = require('@aws-sdk/credential-providers');
   const mockCreds = credentialProviders.fromTemporaryCredentials({
     params: { RoleArn: 'arn:aws:iam::123456789012:role/CoolRole' },
   });
@@ -581,7 +597,7 @@ test('SDK credentials are not persisted across subsequent invocations', async ()
     ServiceToken: 'serviceToken',
     StackId: 'stackId',
   }, {} as AWSLambda.Context);
-  expect(credentialProviderMock).not.toBeCalled();
+  expect(credentialProviderMock).not.toHaveBeenCalled();
   credentialProviderMock.mockClear();
 
   await handler({
@@ -606,7 +622,7 @@ test('SDK credentials are not persisted across subsequent invocations', async ()
     ServiceToken: 'serviceToken',
     StackId: 'stackId',
   }, {} as AWSLambda.Context);
-  expect(credentialProviderMock).toBeCalled();
+  expect(credentialProviderMock).toHaveBeenCalled();
   credentialProviderMock.mockClear();
 
   await handler({
@@ -630,7 +646,48 @@ test('SDK credentials are not persisted across subsequent invocations', async ()
     ServiceToken: 'serviceToken',
     StackId: 'stackId',
   }, {} as AWSLambda.Context);
-  expect(credentialProviderMock).not.toBeCalled();
+  expect(credentialProviderMock).not.toHaveBeenCalled();
+});
+
+test('Role Session Name is sanitized before assuming', async () => {
+  // GIVEN
+  s3MockClient.on(S3.GetObjectCommand).resolves({});
+  // eslint-disable-next-line @typescript-eslint/no-require-imports, import/no-extraneous-dependencies
+  const credentialProviders = require('@aws-sdk/credential-providers');
+  const mockCreds = credentialProviders.fromTemporaryCredentials({
+    params: { RoleArn: 'arn:aws:iam::123456789012:role/CoolRole' },
+  });
+  const credentialProviderMock = jest.spyOn(credentialProviders, 'fromTemporaryCredentials').mockReturnValue(mockCreds);
+  credentialProviderMock.mockClear();
+
+  await handler({
+    LogicalResourceId: 'logicalResourceId',
+    RequestId: 'requestId',
+    RequestType: 'Create',
+    ResponseURL: 'responseUrl',
+    ResourceProperties: {
+      Create: JSON.stringify({
+        service: '@aws-sdk/client-s3',
+        action: 'GetObjectCommand',
+        assumedRoleArn: 'arn:aws:iam::123456789012:role/CoolRole',
+        parameters: {
+          Bucket: 'foo',
+          Key: 'bar',
+        },
+        physicalResourceId: { id: 'This:String(Should)Get$Sanitized' },
+      }),
+      ServiceToken: 'serviceToken',
+    },
+    ResourceType: 'resourceType',
+    ServiceToken: 'serviceToken',
+    StackId: 'stackId',
+  }, {} as AWSLambda.Context);
+  expect(credentialProviderMock).toHaveBeenCalledWith(expect.objectContaining({
+    params: expect.objectContaining({
+      RoleSessionName: expect.stringContaining('ThisStringShouldGetSanitized'),
+    }),
+  }));
+  credentialProviderMock.mockClear();
 });
 
 test('Being able to call the AWS SDK v2 format', async () => {
@@ -647,7 +704,6 @@ test('Being able to call the AWS SDK v2 format', async () => {
           Bucket: 'foo',
           Key: 'bar',
         },
-        logApiResponseData: true,
       } satisfies AwsSdkCall),
     },
   };
@@ -682,7 +738,6 @@ test('invalid v3 package name throws explicit error', async () => {
           Key: 'key',
         },
         physicalResourceId: { id: 'id' },
-        logApiResponseData: true,
       } satisfies AwsSdkCall),
     },
   };
@@ -713,7 +768,6 @@ test('invalid v2 service name throws explicit error', async () => {
           Key: 'key',
         },
         physicalResourceId: { id: 'id' },
-        logApiResponseData: true,
       } satisfies AwsSdkCall),
     },
   };
@@ -748,7 +802,6 @@ test('automatic Uint8Array conversion when necessary', async () => {
           KeyId: 'key-id',
           Plaintext: 'dummy-data',
         },
-        logApiResponseData: true,
       } satisfies AwsSdkCall),
     },
   }, {} as AWSLambda.Context);
@@ -808,7 +861,6 @@ test('automatic Date conversion when necessary', async () => {
           StartTime: new Date('2023-01-01'),
           EndTime: new Date('2023-01-02'),
         },
-        logApiResponseData: true,
       } satisfies AwsSdkCall),
     },
   }, {} as AWSLambda.Context);

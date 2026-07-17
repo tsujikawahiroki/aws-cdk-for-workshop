@@ -1,0 +1,107 @@
+{
+  "/SNSTopicPolicyStack/Topic": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": {
+        "topicName": "*"
+      }
+    }
+  ],
+  "/SNSTopicPolicyStack/TopicPolicy": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": {
+        "topics": [
+          "*"
+        ],
+        "policyDocument": "*",
+        "enforceSSL": true
+      }
+    }
+  ],
+  "/SNSTopicPolicyStack/TopicAddPolicy": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": {
+        "topicName": "*",
+        "enforceSSL": true
+      }
+    }
+  ],
+  "/SNSTopicPolicyStack/TopicWithSSL": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": {
+        "enforceSSL": true
+      }
+    }
+  ],
+  "/SNSTopicPolicyStack/BootstrapVersion": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "BootstrapVersion"
+    }
+  ],
+  "/SNSTopicPolicyStack/CheckBootstrapVersion": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "CheckBootstrapVersion"
+    }
+  ],
+  "/SNSTopicPolicyStack/Topic/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "TopicBFC7AF6E"
+    }
+  ],
+  "/SNSTopicPolicyStack/TopicPolicy/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "TopicPolicyA24B096F"
+    }
+  ],
+  "/SNSTopicPolicyStack/TopicAddPolicy/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "TopicAddPolicy7DB03706"
+    }
+  ],
+  "/SNSTopicPolicyStack/TopicAddPolicy/Policy": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": {
+        "topics": [
+          "*"
+        ]
+      }
+    }
+  ],
+  "/SNSTopicPolicyStack/TopicWithSSL/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "TopicWithSSLC879A4EA"
+    }
+  ],
+  "/SNSTopicPolicyStack/TopicWithSSL/Policy": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": {
+        "topics": [
+          "*"
+        ]
+      }
+    }
+  ],
+  "/SNSTopicPolicyStack/TopicAddPolicy/Policy/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "TopicAddPolicyAEA24A5A"
+    }
+  ],
+  "/SNSTopicPolicyStack/TopicWithSSL/Policy/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "TopicWithSSLPolicy3E7ECD75"
+    }
+  ]
+}

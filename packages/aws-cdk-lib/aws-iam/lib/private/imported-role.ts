@@ -1,13 +1,24 @@
-import { Construct } from 'constructs';
+import type { Construct } from 'constructs';
 import { MAX_POLICY_NAME_LEN } from './util';
-import { FeatureFlags, Names, Resource, Token, TokenComparison, Annotations } from '../../../core';
+import { Annotations, FeatureFlags, Names, Resource, Token, TokenComparison } from '../../../core';
+import { addConstructMetadata, MethodMetadata } from '../../../core/lib/metadata-resource';
+import { propertyInjectable } from '../../../core/lib/prop-injectable';
 import { IAM_IMPORTED_ROLE_STACK_SAFE_DEFAULT_POLICY_NAME } from '../../../cx-api';
 import { Grant } from '../grant';
-import { IManagedPolicy } from '../managed-policy';
+import type { RoleReference } from '../iam.generated';
+import type { IManagedPolicy, ManagedPolicy } from '../managed-policy';
 import { Policy } from '../policy';
-import { PolicyStatement } from '../policy-statement';
-import { IComparablePrincipal, IPrincipal, ArnPrincipal, AddToPrincipalPolicyResult, PrincipalPolicyFragment } from '../principals';
-import { IRole, FromRoleArnOptions } from '../role';
+import type { PolicyStatement } from '../policy-statement';
+import type {
+  AddToPrincipalPolicyResult,
+  IComparablePrincipal,
+  IPrincipal,
+  PrincipalPolicyFragment,
+} from '../principals';
+import {
+  ArnPrincipal,
+} from '../principals';
+import type { FromRoleArnOptions, IRole } from '../role';
 import { AttachedPolicies } from '../util';
 
 export interface ImportedRoleProps extends FromRoleArnOptions {
@@ -16,7 +27,10 @@ export interface ImportedRoleProps extends FromRoleArnOptions {
   readonly account?: string;
 }
 
+@propertyInjectable
 export class ImportedRole extends Resource implements IRole, IComparablePrincipal {
+  /** Uniquely identifies this class. */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-iam.ImportedRole';
   public readonly grantPrincipal: IPrincipal = this;
   public readonly principalAccount?: string;
   public readonly assumeRoleAction: string = 'sts:AssumeRole';
@@ -31,6 +45,8 @@ export class ImportedRole extends Resource implements IRole, IComparablePrincipa
     super(scope, id, {
       account: props.account,
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     this.roleArn = props.roleArn;
     this.roleName = props.roleName;
@@ -39,10 +55,19 @@ export class ImportedRole extends Resource implements IRole, IComparablePrincipa
     this.principalAccount = props.account;
   }
 
+  public get roleRef(): RoleReference {
+    return {
+      roleName: this.roleName,
+      roleArn: this.roleArn,
+    };
+  }
+
+  @MethodMetadata()
   public addToPolicy(statement: PolicyStatement): boolean {
     return this.addToPrincipalPolicy(statement).statementAdded;
   }
 
+  @MethodMetadata()
   public addToPrincipalPolicy(statement: PolicyStatement): AddToPrincipalPolicyResult {
     if (!this.defaultPolicy) {
       const useUniqueName = FeatureFlags.of(this).isEnabled(IAM_IMPORTED_ROLE_STACK_SAFE_DEFAULT_POLICY_NAME);
@@ -63,6 +88,7 @@ export class ImportedRole extends Resource implements IRole, IComparablePrincipa
     return { statementAdded: true, policyDependable: this.defaultPolicy };
   }
 
+  @MethodMetadata()
   public attachInlinePolicy(policy: Policy): void {
     const thisAndPolicyAccountComparison = Token.compareStrings(this.env.account, policy.env.account);
     const equalOrAnyUnresolved = thisAndPolicyAccountComparison === TokenComparison.SAME ||
@@ -74,27 +100,44 @@ export class ImportedRole extends Resource implements IRole, IComparablePrincipa
     }
   }
 
+  @MethodMetadata()
   public addManagedPolicy(policy: IManagedPolicy): void {
-    Annotations.of(this).addWarningV2('@aws-cdk/aws-iam:importedRoleManagedPolicyNotAdded', `Not adding managed policy: ${policy.managedPolicyArn} to imported role: ${this.roleName}`);
+    // Using "Type Predicate" to confirm x is ManagedPolicy, which allows us to avoid
+    // using try ... catch and throw error.
+    const isManagedPolicy = (x: IManagedPolicy): x is ManagedPolicy => {
+      return (x as ManagedPolicy).attachToRole !== undefined;
+    };
+
+    if (isManagedPolicy(policy)) {
+      policy.attachToRole(this);
+    } else {
+      Annotations.of(this).addWarningV2(
+        '@aws-cdk/aws-iam:IRoleCantBeUsedWithIManagedPolicy',
+        `Can\'t combine imported IManagedPolicy: ${policy.managedPolicyArn} to imported role IRole: ${this.roleName}. Use ManagedPolicy directly.`,
+      );
+    }
   }
 
+  @MethodMetadata()
   public grantPassRole(identity: IPrincipal): Grant {
     return this.grant(identity, 'iam:PassRole');
   }
 
+  @MethodMetadata()
   public grantAssumeRole(identity: IPrincipal): Grant {
     return this.grant(identity, 'sts:AssumeRole');
   }
 
+  @MethodMetadata()
   public grant(grantee: IPrincipal, ...actions: string[]): Grant {
     return Grant.addToPrincipal({
       grantee,
       actions,
       resourceArns: [this.roleArn],
-      scope: this,
     });
   }
 
+  @MethodMetadata()
   public dedupeString(): string | undefined {
     return `ImportedRole:${this.roleArn}`;
   }

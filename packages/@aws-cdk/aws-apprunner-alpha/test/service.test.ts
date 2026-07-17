@@ -1,15 +1,15 @@
 import * as path from 'path';
+import { testDeprecated } from '@aws-cdk/cdk-build-tools';
+import * as cdk from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as ecr from 'aws-cdk-lib/aws-ecr';
 import * as ecr_assets from 'aws-cdk-lib/aws-ecr-assets';
-import * as kms from 'aws-cdk-lib/aws-kms';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import * as kms from 'aws-cdk-lib/aws-kms';
+import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
-import * as s3 from 'aws-cdk-lib/aws-s3';
-import { testDeprecated } from '@aws-cdk/cdk-build-tools';
-import * as cdk from 'aws-cdk-lib';
 import * as apprunner from '../lib';
 
 test('create a service with ECR Public(image repository type: ECR_PUBLIC)', () => {
@@ -523,6 +523,56 @@ test('create a service from existing ECR repository(image repository type: ECR)'
       ],
       Version: '2012-10-17',
     },
+  });
+  // we should have a following IAM Policy
+  Template.fromStack(stack).hasResourceProperties('AWS::IAM::Policy', {
+    PolicyDocument: {
+      Statement: [
+        {
+          Effect: 'Allow',
+          Action: 'ecr:GetAuthorizationToken',
+          Resource: '*',
+        },
+        {
+          Effect: 'Allow',
+          Action: [
+            'ecr:BatchCheckLayerAvailability',
+            'ecr:GetDownloadUrlForLayer',
+            'ecr:BatchGetImage',
+          ],
+          Resource: {
+            'Fn::Join': ['', [
+              'arn:',
+              { Ref: 'AWS::Partition' },
+              ':ecr:',
+              { Ref: 'AWS::Region' },
+              ':',
+              { Ref: 'AWS::AccountId' },
+              ':repository/nginx',
+            ]],
+          },
+        },
+        {
+          Effect: 'Allow',
+          Action: 'ecr:DescribeImages',
+          Resource: {
+            'Fn::Join': ['', [
+              'arn:',
+              { Ref: 'AWS::Partition' },
+              ':ecr:',
+              { Ref: 'AWS::Region' },
+              ':',
+              { Ref: 'AWS::AccountId' },
+              ':repository/nginx',
+            ]],
+          },
+        },
+      ],
+    },
+    PolicyName: 'ServiceAccessRoleDefaultPolicy9C214812',
+    Roles: [
+      { Ref: 'ServiceAccessRole4763579D' },
+    ],
   });
   // we should have the service
   Template.fromStack(stack).hasResourceProperties('AWS::AppRunner::Service', {
@@ -1602,6 +1652,261 @@ test('create a service with a customer managed key)', () => {
   Template.fromStack(stack).hasResourceProperties('AWS::AppRunner::Service', {
     EncryptionConfiguration: {
       KmsKey: stack.resolve(key.keyArn),
+    },
+  });
+});
+
+test.each([apprunner.IpAddressType.IPV4, apprunner.IpAddressType.DUAL_STACK])('ipAddressType is set %s', (ipAddressType: apprunner.IpAddressType) => {
+  // GIVEN
+  const app = new cdk.App();
+  const stack = new cdk.Stack(app, 'demo-stack');
+
+  // WHEN
+  new apprunner.Service(stack, 'DemoService', {
+    source: apprunner.Source.fromEcrPublic({
+      imageConfiguration: { port: 8000 },
+      imageIdentifier: 'public.ecr.aws/aws-containers/hello-app-runner:latest',
+    }),
+    ipAddressType,
+  });
+
+  // THEN
+  Template.fromStack(stack).hasResourceProperties('AWS::AppRunner::Service', {
+    NetworkConfiguration: {
+      IpAddressType: ipAddressType,
+    },
+  });
+});
+
+test('create a service with an AutoScalingConfiguration', () => {
+  // GIVEN
+  const app = new cdk.App();
+  const stack = new cdk.Stack(app, 'demo-stack');
+  const autoScalingConfiguration = new apprunner.AutoScalingConfiguration(stack, 'AutoScalingConfiguration', {
+    autoScalingConfigurationName: 'MyAutoScalingConfiguration',
+  });
+
+  // WHEN
+  new apprunner.Service(stack, 'DemoService', {
+    source: apprunner.Source.fromEcrPublic({
+      imageConfiguration: { port: 8000 },
+      imageIdentifier: 'public.ecr.aws/aws-containers/hello-app-runner:latest',
+    }),
+    autoScalingConfiguration,
+  });
+
+  // THEN
+  Template.fromStack(stack).hasResourceProperties('AWS::AppRunner::AutoScalingConfiguration', {
+    AutoScalingConfigurationName: 'MyAutoScalingConfiguration',
+  });
+
+  Template.fromStack(stack).hasResourceProperties('AWS::AppRunner::Service', {
+    AutoScalingConfigurationArn: stack.resolve(autoScalingConfiguration.autoScalingConfigurationArn),
+  });
+});
+
+test('create a service with a Observability Configuration', () => {
+  // GIVEN
+  const app = new cdk.App();
+  const stack = new cdk.Stack(app, 'demo-stack');
+  const observabilityConfiguration = new apprunner.ObservabilityConfiguration(stack, 'ObservabilityConfiguration', {
+    observabilityConfigurationName: 'MyObservabilityConfiguration',
+    traceConfigurationVendor: apprunner.TraceConfigurationVendor.AWSXRAY,
+  });
+
+  // WHEN
+  new apprunner.Service(stack, 'DemoService', {
+    source: apprunner.Source.fromEcrPublic({
+      imageConfiguration: { port: 8000 },
+      imageIdentifier: 'public.ecr.aws/aws-containers/hello-app-runner:latest',
+    }),
+    observabilityConfiguration,
+  });
+
+  // THEN
+  Template.fromStack(stack).hasResourceProperties('AWS::AppRunner::ObservabilityConfiguration', {
+    ObservabilityConfigurationName: 'MyObservabilityConfiguration',
+    TraceConfiguration: {
+      Vendor: 'AWSXRAY',
+    },
+  });
+
+  Template.fromStack(stack).hasResourceProperties('AWS::AppRunner::Service', {
+    ObservabilityConfiguration: {
+      ObservabilityEnabled: true,
+      ObservabilityConfigurationArn: stack.resolve(observabilityConfiguration.observabilityConfigurationArn),
+    },
+  });
+});
+
+test('create a service without a Observability Configuration', () => {
+  // GIVEN
+  const app = new cdk.App();
+  const stack = new cdk.Stack(app, 'demo-stack');
+
+  // WHEN
+  new apprunner.Service(stack, 'DemoService', {
+    source: apprunner.Source.fromEcrPublic({
+      imageConfiguration: { port: 8000 },
+      imageIdentifier: 'public.ecr.aws/aws-containers/hello-app-runner:latest',
+    }),
+  });
+
+  // THEN
+  Template.fromStack(stack).hasResourceProperties('AWS::AppRunner::Service', {
+    ObservabilityConfiguration: Match.absent(),
+  });
+});
+
+test.each([true, false])('isPubliclyAccessible is set %s', (isPubliclyAccessible: boolean) => {
+  // GIVEN
+  const app = new cdk.App();
+  const stack = new cdk.Stack(app, 'demo-stack');
+
+  // WHEN
+  new apprunner.Service(stack, 'DemoService', {
+    source: apprunner.Source.fromEcrPublic({
+      imageConfiguration: { port: 8000 },
+      imageIdentifier: 'public.ecr.aws/aws-containers/hello-app-runner:latest',
+    }),
+    isPubliclyAccessible,
+  });
+
+  // THEN
+  Template.fromStack(stack).hasResourceProperties('AWS::AppRunner::Service', {
+    NetworkConfiguration: {
+      IngressConfiguration: {
+        IsPubliclyAccessible: isPubliclyAccessible,
+      },
+    },
+  });
+});
+
+test.each([
+  ['tes'],
+  ['test-service-name-over-limitation-apprunner'],
+])('serviceName length is invalid (name: %s)', (serviceName: string) => {
+  // GIVEN
+  const app = new cdk.App();
+  const stack = new cdk.Stack(app, 'demo-stack');
+
+  expect(() => {
+    new apprunner.Service(stack, 'DemoService', {
+      source: apprunner.Source.fromEcrPublic({
+        imageConfiguration: { port: 8000 },
+        imageIdentifier: 'public.ecr.aws/aws-containers/hello-app-runner:latest',
+      }),
+      serviceName,
+    });
+  }).toThrow(`\`serviceName\` must be between 4 and 40 characters, got: ${serviceName.length} characters.`);
+});
+
+test.each([
+  ['-test'],
+  ['test-?'],
+  ['test-\\'],
+])('serviceName includes invalid characters (name: %s)', (serviceName: string) => {
+  // GIVEN
+  const app = new cdk.App();
+  const stack = new cdk.Stack(app, 'demo-stack');
+
+  expect(() => {
+    new apprunner.Service(stack, 'DemoService', {
+      source: apprunner.Source.fromEcrPublic({
+        imageConfiguration: { port: 8000 },
+        imageIdentifier: 'public.ecr.aws/aws-containers/hello-app-runner:latest',
+      }),
+      serviceName,
+    });
+  }).toThrow(`\`serviceName\` must start with an alphanumeric character and contain only alphanumeric characters, hyphens, or underscores after that, got: ${serviceName}.`);
+});
+
+test('create a service from GitHub with repository configuration', () => {
+  // GIVEN
+  const app = new cdk.App();
+  const stack = new cdk.Stack(app, 'demo-stack');
+  // WHEN
+  new apprunner.Service(stack, 'Service4', {
+    source: apprunner.Source.fromGitHub({
+      repositoryUrl: 'https://github.com/aws-containers/hello-app-runner',
+      branch: 'main',
+      configurationSource: apprunner.ConfigurationSourceType.REPOSITORY,
+      connection: apprunner.GitHubConnection.fromConnectionArn('arn:aws:apprunner:us-east-1:123456789012:connection/test-connection'),
+    }),
+  });
+
+  // THEN
+  Template.fromStack(stack).hasResourceProperties('AWS::AppRunner::Service', {
+    SourceConfiguration: {
+      AuthenticationConfiguration: {
+        ConnectionArn: 'arn:aws:apprunner:us-east-1:123456789012:connection/test-connection',
+      },
+      CodeRepository: {
+        CodeConfiguration: {
+          ConfigurationSource: 'REPOSITORY',
+        },
+        RepositoryUrl: 'https://github.com/aws-containers/hello-app-runner',
+        SourceCodeVersion: {
+          Type: 'BRANCH',
+          Value: 'main',
+        },
+      },
+    },
+    NetworkConfiguration: {
+      EgressConfiguration: {
+        EgressType: 'DEFAULT',
+      },
+    },
+  });
+});
+
+test('create a service from GitHub with API configuration override', () => {
+  // GIVEN
+  const app = new cdk.App();
+  const stack = new cdk.Stack(app, 'demo-stack');
+  // WHEN
+  new apprunner.Service(stack, 'Service5', {
+    source: apprunner.Source.fromGitHub({
+      repositoryUrl: 'https://github.com/aws-containers/hello-app-runner',
+      branch: 'main',
+      configurationSource: apprunner.ConfigurationSourceType.API,
+      codeConfigurationValues: {
+        runtime: apprunner.Runtime.PYTHON_3,
+        port: '8000',
+        startCommand: 'python app.py',
+        buildCommand: 'yum install -y pycairo && pip install -r requirements.txt',
+      },
+      connection: apprunner.GitHubConnection.fromConnectionArn('arn:aws:apprunner:us-east-1:123456789012:connection/test-connection'),
+    }),
+  });
+
+  // THEN
+  Template.fromStack(stack).hasResourceProperties('AWS::AppRunner::Service', {
+    SourceConfiguration: {
+      AuthenticationConfiguration: {
+        ConnectionArn: 'arn:aws:apprunner:us-east-1:123456789012:connection/test-connection',
+      },
+      CodeRepository: {
+        CodeConfiguration: {
+          CodeConfigurationValues: {
+            Runtime: 'PYTHON_3',
+            Port: '8000',
+            StartCommand: 'python app.py',
+            BuildCommand: 'yum install -y pycairo && pip install -r requirements.txt',
+          },
+          ConfigurationSource: 'API',
+        },
+        RepositoryUrl: 'https://github.com/aws-containers/hello-app-runner',
+        SourceCodeVersion: {
+          Type: 'BRANCH',
+          Value: 'main',
+        },
+      },
+    },
+    NetworkConfiguration: {
+      EgressConfiguration: {
+        EgressType: 'DEFAULT',
+      },
     },
   });
 });

@@ -1,12 +1,13 @@
 import * as path from 'path';
+import { acknowledgeTestWarnings } from './test-warnings';
 import { Match, Template } from '../../assertions';
-import * as s3 from '../../aws-s3';
+import type * as s3 from '../../aws-s3';
 import * as core from '../../core';
 import * as cxapi from '../../cx-api';
 import * as inc from '../lib';
 import * as futils from '../lib/file-utils';
 
-/* eslint-disable quote-props */
+/* eslint-disable @stylistic/quote-props */
 /* eslint-disable quotes */
 
 describe('CDK Include for nested stacks', () => {
@@ -14,6 +15,7 @@ describe('CDK Include for nested stacks', () => {
 
   beforeEach(() => {
     const app = new core.App({ context: { [cxapi.NEW_STYLE_STACK_SYNTHESIS_CONTEXT]: false } });
+    acknowledgeTestWarnings(app);
     stack = new core.Stack(app);
   });
 
@@ -507,6 +509,7 @@ describe('CDK Include for nested stacks', () => {
 
     beforeAll(() => {
       const app = new core.App({ context: { [cxapi.NEW_STYLE_STACK_SYNTHESIS_CONTEXT]: false } });
+      acknowledgeTestWarnings(app);
       assetStack = new core.Stack(app);
       parentTemplate = new inc.CfnInclude(assetStack, 'ParentStack', {
         templateFile: testTemplateFilePath('parent-one-child.json'),
@@ -690,6 +693,7 @@ describe('CDK Include for nested stacks', () => {
 
     beforeAll(() => {
       parentStack = new core.Stack();
+      acknowledgeTestWarnings(parentStack);
       const parentTemplate = new inc.CfnInclude(parentStack, 'ParentStack', {
         templateFile: testTemplateFilePath('parent-two-parameters.json'),
         loadNestedStacks: {
@@ -741,6 +745,78 @@ describe('CDK Include for nested stacks', () => {
           "SecondParameter": "second-value",
         },
       });
+    });
+  });
+
+  describe('dehydrated resources', () => {
+    let parentStack: core.Stack;
+    let childStack: core.Stack;
+
+    beforeEach(() => {
+      parentStack = new core.Stack();
+      acknowledgeTestWarnings(parentStack);
+    });
+
+    test('dehydrated resources are included in child templates, even if they are otherwise invalid', () => {
+      const parentTemplate = new inc.CfnInclude(parentStack, 'ParentStack', {
+        templateFile: testTemplateFilePath('parent-dehydrated.json'),
+        dehydratedResources: ['ASG'],
+        loadNestedStacks: {
+          'ChildStack': {
+            templateFile: testTemplateFilePath('child-dehydrated.json'),
+            dehydratedResources: ['ChildASG'],
+          },
+        },
+      });
+      childStack = parentTemplate.getNestedStack('ChildStack').stack;
+
+      Template.fromStack(childStack).templateMatches({
+        "Conditions": {
+          "SomeCondition": {
+            "Fn::Equals": [
+              2,
+              2,
+            ],
+          },
+        },
+        "Resources": {
+          "ChildStackChildASGF815DFE9": {
+            "Type": "AWS::AutoScaling::AutoScalingGroup",
+            "Properties": {
+              "MaxSize": 10,
+              "MinSize": 1,
+            },
+            "UpdatePolicy": {
+              "AutoScalingScheduledAction": {
+                "Fn::If": [
+                  "SomeCondition",
+                  {
+                    "IgnoreUnmodifiedGroupSizeProperties": true,
+                  },
+                  {
+                    "IgnoreUnmodifiedGroupSizeProperties": false,
+                  },
+                ],
+              },
+            },
+          },
+        },
+      });
+    });
+
+    test('throws if a nested stack is marked dehydrated', () => {
+      expect(() => {
+        new inc.CfnInclude(parentStack, 'ParentStack', {
+          templateFile: testTemplateFilePath('parent-dehydrated.json'),
+          dehydratedResources: ['ChildStack'],
+          loadNestedStacks: {
+            'ChildStack': {
+              templateFile: testTemplateFilePath('child-dehydrated.json'),
+              dehydratedResources: ['ChildASG'],
+            },
+          },
+        });
+      }).toThrow(/nested stack 'ChildStack' was marked as dehydrated - nested stacks cannot be dehydrated/);
     });
   });
 });

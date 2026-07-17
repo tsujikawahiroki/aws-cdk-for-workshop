@@ -31,7 +31,29 @@
     ]
    }
   },
-  "amplifyassetdeploymentoneventServiceRoleDefaultPolicy2DF60B3E": {
+  "amplifyassetdeploymentonevent974704DA": {
+   "Type": "AWS::Lambda::Function",
+   "Properties": {
+    "Code": {
+     "S3Bucket": {
+      "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
+     },
+     "S3Key": "f97d3ad977ed91a21b5119e3168f6e8b219f0368345a732404db0f16994d31b3.zip"
+    },
+    "Handler": "index.onEvent",
+    "Role": {
+     "Fn::GetAtt": [
+      "amplifyassetdeploymentoneventServiceRoleB6658CD9",
+      "Arn"
+     ]
+    },
+    "Runtime": "nodejs24.x"
+   },
+   "DependsOn": [
+    "amplifyassetdeploymentoneventServiceRoleB6658CD9"
+   ]
+  },
+  "amplifyassetdeploymentoneventinlinePolicyAddedToExecutionRole0C600B4AD": {
    "Type": "AWS::IAM::Policy",
    "Properties": {
     "PolicyDocument": {
@@ -49,36 +71,13 @@
      ],
      "Version": "2012-10-17"
     },
-    "PolicyName": "amplifyassetdeploymentoneventServiceRoleDefaultPolicy2DF60B3E",
+    "PolicyName": "amplifyassetdeploymentoneventinlinePolicyAddedToExecutionRole0C600B4AD",
     "Roles": [
      {
       "Ref": "amplifyassetdeploymentoneventServiceRoleB6658CD9"
      }
     ]
    }
-  },
-  "amplifyassetdeploymentonevent974704DA": {
-   "Type": "AWS::Lambda::Function",
-   "Properties": {
-    "Code": {
-     "S3Bucket": {
-      "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
-     },
-     "S3Key": "85f7bb0ac0b4da3571afd49c891d631f4f07c0ef710a02046d3a9abd8d9d4604.zip"
-    },
-    "Handler": "index.onEvent",
-    "Role": {
-     "Fn::GetAtt": [
-      "amplifyassetdeploymentoneventServiceRoleB6658CD9",
-      "Arn"
-     ]
-    },
-    "Runtime": "nodejs18.x"
-   },
-   "DependsOn": [
-    "amplifyassetdeploymentoneventServiceRoleDefaultPolicy2DF60B3E",
-    "amplifyassetdeploymentoneventServiceRoleB6658CD9"
-   ]
   },
   "amplifyassetdeploymentiscompleteServiceRole007B2AB6": {
    "Type": "AWS::IAM::Role",
@@ -111,7 +110,29 @@
     ]
    }
   },
-  "amplifyassetdeploymentiscompleteServiceRoleDefaultPolicyC0D08321": {
+  "amplifyassetdeploymentiscomplete236D9453": {
+   "Type": "AWS::Lambda::Function",
+   "Properties": {
+    "Code": {
+     "S3Bucket": {
+      "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
+     },
+     "S3Key": "f97d3ad977ed91a21b5119e3168f6e8b219f0368345a732404db0f16994d31b3.zip"
+    },
+    "Handler": "index.isComplete",
+    "Role": {
+     "Fn::GetAtt": [
+      "amplifyassetdeploymentiscompleteServiceRole007B2AB6",
+      "Arn"
+     ]
+    },
+    "Runtime": "nodejs24.x"
+   },
+   "DependsOn": [
+    "amplifyassetdeploymentiscompleteServiceRole007B2AB6"
+   ]
+  },
+  "amplifyassetdeploymentiscompleteinlinePolicyAddedToExecutionRole032FCEDB8": {
    "Type": "AWS::IAM::Policy",
    "Properties": {
     "PolicyDocument": {
@@ -124,36 +145,13 @@
      ],
      "Version": "2012-10-17"
     },
-    "PolicyName": "amplifyassetdeploymentiscompleteServiceRoleDefaultPolicyC0D08321",
+    "PolicyName": "amplifyassetdeploymentiscompleteinlinePolicyAddedToExecutionRole032FCEDB8",
     "Roles": [
      {
       "Ref": "amplifyassetdeploymentiscompleteServiceRole007B2AB6"
      }
     ]
    }
-  },
-  "amplifyassetdeploymentiscomplete236D9453": {
-   "Type": "AWS::Lambda::Function",
-   "Properties": {
-    "Code": {
-     "S3Bucket": {
-      "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
-     },
-     "S3Key": "85f7bb0ac0b4da3571afd49c891d631f4f07c0ef710a02046d3a9abd8d9d4604.zip"
-    },
-    "Handler": "index.isComplete",
-    "Role": {
-     "Fn::GetAtt": [
-      "amplifyassetdeploymentiscompleteServiceRole007B2AB6",
-      "Arn"
-     ]
-    },
-    "Runtime": "nodejs18.x"
-   },
-   "DependsOn": [
-    "amplifyassetdeploymentiscompleteServiceRoleDefaultPolicyC0D08321",
-    "amplifyassetdeploymentiscompleteServiceRole007B2AB6"
-   ]
   },
   "amplifyassetdeploymenthandlerproviderframeworkonEventServiceRole8F19D99F": {
    "Type": "AWS::IAM::Role",
@@ -262,7 +260,7 @@
      "S3Bucket": {
       "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
      },
-     "S3Key": "15197a5512179542fe2cff74af89bb047793c9c4e0b4395f114641a81cd52ae5.zip"
+     "S3Key": "d14e70c8c1d5d6c32025ea07c4b9ed67be449820cf578659c9deb07160688c0e.zip"
     },
     "Description": "AWS CDK resource provider framework - onEvent (cdk-amplify-app-asset-deployment/com.amazonaws.cdk.custom-resources.amplify-asset-deployment-provider/amplify-asset-deployment-handler-provider)",
     "Environment": {
@@ -285,19 +283,75 @@
      }
     },
     "Handler": "framework.onEvent",
+    "LoggingConfig": {
+     "ApplicationLogLevel": "FATAL",
+     "LogFormat": "JSON"
+    },
     "Role": {
      "Fn::GetAtt": [
       "amplifyassetdeploymenthandlerproviderframeworkonEventServiceRole8F19D99F",
       "Arn"
      ]
     },
-    "Runtime": "nodejs18.x",
+    "Runtime": "nodejs24.x",
     "Timeout": 900
    },
    "DependsOn": [
     "amplifyassetdeploymenthandlerproviderframeworkonEventServiceRoleDefaultPolicy1E166D14",
     "amplifyassetdeploymenthandlerproviderframeworkonEventServiceRole8F19D99F"
    ]
+  },
+  "amplifyassetdeploymenthandlerproviderframeworkonEventinlinePolicyAddedToExecutionRole02E6AC2A2": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": "lambda:GetFunction",
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "amplifyassetdeploymentonevent974704DA",
+         "Arn"
+        ]
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "amplifyassetdeploymenthandlerproviderframeworkonEventinlinePolicyAddedToExecutionRole02E6AC2A2",
+    "Roles": [
+     {
+      "Ref": "amplifyassetdeploymenthandlerproviderframeworkonEventServiceRole8F19D99F"
+     }
+    ]
+   }
+  },
+  "amplifyassetdeploymenthandlerproviderframeworkonEventinlinePolicyAddedToExecutionRole1ADBFD04E": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": "lambda:GetFunction",
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "amplifyassetdeploymentiscomplete236D9453",
+         "Arn"
+        ]
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "amplifyassetdeploymenthandlerproviderframeworkonEventinlinePolicyAddedToExecutionRole1ADBFD04E",
+    "Roles": [
+     {
+      "Ref": "amplifyassetdeploymenthandlerproviderframeworkonEventServiceRole8F19D99F"
+     }
+    ]
+   }
   },
   "amplifyassetdeploymenthandlerproviderframeworkisCompleteServiceRoleDDB7490E": {
    "Type": "AWS::IAM::Role",
@@ -399,7 +453,7 @@
      "S3Bucket": {
       "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
      },
-     "S3Key": "15197a5512179542fe2cff74af89bb047793c9c4e0b4395f114641a81cd52ae5.zip"
+     "S3Key": "d14e70c8c1d5d6c32025ea07c4b9ed67be449820cf578659c9deb07160688c0e.zip"
     },
     "Description": "AWS CDK resource provider framework - isComplete (cdk-amplify-app-asset-deployment/com.amazonaws.cdk.custom-resources.amplify-asset-deployment-provider/amplify-asset-deployment-handler-provider)",
     "Environment": {
@@ -419,19 +473,75 @@
      }
     },
     "Handler": "framework.isComplete",
+    "LoggingConfig": {
+     "ApplicationLogLevel": "FATAL",
+     "LogFormat": "JSON"
+    },
     "Role": {
      "Fn::GetAtt": [
       "amplifyassetdeploymenthandlerproviderframeworkisCompleteServiceRoleDDB7490E",
       "Arn"
      ]
     },
-    "Runtime": "nodejs18.x",
+    "Runtime": "nodejs24.x",
     "Timeout": 900
    },
    "DependsOn": [
     "amplifyassetdeploymenthandlerproviderframeworkisCompleteServiceRoleDefaultPolicy59E7E0EB",
     "amplifyassetdeploymenthandlerproviderframeworkisCompleteServiceRoleDDB7490E"
    ]
+  },
+  "amplifyassetdeploymenthandlerproviderframeworkisCompleteinlinePolicyAddedToExecutionRole0DD8A5B26": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": "lambda:GetFunction",
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "amplifyassetdeploymentonevent974704DA",
+         "Arn"
+        ]
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "amplifyassetdeploymenthandlerproviderframeworkisCompleteinlinePolicyAddedToExecutionRole0DD8A5B26",
+    "Roles": [
+     {
+      "Ref": "amplifyassetdeploymenthandlerproviderframeworkisCompleteServiceRoleDDB7490E"
+     }
+    ]
+   }
+  },
+  "amplifyassetdeploymenthandlerproviderframeworkisCompleteinlinePolicyAddedToExecutionRole16EE4B599": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": "lambda:GetFunction",
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "amplifyassetdeploymentiscomplete236D9453",
+         "Arn"
+        ]
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "amplifyassetdeploymenthandlerproviderframeworkisCompleteinlinePolicyAddedToExecutionRole16EE4B599",
+    "Roles": [
+     {
+      "Ref": "amplifyassetdeploymenthandlerproviderframeworkisCompleteServiceRoleDDB7490E"
+     }
+    ]
+   }
   },
   "amplifyassetdeploymenthandlerproviderframeworkonTimeoutServiceRoleE3CF0B81": {
    "Type": "AWS::IAM::Role",
@@ -533,7 +643,7 @@
      "S3Bucket": {
       "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
      },
-     "S3Key": "15197a5512179542fe2cff74af89bb047793c9c4e0b4395f114641a81cd52ae5.zip"
+     "S3Key": "d14e70c8c1d5d6c32025ea07c4b9ed67be449820cf578659c9deb07160688c0e.zip"
     },
     "Description": "AWS CDK resource provider framework - onTimeout (cdk-amplify-app-asset-deployment/com.amazonaws.cdk.custom-resources.amplify-asset-deployment-provider/amplify-asset-deployment-handler-provider)",
     "Environment": {
@@ -553,19 +663,75 @@
      }
     },
     "Handler": "framework.onTimeout",
+    "LoggingConfig": {
+     "ApplicationLogLevel": "FATAL",
+     "LogFormat": "JSON"
+    },
     "Role": {
      "Fn::GetAtt": [
       "amplifyassetdeploymenthandlerproviderframeworkonTimeoutServiceRoleE3CF0B81",
       "Arn"
      ]
     },
-    "Runtime": "nodejs18.x",
+    "Runtime": "nodejs24.x",
     "Timeout": 900
    },
    "DependsOn": [
     "amplifyassetdeploymenthandlerproviderframeworkonTimeoutServiceRoleDefaultPolicy9257A1F3",
     "amplifyassetdeploymenthandlerproviderframeworkonTimeoutServiceRoleE3CF0B81"
    ]
+  },
+  "amplifyassetdeploymenthandlerproviderframeworkonTimeoutinlinePolicyAddedToExecutionRole0536E72EC": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": "lambda:GetFunction",
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "amplifyassetdeploymentonevent974704DA",
+         "Arn"
+        ]
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "amplifyassetdeploymenthandlerproviderframeworkonTimeoutinlinePolicyAddedToExecutionRole0536E72EC",
+    "Roles": [
+     {
+      "Ref": "amplifyassetdeploymenthandlerproviderframeworkonTimeoutServiceRoleE3CF0B81"
+     }
+    ]
+   }
+  },
+  "amplifyassetdeploymenthandlerproviderframeworkonTimeoutinlinePolicyAddedToExecutionRole15B2CDE6B": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": "lambda:GetFunction",
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "amplifyassetdeploymentiscomplete236D9453",
+         "Arn"
+        ]
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "amplifyassetdeploymenthandlerproviderframeworkonTimeoutinlinePolicyAddedToExecutionRole15B2CDE6B",
+    "Roles": [
+     {
+      "Ref": "amplifyassetdeploymenthandlerproviderframeworkonTimeoutServiceRoleE3CF0B81"
+     }
+    ]
+   }
   },
   "amplifyassetdeploymenthandlerproviderwaiterstatemachineRole014FC0BB": {
    "Type": "AWS::IAM::Role",
@@ -634,22 +800,6 @@
          ]
         }
        ]
-      },
-      {
-       "Action": [
-        "logs:CreateLogDelivery",
-        "logs:CreateLogStream",
-        "logs:DeleteLogDelivery",
-        "logs:DescribeLogGroups",
-        "logs:DescribeResourcePolicies",
-        "logs:GetLogDelivery",
-        "logs:ListLogDeliveries",
-        "logs:PutLogEvents",
-        "logs:PutResourcePolicy",
-        "logs:UpdateLogDelivery"
-       ],
-       "Effect": "Allow",
-       "Resource": "*"
       }
      ],
      "Version": "2012-10-17"
@@ -661,26 +811,6 @@
      }
     ]
    }
-  },
-  "amplifyassetdeploymenthandlerproviderwaiterstatemachineLogGroupC4BDAC97": {
-   "Type": "AWS::Logs::LogGroup",
-   "Properties": {
-    "LogGroupName": {
-     "Fn::Join": [
-      "",
-      [
-       "/aws/vendedlogs/states/waiter-state-machine-",
-       {
-        "Ref": "amplifyassetdeploymenthandlerproviderframeworkisComplete2A696873"
-       },
-       "-c8a1a2319ce23755893c80671b62fe53abf53d6f98"
-      ]
-     ]
-    },
-    "RetentionInDays": 731
-   },
-   "UpdateReplacePolicy": "Retain",
-   "DeletionPolicy": "Retain"
   },
   "amplifyassetdeploymenthandlerproviderwaiterstatemachineB3C2FCBE": {
    "Type": "AWS::StepFunctions::StateMachine",
@@ -706,22 +836,6 @@
        "\"}}}"
       ]
      ]
-    },
-    "LoggingConfiguration": {
-     "Destinations": [
-      {
-       "CloudWatchLogsLogGroup": {
-        "LogGroupArn": {
-         "Fn::GetAtt": [
-          "amplifyassetdeploymenthandlerproviderwaiterstatemachineLogGroupC4BDAC97",
-          "Arn"
-         ]
-        }
-       }
-      }
-     ],
-     "IncludeExecutionData": false,
-     "Level": "ERROR"
     },
     "RoleArn": {
      "Fn::GetAtt": [

@@ -24,7 +24,7 @@
        {
         "Ref": "TopicBFC7AF6E"
        },
-       "\"},\"logApiResponseData\":true}"
+       "\"}}"
       ]
      ]
     },
@@ -40,11 +40,11 @@
        {
         "Ref": "TopicBFC7AF6E"
        },
-       "\"},\"logApiResponseData\":true}"
+       "\"}}"
       ]
      ]
     },
-    "InstallLatestAwsSdk": "false"
+    "InstallLatestAwsSdk": false
    },
    "DependsOn": [
     "PublishCustomResourcePolicyDF696FCA"
@@ -111,7 +111,7 @@
      "S3Bucket": {
       "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
      },
-     "S3Key": "746da84b10e215c552e68b6d2061024e4429f0386f43a35ef5e4d2940655692e.zip"
+     "S3Key": "9b8fce7ae7f25ef82fdbaf6b72523b99d0875c0c9c826642819fb51f11d9b125.zip"
     },
     "Handler": "index.handler",
     "Role": {
@@ -120,7 +120,7 @@
       "Arn"
      ]
     },
-    "Runtime": "nodejs18.x",
+    "Runtime": "nodejs20.x",
     "Timeout": 120
    },
    "DependsOn": [
@@ -136,9 +136,9 @@
       "Arn"
      ]
     },
-    "Create": "{\"service\":\"SNS\",\"action\":\"listTopics\",\"physicalResourceId\":{\"responsePath\":\"Topics.0.TopicArn\"},\"logApiResponseData\":true}",
-    "Update": "{\"service\":\"SNS\",\"action\":\"listTopics\",\"physicalResourceId\":{\"responsePath\":\"Topics.0.TopicArn\"},\"logApiResponseData\":true}",
-    "InstallLatestAwsSdk": "false"
+    "Create": "{\"service\":\"SNS\",\"action\":\"listTopics\",\"physicalResourceId\":{\"responsePath\":\"Topics.0.TopicArn\"}}",
+    "Update": "{\"service\":\"SNS\",\"action\":\"listTopics\",\"physicalResourceId\":{\"responsePath\":\"Topics.0.TopicArn\"}}",
+    "InstallLatestAwsSdk": false
    },
    "DependsOn": [
     "ListTopicsCustomResourcePolicy31A8396A",
@@ -195,7 +195,7 @@
        {
         "Ref": "Utf8Parameter6C885A19"
        },
-       "\",\"WithDecryption\":true},\"physicalResourceId\":{\"responsePath\":\"Parameter.ARN\"},\"logApiResponseData\":true}"
+       "\",\"WithDecryption\":true},\"physicalResourceId\":{\"responsePath\":\"Parameter.ARN\"}}"
       ]
      ]
     },
@@ -207,11 +207,11 @@
        {
         "Ref": "Utf8Parameter6C885A19"
        },
-       "\",\"WithDecryption\":true},\"physicalResourceId\":{\"responsePath\":\"Parameter.ARN\"},\"logApiResponseData\":true}"
+       "\",\"WithDecryption\":true},\"physicalResourceId\":{\"responsePath\":\"Parameter.ARN\"}}"
       ]
      ]
     },
-    "InstallLatestAwsSdk": "false"
+    "InstallLatestAwsSdk": false
    },
    "DependsOn": [
     "GetParameterCustomResourcePolicyD8E5D455"
@@ -263,7 +263,12 @@
     "PolicyDocument": {
      "Statement": [
       {
-       "Action": "ssm:*",
+       "Action": [
+        "ssm:DescribeParameters",
+        "ssm:GetParameter",
+        "ssm:GetParameters",
+        "ssm:GetParametersByPath"
+       ],
        "Effect": "Allow",
        "Resource": "*"
       }
@@ -295,7 +300,7 @@
        {
         "Ref": "Utf8Parameter6C885A19"
        },
-       "\",\"WithDecryption\":true},\"physicalResourceId\":{\"responsePath\":\"Parameter.ARN\"},\"logApiResponseData\":true}"
+       "\",\"WithDecryption\":true},\"physicalResourceId\":{\"responsePath\":\"Parameter.ARN\"}}"
       ]
      ]
     },
@@ -307,11 +312,11 @@
        {
         "Ref": "Utf8Parameter6C885A19"
        },
-       "\",\"WithDecryption\":true},\"physicalResourceId\":{\"responsePath\":\"Parameter.ARN\"},\"logApiResponseData\":true}"
+       "\",\"WithDecryption\":true},\"physicalResourceId\":{\"responsePath\":\"Parameter.ARN\"}}"
       ]
      ]
     },
-    "InstallLatestAwsSdk": "false"
+    "InstallLatestAwsSdk": false
    },
    "UpdateReplacePolicy": "Delete",
    "DeletionPolicy": "Delete"
@@ -325,9 +330,9 @@
       "Arn"
      ]
     },
-    "Create": "{\"service\":\"EKS\",\"action\":\"describeCluster\",\"parameters\":{\"name\":\"fake-cluster\"},\"physicalResourceId\":{\"id\":\"fake-cluster\"},\"ignoreErrorCodesMatching\":\"ResourceNotFoundException\",\"logApiResponseData\":true}",
-    "Update": "{\"service\":\"EKS\",\"action\":\"describeCluster\",\"parameters\":{\"name\":\"fake-cluster\"},\"physicalResourceId\":{\"id\":\"fake-cluster\"},\"ignoreErrorCodesMatching\":\"ResourceNotFoundException\",\"logApiResponseData\":true}",
-    "InstallLatestAwsSdk": "false"
+    "Create": "{\"service\":\"EKS\",\"action\":\"describeCluster\",\"parameters\":{\"name\":\"fake-cluster\"},\"physicalResourceId\":{\"id\":\"fake-cluster\"},\"ignoreErrorCodesMatching\":\"ResourceNotFoundException\"}",
+    "Update": "{\"service\":\"EKS\",\"action\":\"describeCluster\",\"parameters\":{\"name\":\"fake-cluster\"},\"physicalResourceId\":{\"id\":\"fake-cluster\"},\"ignoreErrorCodesMatching\":\"ResourceNotFoundException\"}",
+    "InstallLatestAwsSdk": false
    },
    "DependsOn": [
     "DescribeClusterCustomResourcePolicyD7730CF4"

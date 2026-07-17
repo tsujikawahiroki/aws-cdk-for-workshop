@@ -71,7 +71,7 @@ test('queues can be used as destinations', () => {
   const resources = Template.fromStack(stack).findResources('Custom::S3BucketNotifications');
 
   expect(resources.BucketNotifications8F2E257D.DependsOn)
-    .toEqual(['QueuePolicy25439813', 'Queue4A7E3555']);
+    .toEqual(['BucketNotificationsHandlerPolicy2180A8BD', 'QueuePolicy25439813', 'Queue4A7E3555']);
 });
 
 test('if the queue is encrypted with a custom kms key, the key resource policy is updated to allow s3 to read messages', () => {
@@ -109,15 +109,7 @@ test('if the queue is encrypted with a imported kms key, printout warning', () =
 
   bucket.addObjectCreatedNotification(new notif.SqsDestination(queue));
 
-  Annotations.fromStack(stack).hasWarning('/Default/ImportedKey', `Can not change key policy of imported kms key. Ensure that your key policy contains the following permissions: \n${JSON.stringify({
-    Action: [
-      'kms:GenerateDataKey*',
-      'kms:Decrypt',
-    ],
-    Effect: 'Allow',
-    Principal: {
-      Service: 's3.amazonaws.com',
-    },
-    Resource: '*',
-  }, null, 2)} [ack: @aws-cdk/aws-s3-notifications:sqsKMSPermissionsNotAdded]`);
+  Annotations.fromStack(stack).hasWarning('/Default/ImportedKey', Match.stringLikeRegexp(
+    'Can not change key policy of imported kms key\\. Ensure that your key policy contains the following permissions: \\n\\{\\n  "Action": \\[\\n    "kms:GenerateDataKey\\*",\\n    "kms:Decrypt"\\n  \\],\\n  "Effect": "Allow",\\n  "Principal": \\{\\n    "Service": "\\${Token\\[s3\\.amazonaws\\.com\\.[0-9]+\\]}"\\n  \\},\\n  "Resource": "\\*"\\n\\} \\[ack: @aws-cdk/aws-s3-notifications:sqsKMSPermissionsNotAdded\\]',
+  ));
 });

@@ -3,6 +3,7 @@ import { Match, Template } from '../../assertions';
 import * as iam from '../../aws-iam';
 import * as cdk from '../../core';
 import * as apigateway from '../lib';
+import type { CfnRestApi } from '../lib';
 
 describe('api key', () => {
   test('default setup', () => {
@@ -28,7 +29,6 @@ describe('api key', () => {
       new apigateway.ApiKey(stack, 'my-api-key', {
         resources: [restApi],
       });
-
     }).toThrow(/Cannot add an ApiKey to a RestApi that does not contain a "deploymentStage"/);
   });
 
@@ -423,6 +423,38 @@ describe('api key', () => {
           Ref: 'testapikeyUsagePlanResource66DB63D6',
         },
       });
+    });
+  });
+});
+
+describe('L1 static methods', () => {
+  test('asdads', () => {
+    const stack = new cdk.Stack();
+
+    const logicalId = 'BackendApi';
+    const api = new apigateway.RestApi(stack, 'api', {
+      cloudWatchRole: false,
+      deploy: true,
+      deployOptions: { stageName: 'test' },
+    });
+    (api.node.defaultChild as CfnRestApi).overrideLogicalId(logicalId);
+
+    const arn = apigateway.CfnRestApi.arnForRestApi(api);
+
+    expect(stack.resolve(arn)).toEqual({
+      'Fn::Join': ['', ['arn:', { Ref: 'AWS::Partition' }, ':apigateway:', { Ref: 'AWS::Region' }, '::/restapis/', { Ref: logicalId }]],
+    });
+  });
+
+  test('axxzxzzx', () => {
+    const stack = new cdk.Stack();
+
+    const restApiId = 'BackendApi';
+    const api = apigateway.CfnRestApi.fromRestApiId(stack, 'asdas', restApiId);
+    const arn = apigateway.CfnRestApi.arnForRestApi(api);
+
+    expect(stack.resolve(arn)).toEqual({
+      'Fn::Join': ['', ['arn:', { Ref: 'AWS::Partition' }, ':apigateway:', { Ref: 'AWS::Region' }, `::/restapis/${restApiId}`]],
     });
   });
 });

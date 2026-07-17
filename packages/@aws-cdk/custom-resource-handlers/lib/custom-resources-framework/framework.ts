@@ -1,28 +1,34 @@
 /* eslint-disable import/no-extraneous-dependencies */
-import { ExternalModule, InterfaceType, Module, TypeScriptRenderer } from '@cdklabs/typewriter';
+import type { InterfaceType } from '@cdklabs/typewriter';
+import { Module, TypeScriptRenderer } from '@cdklabs/typewriter';
 import * as fs from 'fs-extra';
-import { HandlerFrameworkClass, HandlerFrameworkClassProps } from './classes';
-import { ComponentType, ComponentProps, Runtime } from './config';
+import type { HandlerFrameworkClassProps } from './classes';
+import { HandlerFrameworkClass } from './classes';
+import type { ComponentProps } from './config';
+import { ComponentType } from './config';
+import type { ModuleImportOptions } from './module-importer';
+import { ModuleImporter } from './module-importer';
+import type { ImportableModule } from './modules';
 import { buildComponentName } from './utils/framework-utils';
 
 export class HandlerFrameworkModule extends Module {
-  /**
-   * The latest nodejs runtime version available across all AWS regions.
-   */
-  private static readonly DEFAULT_RUNTIME = Runtime.NODEJS_18_X;
-
   private readonly renderer = new TypeScriptRenderer();
-  private readonly externalModules = new Map<string, boolean>();
+  private readonly importer = new ModuleImporter();
   private readonly _interfaces = new Map<string, InterfaceType>();
   private _hasComponents = false;
 
   /**
    * Whether the module being generated will live inside of aws-cdk-lib/core.
    */
-  public readonly coreInternal: boolean;
+  public readonly isCoreInternal: boolean;
 
   /**
-   * Whether the module contains handler framework components.
+   * Whether the module being generated will be part of an alpha module.
+   */
+  public readonly isAlphaModule: boolean;
+
+  /**
+   * Whether the module contains provider framework components.
    */
   public get hasComponents() {
     return this._hasComponents;
@@ -30,13 +36,18 @@ export class HandlerFrameworkModule extends Module {
 
   public constructor(fqn: string) {
     super(fqn);
-    this.coreInternal = fqn.includes('core');
+    this.isCoreInternal = fqn.includes('core');
+    this.isAlphaModule = fqn.includes('alpha');
   }
 
   /**
    * Build a framework component inside of this module.
+   *
+   * @param sourceHash Optional deterministic hash of the bundled handler code.
+   * When provided, the hash is embedded in the generated class so the asset
+   * does not get rehashed at synth time.
    */
-  public build(component: ComponentProps, codeDirectory: string) {
+  public build(component: ComponentProps, codeDirectory: string, sourceHash?: string) {
     if (component.type === ComponentType.NO_OP) {
       return;
     }
@@ -50,7 +61,9 @@ export class HandlerFrameworkModule extends Module {
       name,
       handler,
       codeDirectory,
-      runtime: component.runtime ?? HandlerFrameworkModule.DEFAULT_RUNTIME,
+      runtime: component.runtime,
+      constructorVisibility: component.constructorVisibility,
+      sourceHash,
     };
 
     switch (component.type) {
@@ -73,21 +86,15 @@ export class HandlerFrameworkModule extends Module {
    * Render module with components into an output file.
    */
   public renderTo(file: string) {
+    this.importer.importModulesInto(this);
     fs.outputFileSync(file, this.renderer.render(this));
   }
 
   /**
-   * Add an external module to be imported.
+   * Register an external module to be imported into this module.
    */
-  public addExternalModule(module: ExternalModule) {
-    this.externalModules.set(module.fqn, true);
-  }
-
-  /**
-   * If an external module has been added as an import to this module.
-   */
-  public hasExternalModule(module: ExternalModule) {
-    return this.externalModules.has(module.fqn);
+  public registerImport(module: ImportableModule, options: ModuleImportOptions = {}) {
+    this.importer.registerImport(module, options);
   }
 
   /**

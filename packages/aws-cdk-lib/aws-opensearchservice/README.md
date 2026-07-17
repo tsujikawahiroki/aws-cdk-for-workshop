@@ -149,7 +149,39 @@ const domain = new Domain(this, 'Domain', {
 
 This sets up the domain with node to node encryption and encryption at
 rest. You can also choose to supply your own KMS key to use for encryption at
-rest.
+rest:
+
+```ts
+import * as kms from 'aws-cdk-lib/aws-kms';
+
+const encryptionKey = new kms.Key(this, 'EncryptionKey');
+
+const domain = new Domain(this, 'Domain', {
+  version: EngineVersion.OPENSEARCH_1_0,
+  encryptionAtRest: {
+    kmsKey: encryptionKey,
+  },
+});
+```
+
+The construct also supports using cross-account KMS keys for encryption at rest:
+
+```ts
+import * as kms from 'aws-cdk-lib/aws-kms';
+
+const crossAccountKey = kms.Key.fromKeyArn(
+  this,
+  'CrossAccountKey',
+  'arn:aws:kms:us-east-1:111111111111:key/12345678-1234-1234-1234-123456789012',
+);
+
+const domain = new Domain(this, 'Domain', {
+  version: EngineVersion.OPENSEARCH_1_0,
+  encryptionAtRest: {
+    kmsKey: crossAccountKey,
+  },
+});
+```
 
 ## VPC Support
 
@@ -290,7 +322,7 @@ const domain = new Domain(this, 'Domain', {
 ```
 
 For more complex use-cases, for example, to set the domain up to receive data from a
-[cross-account Kinesis Firehose](https://aws.amazon.com/premiumsupport/knowledge-center/kinesis-firehose-cross-account-streaming/) the `addAccessPolicies` helper method
+[cross-account Amazon Data Firehose](https://aws.amazon.com/premiumsupport/knowledge-center/kinesis-firehose-cross-account-streaming/) the `addAccessPolicies` helper method
 allows for policies that include the explicit domain ARN.
 
 ```ts
@@ -323,7 +355,6 @@ domain.addAccessPolicies(
   }),
 );
 ```
-
 
 ## Audit logs
 
@@ -413,6 +444,30 @@ const domain = new Domain(this, 'Domain', {
 });
 ```
 
+## S3 Vectors Engine
+
+Amazon OpenSearch Service offers [the ability to use Amazon S3 as a vector engine for vector indexes](https://docs.aws.amazon.com/opensearch-service/latest/developerguide/s3-vector-opensearch-integration-engine.html).
+This feature allows you to offload vector data to Amazon S3 while maintaining sub-second vector search capabilities at low cost.
+
+Requirements:
+
+- OpenSearch version 2.19 or later
+- OpenSearch Optimized instance types (OR1, OR2, OM2, OI2) for data nodes
+- Encryption at rest must be enabled
+
+```ts
+const domain = new Domain(this, 'Domain', {
+  version: EngineVersion.OPENSEARCH_2_19,
+  s3VectorsEngineEnabled: true,
+  capacity: {
+    dataNodeInstanceType: 'or1.medium.search',
+  },
+  encryptionAtRest: {
+    enabled: true,
+  },
+});
+```
+
 ## Custom endpoint
 
 Custom endpoints can be configured to reach the domain under a custom domain name.
@@ -464,7 +519,7 @@ const domain = new Domain(this, 'Domain', {
 });
 ```
 
-## Enable support for Multi-AZ with Standby deployment
+## Enable support for Multi-AZ with Standby deployment
 
 The domain can be configured to use [multi-AZ with standby](https://docs.aws.amazon.com/opensearch-service/latest/developerguide/managedomains-multiaz.html#managedomains-za-standby).
 
@@ -532,4 +587,30 @@ const domain = new Domain(this, 'Domain', {
   version: EngineVersion.OPENSEARCH_1_3,
   ipAddressType: IpAddressType.DUAL_STACK,
 });
+```
+
+## Using Coordinator node with NodeOptions
+
+You can specify coordinator as a valid value for node type.
+
+> Visit [Dedicated coordinator nodes in Amazon OpenSearch Service](https://docs.aws.amazon.com/opensearch-service/latest/developerguide/Dedicated-coordinator-nodes.html) for more details.
+
+```ts
+import * as opensearch from 'aws-cdk-lib/aws-opensearchservice';
+
+const domain = new Domain(this, 'Domain', {
+  version: EngineVersion.OPENSEARCH_1_3,
+  capacity: {
+    nodeOptions: [
+      {
+        nodeType: opensearch.NodeType.COORDINATOR,
+        nodeConfig: {
+          enabled: true,
+          count: 2,
+          type: 'm5.large.search',
+        },
+      },
+    ],
+  },
+})
 ```

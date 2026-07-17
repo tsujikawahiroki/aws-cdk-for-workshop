@@ -1,9 +1,9 @@
-import { Construct } from 'constructs';
+import type { Construct } from 'constructs';
 import * as ec2 from '../../aws-ec2';
-
-import { CfnResource } from '../../core';
+import type { EgressRuleConfig, IngressRuleConfig } from '../../aws-ec2';
+import type { CfnResource } from '../../core';
 import { AwsCustomResource, AwsCustomResourcePolicy, PhysicalResourceId } from '../../custom-resources';
-import { EndpointGroup } from '../lib';
+import type { EndpointGroup } from '../lib';
 
 /**
  * The security group used by a Global Accelerator to send traffic to resources in a VPC.
@@ -20,7 +20,6 @@ export class AcceleratorSecurityGroupPeer implements ec2.IPeer {
    * to other resources created by CDK.
    */
   public static fromVpc(scope: Construct, id: string, vpc: ec2.IVpc, endpointGroup: EndpointGroup) {
-
     // The security group name is always 'GlobalAccelerator'
     const globalAcceleratorSGName = 'GlobalAccelerator';
 
@@ -75,11 +74,11 @@ export class AcceleratorSecurityGroupPeer implements ec2.IPeer {
   private constructor(private readonly securityGroupId: string) {
   }
 
-  public toIngressRuleConfig(): any {
+  public toIngressRuleConfig(): IngressRuleConfig {
     return { sourceSecurityGroupId: this.securityGroupId };
   }
 
-  public toEgressRuleConfig(): any {
+  public toEgressRuleConfig(): EgressRuleConfig {
     return { destinationSecurityGroupId: this.securityGroupId };
   }
 }

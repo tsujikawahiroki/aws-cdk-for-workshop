@@ -1,5 +1,8 @@
 import { Match, Template } from '../../assertions';
+import { Role, ServicePrincipal } from '../../aws-iam';
+import { CfnApp } from '../../aws-pinpoint';
 import { Stack, Duration } from '../../core';
+import type { AnalyticsConfiguration } from '../lib';
 import { OAuthScope, ResourceServerScope, UserPool, UserPoolClient, UserPoolClientIdentityProvider, UserPoolIdentityProvider, ClientAttributes } from '../lib';
 
 describe('User Pool Client', () => {
@@ -43,7 +46,6 @@ describe('User Pool Client', () => {
   });
 
   describe('Client with secret', () => {
-
     test('generate secret', () => {
       // GIVEN
       const stack = new Stack();
@@ -89,7 +91,7 @@ describe('User Pool Client', () => {
               {
                 Ref: 'clientWithSecretD25031A8',
               },
-              '"},"logApiResponseData":true}',
+              '"},"logApiResponseData":false}',
             ],
           ],
         },
@@ -113,7 +115,7 @@ describe('User Pool Client', () => {
               {
                 Ref: 'clientWithSecretD25031A8',
               },
-              '"},"logApiResponseData":true}',
+              '"},"logApiResponseData":false}',
             ],
           ],
         },
@@ -196,6 +198,135 @@ describe('User Pool Client', () => {
       expect(Template.fromStack(stack).findResources('AWS::Lambda::Function')).toEqual({});
     });
 
+    test('retrieving secret value does not log the API response data by default', () => {
+      const stack = new Stack();
+      const pool = new UserPool(stack, 'Pool');
+
+      // WHEN
+      const clientWithSecret = new UserPoolClient(stack, 'clientWithoutSecret2', {
+        userPool: pool,
+        generateSecret: true,
+      });
+
+      expect(clientWithSecret.userPoolClientSecret).toBeDefined();
+
+      Template.fromStack(stack).hasResourceProperties('Custom::DescribeCognitoUserPoolClient', {
+        Create: {
+          'Fn::Join': [
+            '',
+            [
+              '{"region":"',
+              {
+                Ref: 'AWS::Region',
+              },
+              '","service":"CognitoIdentityServiceProvider","action":"describeUserPoolClient","parameters":{"UserPoolId":"',
+              {
+                Ref: 'PoolD3F588B8',
+              },
+              '","ClientId":"',
+              {
+                Ref: 'clientWithoutSecret29B6DC7A0',
+              },
+              '"},"physicalResourceId":{"id":"',
+              {
+                Ref: 'clientWithoutSecret29B6DC7A0',
+              },
+              '"},"logApiResponseData":false}',
+            ],
+          ],
+        },
+        Update: {
+          'Fn::Join': [
+            '',
+            [
+              '{"region":"',
+              {
+                Ref: 'AWS::Region',
+              },
+              '","service":"CognitoIdentityServiceProvider","action":"describeUserPoolClient","parameters":{"UserPoolId":"',
+              {
+                Ref: 'PoolD3F588B8',
+              },
+              '","ClientId":"',
+              {
+                Ref: 'clientWithoutSecret29B6DC7A0',
+              },
+              '"},"physicalResourceId":{"id":"',
+              {
+                Ref: 'clientWithoutSecret29B6DC7A0',
+              },
+              '"},"logApiResponseData":false}',
+            ],
+          ],
+        },
+      });
+    });
+
+    test('retrieving secret value keeps the existing logging behaviour for the API response with feature flag set to true', () => {
+      const stack = new Stack();
+      stack.node.setContext('@aws-cdk/cognito:logUserPoolClientSecretValue', true);
+      const pool = new UserPool(stack, 'Pool');
+
+      // WHEN
+      const clientWithSecret = new UserPoolClient(stack, 'clientWithoutSecret2', {
+        userPool: pool,
+        generateSecret: true,
+      });
+
+      expect(clientWithSecret.userPoolClientSecret).toBeDefined();
+
+      Template.fromStack(stack).hasResourceProperties('Custom::DescribeCognitoUserPoolClient', {
+        Create: {
+          'Fn::Join': [
+            '',
+            [
+              '{"region":"',
+              {
+                Ref: 'AWS::Region',
+              },
+              '","service":"CognitoIdentityServiceProvider","action":"describeUserPoolClient","parameters":{"UserPoolId":"',
+              {
+                Ref: 'PoolD3F588B8',
+              },
+              '","ClientId":"',
+              {
+                Ref: 'clientWithoutSecret29B6DC7A0',
+              },
+              '"},"physicalResourceId":{"id":"',
+              {
+                Ref: 'clientWithoutSecret29B6DC7A0',
+              },
+              '"}}',
+            ],
+          ],
+        },
+        Update: {
+          'Fn::Join': [
+            '',
+            [
+              '{"region":"',
+              {
+                Ref: 'AWS::Region',
+              },
+              '","service":"CognitoIdentityServiceProvider","action":"describeUserPoolClient","parameters":{"UserPoolId":"',
+              {
+                Ref: 'PoolD3F588B8',
+              },
+              '","ClientId":"',
+              {
+                Ref: 'clientWithoutSecret29B6DC7A0',
+              },
+              '"},"physicalResourceId":{"id":"',
+              {
+                Ref: 'clientWithoutSecret29B6DC7A0',
+              },
+              '"}}',
+            ],
+          ],
+        },
+      });
+    });
+
     test('lacking secret configuration implicitly disables it', () => {
       // GIVEN
       const stack = new Stack();
@@ -255,6 +386,7 @@ describe('User Pool Client', () => {
         custom: true,
         userPassword: true,
         userSrp: true,
+        user: true,
       },
     });
 
@@ -264,6 +396,7 @@ describe('User Pool Client', () => {
         'ALLOW_ADMIN_USER_PASSWORD_AUTH',
         'ALLOW_CUSTOM_AUTH',
         'ALLOW_USER_SRP_AUTH',
+        'ALLOW_USER_AUTH',
         'ALLOW_REFRESH_TOKEN_AUTH',
       ],
     });
@@ -281,6 +414,7 @@ describe('User Pool Client', () => {
         custom: false,
         userPassword: false,
         userSrp: false,
+        user: false,
       },
     });
 
@@ -1285,5 +1419,304 @@ describe('User Pool Client', () => {
       enablePropagateAdditionalUserContextData: true,
     }),
     ).toThrow('Cannot activate enablePropagateAdditionalUserContextData in an app client without a client secret.');
+  });
+
+  test('defaulrRedirectUri in UserPoolClient', () => {
+    const stack = new Stack();
+    const pool = new UserPool(stack, 'Pool');
+
+    // WHEN
+    new UserPoolClient(stack, 'PoolClient', {
+      userPool: pool,
+      oAuth: {
+        defaultRedirectUri: 'https://aaa.example.com',
+        callbackUrls: ['https://aaa.example.com', 'https://bbb.example.com', 'https://ccc.example.com'],
+      },
+    });
+
+    Template.fromStack(stack).hasResourceProperties('AWS::Cognito::UserPoolClient', {
+      DefaultRedirectURI: 'https://aaa.example.com',
+      CallbackURLs: ['https://aaa.example.com', 'https://bbb.example.com', 'https://ccc.example.com'],
+    });
+  });
+
+  test('cannot create when defaultRedirectUri is not inclueded in callbackUrls', () => {
+    // GIVEN
+    const stack = new Stack();
+    const pool = new UserPool(stack, 'Pool');
+
+    // WHEN
+    expect(() => new UserPoolClient(stack, 'PoolClient', {
+      userPool: pool,
+      oAuth: {
+        defaultRedirectUri: 'https://ddd.example.com',
+        callbackUrls: ['https://aaa.example.com', 'https://bbb.example.com', 'https://ccc.example.com'],
+      },
+    }),
+    ).toThrow('defaultRedirectUri must be included in callbackUrls.');
+  });
+
+  test('cannot create when invalid defaultRedirectUri is set', () => {
+    // GIVEN
+    const stack = new Stack();
+    const pool = new UserPool(stack, 'Pool');
+
+    const invalidUrl = 'https://' + 'a'.repeat(1025) + '.example.com';
+    // WHEN
+    expect(() => new UserPoolClient(stack, 'PoolClient', {
+      userPool: pool,
+      oAuth: {
+        defaultRedirectUri: invalidUrl,
+        callbackUrls: [invalidUrl, 'https://bbb.example.com', 'https://ccc.example.com'],
+      },
+    }),
+    ).toThrow(`defaultRedirectUri must match the \`^(?=.{1,1024}$)[\p{L}\p{M}\p{S}\p{N}\p{P}]+$\` pattern, got ${invalidUrl}`);
+  });
+
+  describe('analytics configuration', () => {
+    test('analytics configuration can be added to userPoolClients by specifying application', () => {
+      // GIVEN
+      const stack = new Stack();
+      const pool = new UserPool(stack, 'Pool');
+      const pinpointApp = new CfnApp(stack, 'PinpointApp', {
+        name: 'SamplePinpointApp',
+      });
+
+      // WHEN
+      new UserPoolClient(stack, 'Client', {
+        userPool: pool,
+        analytics: {
+          application: pinpointApp,
+          shareUserData: true,
+        },
+      });
+
+      // THEN
+      Template.fromStack(stack).hasResourceProperties('AWS::Cognito::UserPoolClient', {
+        AnalyticsConfiguration: {
+          ApplicationArn: Match.objectLike({
+            'Fn::GetAtt': ['PinpointApp', 'Arn'],
+          }),
+          UserDataShared: true,
+        },
+      });
+    });
+
+    test('analytics configuration can be added to userPoolClients by specifying applicationId, externalId, and role', () => {
+      // GIVEN
+      const stack = new Stack();
+      const pool = new UserPool(stack, 'Pool');
+
+      const role = new Role(stack, 'Role', {
+        assumedBy: new ServicePrincipal('cognito-idp.amazonaws.com'),
+      });
+
+      // WHEN
+      new UserPoolClient(stack, 'Client', {
+        userPool: pool,
+        analytics: {
+          applicationId: '12345678-1234-1234-1234-123456789012',
+          externalId: 'sample-external-id',
+          role,
+          shareUserData: true,
+        },
+      });
+
+      // THEN
+      Template.fromStack(stack).hasResourceProperties('AWS::Cognito::UserPoolClient', {
+        AnalyticsConfiguration: {
+          ApplicationId: '12345678-1234-1234-1234-123456789012',
+          ExternalId: 'sample-external-id',
+          RoleArn: stack.resolve(role.roleArn),
+          UserDataShared: true,
+        },
+      });
+    });
+
+    test('throws an error when both application and applicationId are specified', () => {
+      // GIVEN
+      const stack = new Stack();
+      const pool = new UserPool(stack, 'Pool');
+      const pinpointApp = new CfnApp(stack, 'PinpointApp', {
+        name: 'SamplePinpointApp',
+      });
+
+      // WHEN
+      const createUserPoolClient = () => new UserPoolClient(stack, 'PoolClient', {
+        userPool: pool,
+        analytics: {
+          application: pinpointApp,
+          applicationId: '12345678-1234-1234-1234-123456789012',
+        },
+      });
+
+      // THEN
+      expect(() => createUserPoolClient()).toThrow('Either `application` or all of `applicationId`, `externalId` and `role` must be specified.');
+    });
+
+    test('throws an error when either applicationId, externalId or role is not specified', () => {
+      // GIVEN
+      const stack = new Stack();
+      const pool = new UserPool(stack, 'Pool');
+
+      const role = new Role(stack, 'Role', {
+        assumedBy: new ServicePrincipal('cognito-idp.amazonaws.com'),
+      });
+
+      // WHEN
+      const createUserPoolClient = (id: string, analytics: AnalyticsConfiguration) => new UserPoolClient(stack, id, {
+        userPool: pool,
+        analytics,
+      });
+
+      // THEN
+      expect(
+        () =>
+          createUserPoolClient('PoolClient1', {
+            applicationId: '12345678-1234-1234-1234-123456789012',
+          }),
+      ).toThrow('Either all of `applicationId`, `externalId` and `role` must be specified or `application` must be specified.');
+
+      expect(
+        () =>
+          createUserPoolClient('PoolClient2', {
+            externalId: 'sample-external-id',
+          }),
+      ).toThrow('Either all of `applicationId`, `externalId` and `role` must be specified or `application` must be specified.');
+
+      expect(
+        () =>
+          createUserPoolClient('PoolClient3', {
+            role,
+          }),
+      ).toThrow('Either all of `applicationId`, `externalId` and `role` must be specified or `application` must be specified.');
+    });
+  });
+
+  describe('refresh token rotation', () => {
+    test('undefined by default', () => {
+      const stack = new Stack();
+      const pool = new UserPool(stack, 'Pool');
+
+      // WHEN
+      pool.addClient('Client', {
+        userPoolClientName: 'Client',
+      });
+
+      // THEN
+      Template.fromStack(stack).hasResourceProperties('AWS::Cognito::UserPoolClient', {
+        ClientName: 'Client',
+        refreshTokenRotation: Match.absent(),
+      });
+    });
+
+    test('validate grace period original refresh token', () => {
+      const stack = new Stack();
+      const pool = new UserPool(stack, 'Pool');
+
+      // WHEN
+      pool.addClient('Client1', {
+        userPoolClientName: 'Client1',
+        refreshTokenRotationGracePeriod: Duration.seconds(5),
+      });
+      pool.addClient('Client2', {
+        userPoolClientName: 'Client2',
+        refreshTokenRotationGracePeriod: Duration.seconds(25),
+      });
+      pool.addClient('Client3', {
+        userPoolClientName: 'Client3',
+        refreshTokenRotationGracePeriod: Duration.seconds(50),
+      });
+
+      // THEN
+      Template.fromStack(stack).hasResourceProperties('AWS::Cognito::UserPoolClient', {
+        ClientName: 'Client1',
+        RefreshTokenRotation: {
+          Feature: 'ENABLED',
+          RetryGracePeriodSeconds: 5,
+        },
+      });
+      Template.fromStack(stack).hasResourceProperties('AWS::Cognito::UserPoolClient', {
+        ClientName: 'Client2',
+        RefreshTokenRotation: {
+          Feature: 'ENABLED',
+          RetryGracePeriodSeconds: 25,
+        },
+      });
+      Template.fromStack(stack).hasResourceProperties('AWS::Cognito::UserPoolClient', {
+        ClientName: 'Client3',
+        RefreshTokenRotation: {
+          Feature: 'ENABLED',
+          RetryGracePeriodSeconds: 50,
+        },
+      });
+    });
+
+    test('error when exceeding max refreshTokenRotationGracePeriod', () => {
+      const stack = new Stack();
+      const pool = new UserPool(stack, 'Pool');
+
+      expect(() =>pool.addClient('Client1', {
+        refreshTokenRotationGracePeriod: Duration.seconds(80),
+      })).toThrow('refreshTokenRotationGracePeriod: Must be a duration between 0 seconds and 1 minute (inclusive); received 1 minute 20 seconds.');
+    });
+
+    test('explicitAuthFlows refresh token excluded if refresh token rotation is enabled', () => {
+      // GIVEN
+      const stack = new Stack();
+      const pool = new UserPool(stack, 'Pool');
+
+      // WHEN
+      pool.addClient('Client', {
+        authFlows: {
+          adminUserPassword: true,
+          custom: true,
+          userPassword: true,
+          userSrp: true,
+          user: true,
+        },
+        refreshTokenRotationGracePeriod: Duration.seconds(40),
+      });
+
+      // THEN
+      Template.fromStack(stack).hasResourceProperties('AWS::Cognito::UserPoolClient', {
+        ExplicitAuthFlows: [
+          'ALLOW_USER_PASSWORD_AUTH',
+          'ALLOW_ADMIN_USER_PASSWORD_AUTH',
+          'ALLOW_CUSTOM_AUTH',
+          'ALLOW_USER_SRP_AUTH',
+          'ALLOW_USER_AUTH',
+        ],
+      });
+    });
+
+    test('explicitAuthFlows refresh token included if refresh token rotation is disabled', () => {
+      // GIVEN
+      const stack = new Stack();
+      const pool = new UserPool(stack, 'Pool');
+
+      // WHEN
+      pool.addClient('Client', {
+        authFlows: {
+          adminUserPassword: true,
+          custom: true,
+          userPassword: true,
+          userSrp: true,
+          user: true,
+        },
+      });
+
+      // THEN
+      Template.fromStack(stack).hasResourceProperties('AWS::Cognito::UserPoolClient', {
+        ExplicitAuthFlows: [
+          'ALLOW_USER_PASSWORD_AUTH',
+          'ALLOW_ADMIN_USER_PASSWORD_AUTH',
+          'ALLOW_CUSTOM_AUTH',
+          'ALLOW_USER_SRP_AUTH',
+          'ALLOW_USER_AUTH',
+          'ALLOW_REFRESH_TOKEN_AUTH',
+        ],
+      });
+    });
   });
 });

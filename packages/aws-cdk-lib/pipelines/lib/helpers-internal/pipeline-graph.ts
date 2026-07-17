@@ -1,7 +1,10 @@
 import { DependencyBuilders, Graph, GraphNode, GraphNodeCollection } from './graph';
 import { PipelineQueries } from './pipeline-queries';
-import { AssetType, FileSet, StackAsset, StackDeployment, StageDeployment, Step, Wave } from '../blueprint';
-import { PipelineBase } from '../main/pipeline-base';
+import { ValidationError } from '../../../core';
+import { lit } from '../../../core/lib/private/literal-string';
+import type { FileSet, StackAsset, StackDeployment, StageDeployment, Wave } from '../blueprint';
+import { AssetType, Step } from '../blueprint';
+import type { PipelineBase } from '../main/pipeline-base';
 
 export interface PipelineGraphProps {
   /**
@@ -82,7 +85,7 @@ export class PipelineGraph {
 
     const cloudAssembly = pipeline.synth.primaryOutput?.primaryOutput;
     if (!cloudAssembly) {
-      throw new Error(`The synth step must produce the cloud assembly artifact, but doesn't: ${pipeline.synth}`);
+      throw new ValidationError(lit`SynthStepMissingCloudAssembly`, `The synth step must produce the cloud assembly artifact, but doesn't: ${pipeline.synth}`, this.pipeline);
     }
 
     this.cloudAssemblyFileSet = cloudAssembly;
@@ -134,7 +137,12 @@ export class PipelineGraph {
     const stackGraphs = new Map<StackDeployment, AGraph>();
 
     for (const stack of stage.stacks) {
-      const stackGraph: AGraph = Graph.of(this.simpleStackName(stack.stackName, stage.stageName), { type: 'stack-group', stack });
+      const stackGraphName = findUniqueName(retGraph, [
+        this.simpleStackName(stack.stackName, stage.stageName),
+        ...stack.account ? [stack.account] : [],
+        ...stack.region ? [stack.region] : [],
+      ]);
+      const stackGraph: AGraph = Graph.of(stackGraphName, { type: 'stack-group', stack });
       const prepareNode: AGraphNode | undefined = this.prepareStep ? aGraphNode('Prepare', { type: 'prepare', stack }) : undefined;
       const deployNode: AGraphNode = aGraphNode('Deploy', {
         type: 'execute',
@@ -161,7 +169,7 @@ export class PipelineGraph {
         if (prepareNode) {
           this.addChangeSetNode(stack.changeSet, prepareNode, deployNode, stackGraph);
         } else {
-          throw new Error(`Cannot use \'changeSet\' steps for stack \'${stack.stackName}\': the pipeline does not support them or they have been disabled`);
+          throw new ValidationError(lit`ChangeSetStepsNotSupported`, `Cannot use \'changeSet\' steps for stack \'${stack.stackName}\': the pipeline does not support them or they have been disabled`, this.pipeline);
         }
       }
 
@@ -180,7 +188,7 @@ export class PipelineGraph {
       // add the template asset
       if (this.publishTemplate) {
         if (!stack.templateAsset) {
-          throw new Error(`"publishTemplate" is enabled, but stack ${stack.stackArtifactId} does not have a template asset`);
+          throw new ValidationError(lit`TemplateAssetMissing`, `"publishTemplate" is enabled, but stack ${stack.stackArtifactId} does not have a template asset`, this.pipeline);
         }
 
         firstDeployNode.dependOn(this.publishAsset(stack.templateAsset));
@@ -205,10 +213,10 @@ export class PipelineGraph {
         const stackNode = stackGraphs.get(stack);
         const depNode = stackGraphs.get(dep);
         if (!stackNode) {
-          throw new Error(`cannot find node for ${stack.stackName}`);
+          throw new ValidationError(lit`StackNodeNotFound`, `cannot find node for ${stack.stackName}`, this.pipeline);
         }
         if (!depNode) {
-          throw new Error(`cannot find node for ${dep.stackName}`);
+          throw new ValidationError(lit`DependencyNodeNotFound`, `cannot find node for ${dep.stackName}`, this.pipeline);
         }
         stackNode.dependOn(depNode);
       }
@@ -310,17 +318,17 @@ export class PipelineGraph {
         const leftMostConsumer = new GraphNodeCollection(builder.consumers).first();
         const parent = leftMostConsumer.parentGraph;
         if (!parent) {
-          throw new Error(`Consumer doesn't have a parent graph: ${leftMostConsumer}`);
+          throw new ValidationError(lit`ConsumerMissingParentGraph`, `Consumer doesn't have a parent graph: ${leftMostConsumer}`, this.pipeline);
         }
         this.addStepNode(step, parent);
       }
     }
 
     const unsatisfied = this.nodeDependencies.unsatisfiedBuilders();
-    throw new Error([
+    throw new ValidationError(lit`DependencyRecursionDepthExceeded`, [
       'Recursion depth too large while adding dependency nodes:',
       unsatisfied.map(([step, builder]) => `${builder.consumersAsString()} awaiting ${step}.`),
-    ].join(' '));
+    ].join(' '), this.pipeline);
   }
 
   private publishAsset(stackAsset: StackAsset): AGraphNode {
@@ -338,8 +346,11 @@ export class PipelineGraph {
       const id = stackAsset.assetType === AssetType.FILE
         ? (this.singlePublisher ? 'FileAsset' : `FileAsset${++this._fileAssetCtr}`)
         : (this.singlePublisher ? 'DockerAsset' : `DockerAsset${++this._dockerAssetCtr}`);
+      const displayName = this.singlePublisher
+        ? getDisplayNameForSinglePublishStep(stackAsset.assetType)
+        : stackAsset.displayName;
 
-      assetNode = aGraphNode(id, { type: 'publish-assets', assets: [] });
+      assetNode = aGraphNode(id, { type: 'publish-assets', assets: [] }, displayName);
       assetsGraph.add(assetNode);
       assetNode.dependOn(this.lastPreparationNode);
 
@@ -349,7 +360,7 @@ export class PipelineGraph {
 
     const data = assetNode.data;
     if (data?.type !== 'publish-assets') {
-      throw new Error(`${assetNode} has the wrong data.type: ${data?.type}`);
+      throw new ValidationError(lit`InvalidAssetNodeDataType`, `${assetNode} has the wrong data.type: ${data?.type}`, this.pipeline);
     }
 
     if (!data.assets.some(a => a.assetSelector === stackAsset.assetSelector)) {
@@ -406,10 +417,29 @@ interface ExecuteAnnotation {
 export type AGraphNode = GraphNode<GraphAnnotation>;
 export type AGraph = Graph<GraphAnnotation>;
 
-function aGraphNode(id: string, x: GraphAnnotation): AGraphNode {
-  return GraphNode.of(id, x);
+function aGraphNode(id: string, x: GraphAnnotation, displayName?: string): AGraphNode {
+  return GraphNode.of(id, x, displayName);
 }
 
 function stripPrefix(s: string, prefix: string) {
   return s.startsWith(prefix) ? s.slice(prefix.length) : s;
+}
+
+function findUniqueName(parent: Graph<any>, parts: string[]): string {
+  for (let i = 1; i <= parts.length; i++) {
+    const candidate = parts.slice(0, i).join('.');
+    if (!parent.containsId(candidate)) {
+      return candidate;
+    }
+  }
+  return parts.join('.');
+}
+
+function getDisplayNameForSinglePublishStep(type: AssetType) {
+  switch (type) {
+    case AssetType.FILE:
+      return 'FileAssets';
+    case AssetType.DOCKER_IMAGE:
+      return 'DockerAssets';
+  }
 }

@@ -2,25 +2,25 @@ import * as path from 'path';
 import * as cdk from '../../core';
 import * as cxapi from '../../cx-api';
 import * as ecs from '../lib';
-
-/* eslint-disable dot-notation */
+import { acknowledgeTestValidationRules } from './util';
 
 describe('environment file', () => {
   describe('ecs.EnvironmentFile.fromAsset', () => {
     test('fails if asset is not a single file', () => {
       // GIVEN
       const stack = new cdk.Stack();
+      acknowledgeTestValidationRules(stack);
       const fileAsset = ecs.EnvironmentFile.fromAsset(path.join(__dirname, 'demo-envfiles'));
 
       // THEN
       expect(() => defineContainerDefinition(stack, fileAsset)).toThrow(/Asset must be a single file/);
-
     });
 
     test('only one environment file asset object is created even if multiple container definitions use the same file', () => {
       // GIVEN
       const app = new cdk.App({ context: { [cxapi.NEW_STYLE_STACK_SYNTHESIS_CONTEXT]: false } });
       const stack = new cdk.Stack(app);
+      acknowledgeTestValidationRules(stack);
       const fileAsset = ecs.EnvironmentFile.fromAsset(path.join(__dirname, 'demo-envfiles', 'test-envfile.env'));
 
       // WHEN
@@ -42,7 +42,6 @@ describe('environment file', () => {
 
       // container one has an asset, container two does not
       expect(synthesized.assets.length).toEqual(1);
-
     });
   });
 });

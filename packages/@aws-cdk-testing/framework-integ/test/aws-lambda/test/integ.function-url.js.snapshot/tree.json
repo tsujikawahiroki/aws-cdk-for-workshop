@@ -78,13 +78,13 @@
                     "code": {
                       "zipFile": "def handler(event, context):\n  return \"success\""
                     },
+                    "handler": "index.handler",
                     "role": {
                       "Fn::GetAtt": [
                         "IamAuthFunctionUrlsServiceRole35DF9DE0",
                         "Arn"
                       ]
                     },
-                    "handler": "index.handler",
                     "runtime": "python3.10"
                   }
                 },
@@ -207,13 +207,13 @@
                     "code": {
                       "zipFile": "def handler(event, context):\n  return \"success\""
                     },
+                    "handler": "index.handler",
                     "role": {
                       "Fn::GetAtt": [
                         "NoAuthFunctionUrlsServiceRole7247E6F2",
                         "Arn"
                       ]
                     },
-                    "handler": "index.handler",
                     "runtime": "python3.10"
                   }
                 },
@@ -265,8 +265,30 @@
                         "Arn"
                       ]
                     },
-                    "principal": "*",
-                    "functionUrlAuthType": "NONE"
+                    "functionUrlAuthType": "NONE",
+                    "principal": "*"
+                  }
+                },
+                "constructInfo": {
+                  "fqn": "aws-cdk-lib.aws_lambda.CfnPermission",
+                  "version": "0.0.0"
+                }
+              },
+              "invoke-function": {
+                "id": "invoke-function",
+                "path": "Stack1/NoAuthFunctionUrls/invoke-function",
+                "attributes": {
+                  "aws:cdk:cloudformation:type": "AWS::Lambda::Permission",
+                  "aws:cdk:cloudformation:props": {
+                    "action": "lambda:InvokeFunction",
+                    "functionName": {
+                      "Fn::GetAtt": [
+                        "NoAuthFunctionUrls65ABC157",
+                        "Arn"
+                      ]
+                    },
+                    "invokedViaFunctionUrl": true,
+                    "principal": "*"
                   }
                 },
                 "constructInfo": {
@@ -358,13 +380,13 @@
                     "code": {
                       "zipFile": "def handler(event, context):\n  return \"success\""
                     },
+                    "handler": "index.handler",
                     "role": {
                       "Fn::GetAtt": [
                         "CorsFunctionUrlsServiceRole6227B597",
                         "Arn"
                       ]
                     },
-                    "handler": "index.handler",
                     "runtime": "python3.10"
                   }
                 },
@@ -384,18 +406,18 @@
                       "aws:cdk:cloudformation:type": "AWS::Lambda::Url",
                       "aws:cdk:cloudformation:props": {
                         "authType": "NONE",
-                        "targetFunctionArn": {
-                          "Fn::GetAtt": [
-                            "CorsFunctionUrlsD81CF424",
-                            "Arn"
-                          ]
-                        },
                         "cors": {
                           "allowMethods": [
                             "*"
                           ],
                           "allowOrigins": [
                             "https://example.com"
+                          ]
+                        },
+                        "targetFunctionArn": {
+                          "Fn::GetAtt": [
+                            "CorsFunctionUrlsD81CF424",
+                            "Arn"
                           ]
                         }
                       }
@@ -424,8 +446,30 @@
                         "Arn"
                       ]
                     },
-                    "principal": "*",
-                    "functionUrlAuthType": "NONE"
+                    "functionUrlAuthType": "NONE",
+                    "principal": "*"
+                  }
+                },
+                "constructInfo": {
+                  "fqn": "aws-cdk-lib.aws_lambda.CfnPermission",
+                  "version": "0.0.0"
+                }
+              },
+              "invoke-function": {
+                "id": "invoke-function",
+                "path": "Stack1/CorsFunctionUrls/invoke-function",
+                "attributes": {
+                  "aws:cdk:cloudformation:type": "AWS::Lambda::Permission",
+                  "aws:cdk:cloudformation:props": {
+                    "action": "lambda:InvokeFunction",
+                    "functionName": {
+                      "Fn::GetAtt": [
+                        "CorsFunctionUrlsD81CF424",
+                        "Arn"
+                      ]
+                    },
+                    "invokedViaFunctionUrl": true,
+                    "principal": "*"
                   }
                 },
                 "constructInfo": {
@@ -517,13 +561,13 @@
                     "code": {
                       "zipFile": "def handler(event, context):\n  return \"success\""
                     },
+                    "handler": "index.handler",
                     "role": {
                       "Fn::GetAtt": [
                         "StreamFunctionUrlsServiceRoleAF76EC5D",
                         "Arn"
                       ]
                     },
-                    "handler": "index.handler",
                     "runtime": "python3.10"
                   }
                 },
@@ -543,13 +587,13 @@
                       "aws:cdk:cloudformation:type": "AWS::Lambda::Url",
                       "aws:cdk:cloudformation:props": {
                         "authType": "NONE",
+                        "invokeMode": "RESPONSE_STREAM",
                         "targetFunctionArn": {
                           "Fn::GetAtt": [
                             "StreamFunctionUrlsAAB55C9C",
                             "Arn"
                           ]
-                        },
-                        "invokeMode": "RESPONSE_STREAM"
+                        }
                       }
                     },
                     "constructInfo": {
@@ -576,8 +620,30 @@
                         "Arn"
                       ]
                     },
-                    "principal": "*",
-                    "functionUrlAuthType": "NONE"
+                    "functionUrlAuthType": "NONE",
+                    "principal": "*"
+                  }
+                },
+                "constructInfo": {
+                  "fqn": "aws-cdk-lib.aws_lambda.CfnPermission",
+                  "version": "0.0.0"
+                }
+              },
+              "invoke-function": {
+                "id": "invoke-function",
+                "path": "Stack1/StreamFunctionUrls/invoke-function",
+                "attributes": {
+                  "aws:cdk:cloudformation:type": "AWS::Lambda::Permission",
+                  "aws:cdk:cloudformation:props": {
+                    "action": "lambda:InvokeFunction",
+                    "functionName": {
+                      "Fn::GetAtt": [
+                        "StreamFunctionUrlsAAB55C9C",
+                        "Arn"
+                      ]
+                    },
+                    "invokedViaFunctionUrl": true,
+                    "principal": "*"
                   }
                 },
                 "constructInfo": {
@@ -634,7 +700,7 @@
                 "path": "IntegTest/DefaultTest/Default",
                 "constructInfo": {
                   "fqn": "constructs.Construct",
-                  "version": "10.1.270"
+                  "version": "10.4.2"
                 }
               },
               "DeployAssert": {
@@ -680,7 +746,7 @@
         "path": "Tree",
         "constructInfo": {
           "fqn": "constructs.Construct",
-          "version": "10.1.270"
+          "version": "10.4.2"
         }
       }
     },

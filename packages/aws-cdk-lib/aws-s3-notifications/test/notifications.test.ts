@@ -4,8 +4,7 @@ import * as sns from '../../aws-sns';
 import * as cdk from '../../core';
 import * as s3n from '../lib';
 
-/* eslint-disable max-len */
-/* eslint-disable quote-props */
+/* eslint-disable @stylistic/quote-props */
 
 test('bucket without notifications', () => {
   const stack = new cdk.Stack();
@@ -24,7 +23,6 @@ test('bucket without notifications', () => {
 });
 
 test('notifications can be added to imported buckets', () => {
-
   const stack = new cdk.Stack();
 
   const bucket = s3.Bucket.fromBucketName(stack, 'MyBucket', 'mybucket');
@@ -49,7 +47,6 @@ test('notifications can be added to imported buckets', () => {
       ],
     },
   });
-
 });
 
 test('when notification are added, a custom resource is provisioned + a lambda handler for it', () => {
@@ -327,8 +324,9 @@ test('a notification destination can specify a set of dependencies that must be 
       BucketName: { Ref: 'Bucket83908E77' },
       Managed: true,
       NotificationConfiguration: { QueueConfigurations: [{ Events: ['s3:ObjectCreated:*'], QueueArn: 'arn' }] },
+      SkipDestinationValidation: false,
     },
-    DependsOn: ['Dependent'],
+    DependsOn: ['BucketNotificationsHandlerPolicy2180A8BD', 'Dependent'],
   });
 });
 

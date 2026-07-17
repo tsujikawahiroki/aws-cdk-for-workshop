@@ -50,7 +50,7 @@ beforeEach(() => {
 
 test('appsync supports merged API', () => {
   // WHEN
-  const mergedApi = new appsync.GraphqlApi(stack, 'merged-api', {
+  new appsync.GraphqlApi(stack, 'merged-api', {
     name: 'api',
     definition: appsync.Definition.fromSourceApis({
       sourceApis: [
@@ -72,7 +72,7 @@ test('appsync supports merged API', () => {
 
 test('appsync supports merged API - ARN identifier flag enabled', () => {
   // WHEN
-  const mergedApi = new appsync.GraphqlApi(stackWithFlag, 'merged-api', {
+  new appsync.GraphqlApi(stackWithFlag, 'merged-api', {
     name: 'api',
     definition: appsync.Definition.fromSourceApis({
       sourceApis: [
@@ -173,7 +173,7 @@ test('Merged API throws when accessing schema property', () => {
   // THEN
   expect(() => {
     mergedApi.schema;
-  }).toThrowError('Schema does not exist for AppSync merged APIs.');
+  }).toThrow('Schema does not exist for AppSync merged APIs.');
 });
 
 test('source api association depends on source schema', () => {

@@ -2,8 +2,14 @@ import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as elb from 'aws-cdk-lib/aws-elasticloadbalancing';
 import * as cdk from 'aws-cdk-lib';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
+import type { CfnResource } from 'aws-cdk-lib';
 
-const app = new cdk.App();
+const app = new cdk.App({
+  postCliContext: {
+    '@aws-cdk/aws-lambda:useCdkManagedLogGroup': false,
+    '@aws-cdk/aws-lambda:createNewPoliciesWithAddToRolePolicy': false,
+  },
+});
 const stack = new cdk.Stack(app, 'aws-ecs-integ');
 
 const vpc = new ec2.Vpc(stack, 'Vpc', { maxAzs: 2, restrictDefaultSecurityGroup: false });
@@ -37,6 +43,14 @@ const service = new ecs.Ec2Service(stack, 'Service', {
 const lb = new elb.LoadBalancer(stack, 'LB', { vpc });
 lb.addListener({ externalPort: 80 });
 lb.addTarget(service);
+
+// Suppress security guardian rule for CLB default behavior
+lb.connections.securityGroups.forEach(sg => {
+  const cfnSg = sg.node.defaultChild as CfnResource;
+  cfnSg.addMetadata('guard', {
+    SuppressedRules: ['EC2_NO_OPEN_SECURITY_GROUPS'],
+  });
+});
 
 new cdk.CfnOutput(stack, 'LoadBalancerDNS', { value: lb.loadBalancerDnsName });
 

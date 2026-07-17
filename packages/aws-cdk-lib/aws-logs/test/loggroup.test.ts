@@ -1,10 +1,11 @@
-import { Construct } from 'constructs';
-import { Annotations, Template, Match } from '../../assertions';
+import type { Construct } from 'constructs';
+import { Template } from '../../assertions';
 import * as iam from '../../aws-iam';
 import * as kms from '../../aws-kms';
 import { Bucket } from '../../aws-s3';
 import { App, CfnParameter, Fn, RemovalPolicy, Stack } from '../../core';
-import { LogGroup, RetentionDays, LogGroupClass, DataProtectionPolicy, DataIdentifier, CustomDataIdentifier, ILogGroup, ILogSubscriptionDestination, FilterPattern } from '../lib';
+import type { ILogGroup, ILogSubscriptionDestination } from '../lib';
+import { LogGroupGrants, LogGroup, RetentionDays, LogGroupClass, DataProtectionPolicy, DataIdentifier, CustomDataIdentifier, FilterPattern, FieldIndexPolicy, ParserProcessor, ParserProcessorType, JsonMutatorType, JsonMutatorProcessor, CfnLogGroup } from '../lib';
 
 describe('log group', () => {
   test('set kms key when provided', () => {
@@ -162,24 +163,6 @@ describe('log group', () => {
     Template.fromStack(stack).resourcePropertiesCountIs('AWS::Logs::LogGroup', {
       LogGroupClass: LogGroupClass.INFREQUENT_ACCESS,
     }, 0);
-  });
-
-  test('with log group class in a non-supported region', () => {
-    // GIVEN
-    const app = new App();
-    const stack = new Stack(app, 'TestStack', {
-      env: {
-        region: 'us-isob-east-1',
-      },
-    });
-
-    // WHEN
-    new LogGroup(stack, 'LogGroup', {
-      logGroupClass: LogGroupClass.STANDARD,
-    });
-
-    // THEN
-    Annotations.fromStack(stack).hasWarning('*', Match.stringLikeRegexp(/The LogGroupClass property is not supported in the following regions.+us-isob-east-1/));
   });
 
   test('will delete log group if asked to', () => {
@@ -458,6 +441,36 @@ describe('log group', () => {
     });
   });
 
+  test('grant write to service principal for CfnLogGroup', () => {
+    // GIVEN
+    const stack = new Stack();
+    const cfnLogGroup = new CfnLogGroup(stack, 'CfnLogGroup');
+    const sp = new iam.ServicePrincipal('lambda.amazonaws.com');
+
+    // WHEN
+    LogGroupGrants.fromLogGroup(cfnLogGroup).write(sp);
+
+    // THEN
+    const template = Template.fromStack(stack);
+    template.hasResourceProperties('AWS::Logs::ResourcePolicy', {
+      PolicyDocument: {
+        'Fn::Join': [
+          '',
+          [
+            '{"Statement":[{"Action":["logs:CreateLogStream","logs:PutLogEvents"],"Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"},"Resource":"',
+            {
+              'Fn::GetAtt': [
+                'CfnLogGroup',
+                'Arn',
+              ],
+            },
+            '"}],"Version":"2012-10-17"}',
+          ],
+        ],
+      },
+    });
+  });
+
   test('when added to log groups, IAM users are converted into account IDs in the resource policy', () => {
     // GIVEN
     const stack = new Stack();
@@ -572,13 +585,13 @@ describe('log group', () => {
     Template.fromStack(stack).hasResourceProperties('AWS::Logs::LogGroup', {
       LogGroupName: logGroupName,
       DataProtectionPolicy: {
-        name: 'test-policy-name',
-        description: 'test description',
-        version: '2021-06-01',
-        statement: [
+        Name: 'test-policy-name',
+        Description: 'test description',
+        Version: '2021-06-01',
+        Statement: [
           {
-            sid: 'audit-statement-cdk',
-            dataIdentifier: [
+            Sid: 'audit-statement-cdk',
+            DataIdentifier: [
               {
                 'Fn::Join': [
                   '',
@@ -590,15 +603,15 @@ describe('log group', () => {
                 ],
               },
             ],
-            operation: {
-              audit: {
-                findingsDestination: {},
+            Operation: {
+              Audit: {
+                FindingsDestination: {},
               },
             },
           },
           {
-            sid: 'redact-statement-cdk',
-            dataIdentifier: [
+            Sid: 'redact-statement-cdk',
+            DataIdentifier: [
               {
                 'Fn::Join': [
                   '',
@@ -610,9 +623,9 @@ describe('log group', () => {
                 ],
               },
             ],
-            operation: {
-              deidentify: {
-                maskConfig: {},
+            Operation: {
+              Deidentify: {
+                MaskConfig: {},
               },
             },
           },
@@ -642,13 +655,13 @@ describe('log group', () => {
     Template.fromStack(stack).hasResourceProperties('AWS::Logs::LogGroup', {
       LogGroupName: logGroupName,
       DataProtectionPolicy: {
-        name: 'test-policy-name',
-        description: 'test description',
-        version: '2021-06-01',
-        statement: [
+        Name: 'test-policy-name',
+        Description: 'test description',
+        Version: '2021-06-01',
+        Statement: [
           {
-            sid: 'audit-statement-cdk',
-            dataIdentifier: [
+            Sid: 'audit-statement-cdk',
+            DataIdentifier: [
               {
                 'Fn::Join': [
                   '',
@@ -660,15 +673,15 @@ describe('log group', () => {
                 ],
               },
             ],
-            operation: {
-              audit: {
-                findingsDestination: {},
+            Operation: {
+              Audit: {
+                FindingsDestination: {},
               },
             },
           },
           {
-            sid: 'redact-statement-cdk',
-            dataIdentifier: [
+            Sid: 'redact-statement-cdk',
+            DataIdentifier: [
               {
                 'Fn::Join': [
                   '',
@@ -680,9 +693,9 @@ describe('log group', () => {
                 ],
               },
             ],
-            operation: {
-              deidentify: {
-                maskConfig: {},
+            Operation: {
+              Deidentify: {
+                MaskConfig: {},
               },
             },
           },
@@ -717,13 +730,13 @@ describe('log group', () => {
     Template.fromStack(stack).hasResourceProperties('AWS::Logs::LogGroup', {
       LogGroupName: logGroupName,
       DataProtectionPolicy: {
-        name: 'data-protection-policy-cdk',
-        description: 'cdk generated data protection policy',
-        version: '2021-06-01',
-        statement: [
+        Name: 'data-protection-policy-cdk',
+        Description: 'cdk generated data protection policy',
+        Version: '2021-06-01',
+        Statement: [
           {
-            sid: 'audit-statement-cdk',
-            dataIdentifier: [
+            Sid: 'audit-statement-cdk',
+            DataIdentifier: [
               {
                 'Fn::Join': [
                   '',
@@ -735,19 +748,19 @@ describe('log group', () => {
                 ],
               },
             ],
-            operation: {
-              audit: {
-                findingsDestination: {
-                  cloudWatchLogs: {
-                    logGroup: {
+            Operation: {
+              Audit: {
+                FindingsDestination: {
+                  CloudWatchLogs: {
+                    LogGroup: {
                       Ref: 'LogGroupAudit2C8B7F73',
                     },
                   },
-                  firehose: {
-                    deliveryStream: auditDeliveryStreamName,
+                  Firehose: {
+                    DeliveryStream: auditDeliveryStreamName,
                   },
-                  s3: {
-                    bucket: {
+                  S3: {
+                    Bucket: {
                       Ref: 'BucketAudit1DED3529',
                     },
                   },
@@ -756,8 +769,8 @@ describe('log group', () => {
             },
           },
           {
-            sid: 'redact-statement-cdk',
-            dataIdentifier: [
+            Sid: 'redact-statement-cdk',
+            DataIdentifier: [
               {
                 'Fn::Join': [
                   '',
@@ -769,9 +782,9 @@ describe('log group', () => {
                 ],
               },
             ],
-            operation: {
-              deidentify: {
-                maskConfig: {},
+            Operation: {
+              Deidentify: {
+                MaskConfig: {},
               },
             },
           },
@@ -801,37 +814,37 @@ describe('log group', () => {
     Template.fromStack(stack).hasResourceProperties('AWS::Logs::LogGroup', {
       LogGroupName: logGroupName,
       DataProtectionPolicy: {
-        name: 'test-policy-name',
-        description: 'test description',
-        version: '2021-06-01',
-        configuration: {
-          customDataIdentifier: [
+        Name: 'test-policy-name',
+        Description: 'test description',
+        Version: '2021-06-01',
+        Configuration: {
+          CustomDataIdentifier: [
             {
-              name: 'EmployeeId',
-              regex: 'EmployeeId-\\d{9}',
+              Name: 'EmployeeId',
+              Regex: 'EmployeeId-\\d{9}',
             },
           ],
         },
-        statement: [
+        Statement: [
           {
-            sid: 'audit-statement-cdk',
-            dataIdentifier: [
+            Sid: 'audit-statement-cdk',
+            DataIdentifier: [
               'EmployeeId',
             ],
-            operation: {
-              audit: {
-                findingsDestination: {},
+            Operation: {
+              Audit: {
+                FindingsDestination: {},
               },
             },
           },
           {
-            sid: 'redact-statement-cdk',
-            dataIdentifier: [
+            Sid: 'redact-statement-cdk',
+            DataIdentifier: [
               'EmployeeId',
             ],
-            operation: {
-              deidentify: {
-                maskConfig: {},
+            Operation: {
+              Deidentify: {
+                MaskConfig: {},
               },
             },
           },
@@ -861,21 +874,21 @@ describe('log group', () => {
     Template.fromStack(stack).hasResourceProperties('AWS::Logs::LogGroup', {
       LogGroupName: logGroupName,
       DataProtectionPolicy: {
-        name: 'test-policy-name',
-        description: 'test description',
-        version: '2021-06-01',
-        configuration: {
-          customDataIdentifier: [
+        Name: 'test-policy-name',
+        Description: 'test description',
+        Version: '2021-06-01',
+        Configuration: {
+          CustomDataIdentifier: [
             {
-              name: 'EmployeeId',
-              regex: 'EmployeeId-\\d{9}',
+              Name: 'EmployeeId',
+              Regex: 'EmployeeId-\\d{9}',
             },
           ],
         },
-        statement: [
+        Statement: [
           {
-            sid: 'audit-statement-cdk',
-            dataIdentifier: [
+            Sid: 'audit-statement-cdk',
+            DataIdentifier: [
               'EmployeeId',
               {
                 'Fn::Join': [
@@ -888,15 +901,15 @@ describe('log group', () => {
                 ],
               },
             ],
-            operation: {
-              audit: {
-                findingsDestination: {},
+            Operation: {
+              Audit: {
+                FindingsDestination: {},
               },
             },
           },
           {
-            sid: 'redact-statement-cdk',
-            dataIdentifier: [
+            Sid: 'redact-statement-cdk',
+            DataIdentifier: [
               'EmployeeId',
               {
                 'Fn::Join': [
@@ -909,9 +922,9 @@ describe('log group', () => {
                 ],
               },
             ],
-            operation: {
-              deidentify: {
-                maskConfig: {},
+            Operation: {
+              Deidentify: {
+                MaskConfig: {},
               },
             },
           },
@@ -919,6 +932,66 @@ describe('log group', () => {
       },
     });
   });
+});
+
+test('set field index policy with four fields indexed', () => {
+  // GIVEN
+  const stack = new Stack();
+
+  const fieldIndexPolicy = new FieldIndexPolicy({
+    fields: ['Operation', 'RequestId', 'timestamp', 'message'],
+  });
+
+  // WHEN
+  const logGroupName = 'test-field-index-log-group';
+  new LogGroup(stack, 'LogGroup', {
+    logGroupName: logGroupName,
+    fieldIndexPolicies: [fieldIndexPolicy],
+  });
+
+  // THEN
+  Template.fromStack(stack).hasResourceProperties('AWS::Logs::LogGroup', {
+    LogGroupName: logGroupName,
+    FieldIndexPolicies: [{
+      Fields: [
+        'Operation',
+        'RequestId',
+        'timestamp',
+        'message',
+      ],
+    }],
+  });
+});
+
+test('set more than 20 field indexes in a field index policy', () => {
+  let message;
+  try {
+    // GIVEN
+    const stack = new Stack();
+    const fieldIndexPolicy = new FieldIndexPolicy({
+      fields: createMoreThan20FieldIndexes(),
+    });
+
+    // WHEN
+    const logGroupName = 'test-field-multiple-field-index-policies';
+    new LogGroup(stack, 'LogGroup', {
+      logGroupName: logGroupName,
+      fieldIndexPolicies: [fieldIndexPolicy],
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::Logs::LogGroup', {
+      LogGroupName: logGroupName,
+      FieldIndexPolicies: [{
+        Fields: ['abc'],
+      }],
+    });
+  } catch (e) {
+    message = (e as Error).message;
+  }
+
+  expect(message).toBeDefined();
+  expect(message).toEqual('A maximum of 20 fields can be indexed per log group');
 });
 
 describe('subscription filter', () => {
@@ -944,6 +1017,98 @@ describe('subscription filter', () => {
   });
 });
 
+test('encrypting log group with referenced alias', () => {
+  const stack = new Stack();
+
+  const alias = kms.Alias.fromAliasName(stack, 'KmsAlias', 'alias/some-alias');
+
+  new LogGroup(stack, 'LogGroup', {
+    encryptionKey: alias,
+  });
+
+  Template.fromStack(stack).hasResourceProperties('AWS::Logs::LogGroup', {
+    KmsKeyId: {
+      'Fn::Join': [
+        '',
+        [
+          'arn:',
+          { Ref: 'AWS::Partition' },
+          ':kms:',
+          { Ref: 'AWS::Region' },
+          ':',
+          { Ref: 'AWS::AccountId' },
+          ':alias/some-alias',
+        ],
+      ],
+    },
+  });
+});
+
+test('create a Add Key transformer against a log group', () => {
+  // GIVEN
+  const stack = new Stack();
+  const logGroup = new LogGroup(stack, 'aws_cdk_test_log_group');
+
+  const jsonParser = new ParserProcessor({
+    type: ParserProcessorType.JSON,
+  });
+
+  const addKeysProcesor = new JsonMutatorProcessor({
+    type: JsonMutatorType.ADD_KEYS,
+    addKeysOptions: {
+      entries: [
+        { key: 'test_key1', value: 'test_value1', overwriteIfExists: true },
+        { key: 'test_key2', value: 'test_value2' },
+        { key: 'test_key3', value: 'test_value3', overwriteIfExists: false },
+      ],
+    },
+  });
+
+  // WHEN
+
+  logGroup.addTransformer(
+    'Transformer',
+    {
+      transformerName: 'MyTransformer',
+      transformerConfig: [jsonParser, addKeysProcesor],
+    },
+  );
+
+  // THEN
+  Template.fromStack(stack).hasResourceProperties('AWS::Logs::Transformer', {
+    LogGroupIdentifier: { Ref: 'awscdktestloggroup30AE39AB' },
+    TransformerConfig: [
+      {
+        ParseJSON: { Source: '@message' },
+      },
+      {
+        AddKeys: {
+          Entries: [
+            { Key: 'test_key1', Value: 'test_value1', OverwriteIfExists: true },
+            { Key: 'test_key2', Value: 'test_value2', OverwriteIfExists: false },
+            { Key: 'test_key3', Value: 'test_value3', OverwriteIfExists: false },
+          ],
+        },
+      },
+    ],
+  });
+});
+
+test('enable deletion protection', () => {
+  // GIVEN
+  const stack = new Stack();
+
+  // WHEN
+  new LogGroup(stack, 'LogGroup', {
+    deletionProtectionEnabled: true,
+  });
+
+  // THEN
+  Template.fromStack(stack).hasResourceProperties('AWS::Logs::LogGroup', {
+    DeletionProtectionEnabled: true,
+  });
+});
+
 function dataDrivenTests(cases: string[], body: (suffix: string) => void): void {
   for (let i = 0; i < cases.length; i++) {
     const args = cases[i]; // Need to capture inside loop for safe use inside closure.
@@ -951,6 +1116,14 @@ function dataDrivenTests(cases: string[], body: (suffix: string) => void): void 
       body(args);
     });
   }
+}
+
+function createMoreThan20FieldIndexes(): string[] {
+  let arr: string[] = [];
+  for (let i = 0; i < 23; i++) {
+    arr.push('abc' + i.toString());
+  }
+  return arr;
 }
 
 class FakeDestination implements ILogSubscriptionDestination {

@@ -9,8 +9,9 @@
       "Arn"
      ]
     },
-    "Url": "https://oidc.eks.us-east-1.amazonaws.com/id/test2",
-    "CodeHash": "469d5d61e22fea12a07cfcadd430b3a6babbbd52a6d677d3eb99b583b278761d"
+    "Url": "https://oidc.eks.us-east-1.amazonaws.com/id/test2noreject",
+    "RejectUnauthorized": false,
+    "CodeHash": "a6c501b56f95db60850de11c6ca7d936d88fdfc2f444fb39d5f76faaab8c1815"
    },
    "UpdateReplacePolicy": "Delete",
    "DeletionPolicy": "Delete"
@@ -65,7 +66,7 @@
      "S3Bucket": {
       "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
      },
-     "S3Key": "469d5d61e22fea12a07cfcadd430b3a6babbbd52a6d677d3eb99b583b278761d.zip"
+     "S3Key": "a6c501b56f95db60850de11c6ca7d936d88fdfc2f444fb39d5f76faaab8c1815.zip"
     },
     "Timeout": 900,
     "MemorySize": 128,
@@ -76,7 +77,7 @@
       "Arn"
      ]
     },
-    "Runtime": "nodejs18.x"
+    "Runtime": "nodejs24.x"
    },
    "DependsOn": [
     "CustomAWSCDKOpenIdConnectProviderCustomResourceProviderRole517FED65"
@@ -95,8 +96,9 @@
      "foo",
      "bar"
     ],
-    "Url": "https://oidc.eks.us-east-1.amazonaws.com/id/test3",
-    "CodeHash": "469d5d61e22fea12a07cfcadd430b3a6babbbd52a6d677d3eb99b583b278761d"
+    "Url": "https://oidc.eks.us-east-1.amazonaws.com/id/test3noreject",
+    "RejectUnauthorized": false,
+    "CodeHash": "a6c501b56f95db60850de11c6ca7d936d88fdfc2f444fb39d5f76faaab8c1815"
    },
    "UpdateReplacePolicy": "Delete",
    "DeletionPolicy": "Delete"
@@ -114,8 +116,9 @@
      "aa00aa1122aa00aa1122aa00aa1122aa00aa1122",
      "aa00aa1122aa00aa1122aa00aa1122aa00aa1111"
     ],
-    "Url": "https://oidc.eks.us-east-1.amazonaws.com/id/test4",
-    "CodeHash": "469d5d61e22fea12a07cfcadd430b3a6babbbd52a6d677d3eb99b583b278761d"
+    "Url": "https://oidc.eks.us-east-1.amazonaws.com/id/test4noreject",
+    "RejectUnauthorized": false,
+    "CodeHash": "a6c501b56f95db60850de11c6ca7d936d88fdfc2f444fb39d5f76faaab8c1815"
    },
    "UpdateReplacePolicy": "Delete",
    "DeletionPolicy": "Delete"

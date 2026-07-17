@@ -10,7 +10,7 @@ describe('ApiEventSource', () => {
     const handler = new lambda.Function(stack, 'MyFunc', {
       code: lambda.Code.fromInline('boom'),
       handler: 'index.handler',
-      runtime: lambda.Runtime.NODEJS,
+      runtime: lambda.Runtime.NODEJS_LATEST,
     });
 
     // WHEN
@@ -26,7 +26,6 @@ describe('ApiEventSource', () => {
       HttpMethod: 'GET',
       ResourceId: { Ref: 'MyFuncApiEventSourceA7A86A4FfooCA6F87E4' },
     });
-
   });
 
   test('disjoint routes', () => {
@@ -35,7 +34,7 @@ describe('ApiEventSource', () => {
     const handler = new lambda.Function(stack, 'MyFunc', {
       code: lambda.Code.fromInline('boom'),
       handler: 'index.handler',
-      runtime: lambda.Runtime.NODEJS,
+      runtime: lambda.Runtime.NODEJS_LATEST,
     });
 
     // WHEN
@@ -62,7 +61,6 @@ describe('ApiEventSource', () => {
       HttpMethod: 'POST',
       ResourceId: { Ref: 'MyFuncApiEventSourceA7A86A4FbarDFB0F21B' },
     });
-
   });
 
   test('tree of routes', () => {
@@ -71,7 +69,7 @@ describe('ApiEventSource', () => {
     const handler = new lambda.Function(stack, 'MyFunc', {
       code: lambda.Code.fromInline('boom'),
       handler: 'index.handler',
-      runtime: lambda.Runtime.NODEJS,
+      runtime: lambda.Runtime.NODEJS_LATEST,
     });
 
     // WHEN
@@ -99,6 +97,5 @@ describe('ApiEventSource', () => {
       HttpMethod: 'POST',
       ResourceId: { Ref: 'MyFuncApiEventSourceA7A86A4Ffoobar028FFFDE' },
     });
-
   });
 });

@@ -2,8 +2,8 @@ import * as path from 'path';
 import * as process from 'process';
 import * as fs from 'fs-extra';
 import { shell, escape } from './os';
-import { CDKBuildOptions, CompilerOverrides } from './package-info';
-import { Timers } from './timer';
+import type { CDKBuildOptions, CompilerOverrides } from './package-info';
+import type { Timers } from './timer';
 
 export async function lintCurrentPackage(
   options: CDKBuildOptions,
@@ -13,11 +13,15 @@ export async function lintCurrentPackage(
   const fixOption = compilers.fix ? ['--fix'] : [];
 
   if (!options.eslint?.disable) {
+    let eslintPath = compilers.eslint;
+    if (!eslintPath) {
+      const eslintPj = require.resolve('eslint/package.json');
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      eslintPath = path.resolve(eslintPj, '..', require(eslintPj).bin.eslint);
+    }
+
     await shell([
-      compilers.eslint || require.resolve('eslint/bin/eslint'),
-      '.',
-      '--ext=.ts',
-      `--resolve-plugins-relative-to=${__dirname}`,
+      eslintPath,
       ...fixOption,
     ], { timers, env });
   }

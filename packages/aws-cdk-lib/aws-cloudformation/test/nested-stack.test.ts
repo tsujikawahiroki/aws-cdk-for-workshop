@@ -9,7 +9,6 @@ import { App, CfnParameter, CfnResource, ContextProvider, LegacyStackSynthesizer
 import * as cxapi from '../../cx-api';
 import { NestedStack } from '../lib/nested-stack';
 
-/* eslint-disable @aws-cdk/no-core-construct */
 /* eslint-disable max-len */
 
 describeDeprecated('NestedStack', () => {
@@ -240,7 +239,6 @@ describeDeprecated('NestedStack', () => {
   test('references to a resource from the parent stack in a nested stack is translated into a cfn parameter', () => {
     // WHEN
     class MyNestedStack extends NestedStack {
-
       constructor(scope: Construct, id: string, resourceFromParent: CfnResource) {
         super(scope, id);
 
@@ -816,9 +814,8 @@ describeDeprecated('NestedStack', () => {
     });
 
     // use the asset, so the parameters will be wired.
-    new sns.Topic(nested, 'MyTopic', {
-      displayName: `image location is ${location.imageUri}`,
-    });
+    const myTopic = new sns.Topic(nested, 'MyTopic');
+    (myTopic.node.defaultChild as sns.CfnTopic).displayName = `image location is ${location.imageUri}`;
 
     // THEN
     const asm = app.synth();

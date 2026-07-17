@@ -16,8 +16,8 @@ const topic = new sns.Topic(this, 'Topic', {
 });
 ```
 
-Add an SNS Topic to your stack with a specified signature version, which corresponds 
-to the hashing algorithm used while creating the signature of the notifications, 
+Add an SNS Topic to your stack with a specified signature version, which corresponds
+to the hashing algorithm used while creating the signature of the notifications,
 subscription confirmations, or unsubscribe confirmation messages sent by Amazon SNS.
 
 The default signature version is `1` (`SHA1`).
@@ -57,6 +57,16 @@ myTopic.addSubscription(new subscriptions.SqsSubscription(queue));
 
 Note that subscriptions of queues in different accounts need to be manually confirmed by
 reading the initial message from the queue and visiting the link found in it.
+
+ The `topic.grants.subscribe` method adds a policy statement to the topic's resource policy, allowing the specified principal to perform the `sns:Subscribe` action.
+ It's useful when you want to allow entities, such as another AWS account or resources created later, to subscribe to the topic at their own pace, separating permission granting from the actual subscription process.
+
+```ts
+declare const accountPrincipal: iam.AccountPrincipal;
+const myTopic = new sns.Topic(this, 'MyTopic');
+
+myTopic.grants.subscribe(accountPrincipal);
+```
 
 ### Filter policy
 
@@ -108,6 +118,7 @@ declare const fn: lambda.Function;
 
 // Lambda should receive only message matching the following conditions on message body:
 // color: 'red' or 'orange'
+// store: property must not be present
 myTopic.addSubscription(new subscriptions.LambdaSubscription(fn, {
   filterPolicyWithMessageBody: {
     background: sns.FilterOrPolicy.policy({
@@ -115,6 +126,7 @@ myTopic.addSubscription(new subscriptions.LambdaSubscription(fn, {
         allowlist: ['red', 'orange'],
       })),
     }),
+    store: sns.FilterOrPolicy.filter(sns.SubscriptionFilter.notExistsFilter()),
   },
 }));
 ```
@@ -122,10 +134,10 @@ myTopic.addSubscription(new subscriptions.LambdaSubscription(fn, {
 ### Example of Firehose Subscription
 
 ```ts
-import { DeliveryStream } from '@aws-cdk/aws-kinesisfirehose-alpha';
+import * as firehose from 'aws-cdk-lib/aws-kinesisfirehose';
 
 const topic = new sns.Topic(this, 'Topic');
-declare const stream: DeliveryStream;
+declare const stream: firehose.DeliveryStream;
 
 new sns.Subscription(this, 'Subscription', {
   topic,
@@ -218,6 +230,23 @@ const topicPolicy = new sns.TopicPolicy(this, 'Policy', {
 });
 ```
 
+A simpler and more general way of achieving the same result is to use the
+`TopicGrants` class:
+
+```ts 
+const topic = new sns.Topic(this, 'Topic');
+
+// This would work the same way if topic was a CfnTopic (L1)
+sns.TopicGrants.fromTopic(topic).subscribe(new iam.AnyPrincipal()); 
+```
+
+For convenience, if you are using an L2, you can also call `grants` on the topic: 
+
+```ts 
+const topic = new sns.Topic(this, 'Topic'); 
+topic.grants.subscribe(new iam.AnyPrincipal());
+```
+
 ### Enforce encryption of data in transit when publishing to a topic
 
 You can enforce SSL when creating a topic policy by setting the `enforceSSL` flag:
@@ -261,7 +290,7 @@ topic.addToResourcePolicy(new iam.PolicyStatement({
 Amazon SNS provides support to log the delivery status of notification messages sent to topics with the following Amazon SNS endpoints:
 
 - HTTP
-- Amazon Kinesis Data Firehose
+- Amazon Data Firehose
 - AWS Lambda
 - Platform application endpoint
 - Amazon Simple Queue Service
@@ -331,3 +360,23 @@ const topic = new sns.Topic(this, 'MyTopic', {
   tracingConfig: sns.TracingConfig.ACTIVE,
 });
 ```
+
+## High-throughput mode for Amazon SNS FIFO Topics
+
+High throughput FIFO topics in Amazon SNS efficiently manage high message throughput while maintaining strict message order, ensuring reliability and scalability for applications processing numerous messages.
+This solution is ideal for scenarios demanding both high throughput and ordered message delivery.
+
+To improve message throughput using high throughput FIFO topics, increasing the number of message groups is recommended.
+
+For more information, see [High throughput FIFO topics in Amazon SNS](https://docs.aws.amazon.com/sns/latest/dg/fifo-high-throughput.html).
+
+You can configure high-throughput mode for your FIFO topics by setting the `fifoThroughputScope` property:
+
+```ts
+const topic = new sns.Topic(this, 'MyTopic', {
+  fifo: true,
+  fifoThroughputScope: sns.FifoThroughputScope.TOPIC,
+});
+```
+
+**Note**: The `fifoThroughputScope` property is only available for FIFO topics.

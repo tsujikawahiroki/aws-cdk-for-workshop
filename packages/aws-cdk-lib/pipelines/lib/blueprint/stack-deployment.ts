@@ -1,6 +1,8 @@
 import * as path from 'path';
 import { AssetType } from './asset-type';
-import { Step } from './step';
+import type { Step } from './step';
+import { UnscopedValidationError } from '../../../core';
+import { lit } from '../../../core/lib/private/literal-string';
 import * as cxapi from '../../../cx-api';
 import { AssetManifestReader, DockerImageManifestEntry, FileManifestEntry } from '../private/asset-manifest';
 import { isAssetManifest } from '../private/cloud-assembly-internals';
@@ -277,6 +279,13 @@ export interface StackAsset {
   readonly assetType: AssetType;
 
   /**
+   * The display name of this asset
+   *
+   * @default - Use some generated string as display name
+   */
+  readonly displayName?: string;
+
+  /**
    * Role ARN to assume to publish
    *
    * @default - No need to assume any role
@@ -308,7 +317,7 @@ function extractStackAssets(stackArtifact: cxapi.CloudFormationStackArtifact): S
         isTemplate = entry.source.packaging === 'file' && entry.source.path === stackArtifact.templateFile;
         assetType = AssetType.FILE;
       } else {
-        throw new Error(`Unrecognized asset type: ${entry.type}`);
+        throw new UnscopedValidationError(lit`UnrecognizedAssetType`, `Unrecognized asset type: ${entry.type}`);
       }
 
       ret.push({
@@ -318,6 +327,7 @@ function extractStackAssets(stackArtifact: cxapi.CloudFormationStackArtifact): S
         assetType,
         assetPublishingRoleArn: entry.destination.assumeRoleArn,
         isTemplate,
+        displayName: entry.displayName,
       });
     }
   }
@@ -333,9 +343,8 @@ function extractStackAssets(stackArtifact: cxapi.CloudFormationStackArtifact): S
  * @see https://docs.aws.amazon.com/AmazonS3/latest/userguide/VirtualHosting.html#virtual-hosted-style-access
  */
 function s3UrlFromUri(uri: string, region: string | undefined) {
-
   // will return something like this
-  //[
+  // [
   //  's3:',
   //   '',
   //  'cdk-hnb659fds-assets-111-${AWS::Region}',

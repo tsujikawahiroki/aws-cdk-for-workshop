@@ -2,12 +2,146 @@ import { EOL } from 'os';
 import { Annotations, Template } from '../../assertions';
 import * as iam from '../../aws-iam';
 import * as kms from '../../aws-kms';
+import * as cxschema from '../../cloud-assembly-schema';
 import * as cdk from '../../core';
 import * as ecr from '../lib';
-
-/* eslint-disable quote-props */
+/* eslint-disable @stylistic/quote-props */
 
 describe('repository', () => {
+  describe('lookup', () => {
+    test('return correct repository info by name', () => {
+      // GIVEN
+      const resultObjs = [
+        {
+          'Arn': 'arn:aws:ecr:us-east-1:123456789012:repository/my-repo',
+        },
+      ];
+      const value = {
+        value: resultObjs,
+      };
+      const mock = jest.spyOn(cdk.ContextProvider, 'getValue').mockReturnValue(value);
+
+      // WHEN
+      const stack = new cdk.Stack(undefined, undefined, { env: { region: 'us-east-1', account: '123456789012' } });
+      const repo = ecr.Repository.fromLookup(stack, 'MyRepo', {
+        repositoryName: 'my-repo',
+      });
+
+      // THEN
+      expect(repo.repositoryName).toEqual('my-repo');
+      expect(repo.repositoryArn).toEqual(cdk.Stack.of(repo).formatArn({
+        service: 'ecr',
+        partition: 'aws',
+        resource: 'repository',
+        resourceName: 'my-repo',
+      }));
+      expect(mock).toHaveBeenCalledWith(stack, {
+        provider: cxschema.ContextProvider.CC_API_PROVIDER,
+        props: {
+          typeName: 'AWS::ECR::Repository',
+          exactIdentifier: 'my-repo',
+          propertiesToReturn: [
+            'Arn',
+          ],
+        } as cxschema.CcApiContextQuery,
+        dummyValue: [
+          {
+            'Arn': ecr.Repository.arnForLocalRepository('DUMMY_ARN', stack),
+          },
+        ],
+      });
+
+      mock.mockRestore();
+    });
+
+    test('return correct repository info by arn', () => {
+      const repoArn = 'arn:aws:ecr:us-east-1:123456789012:repository/my-repo';
+      // GIVEN
+      const resultObjs = [
+        {
+          'Arn': repoArn,
+        },
+      ];
+      const value = {
+        value: resultObjs,
+      };
+      const mock = jest.spyOn(cdk.ContextProvider, 'getValue').mockReturnValue(value);
+
+      // WHEN
+      const stack = new cdk.Stack(undefined, undefined, { env: { region: 'us-east-1', account: '123456789012' } });
+      const repo = ecr.Repository.fromLookup(stack, 'MyRepo', {
+        repositoryArn: repoArn,
+      });
+
+      // THEN
+      expect(repo.repositoryName).toEqual('my-repo');
+      expect(repo.repositoryArn).toEqual(cdk.Stack.of(repo).formatArn({
+        service: 'ecr',
+        partition: 'aws',
+        resource: 'repository',
+        resourceName: 'my-repo',
+      }));
+      expect(mock).toHaveBeenCalledWith(stack, {
+        provider: cxschema.ContextProvider.CC_API_PROVIDER,
+        props: {
+          typeName: 'AWS::ECR::Repository',
+          exactIdentifier: 'my-repo',
+          propertiesToReturn: [
+            'Arn',
+          ],
+        } as cxschema.CcApiContextQuery,
+        dummyValue: [
+          {
+            'Arn': ecr.Repository.arnForLocalRepository('DUMMY_ARN', stack),
+          },
+        ],
+      });
+
+      mock.mockRestore();
+    });
+
+    test.each([
+      {
+        repositoryArn: 'arn:aws:ecr:us-east-1:123456789012:repository/does-not-exist-repo',
+      },
+      {
+        repositoryName: 'does-not-exist-repo',
+      },
+    ])('return dummy repository info if not found', (config) => {
+      // WHEN
+      const stack = new cdk.Stack(undefined, undefined, { env: { region: 'us-east-1', account: '123456789012' } });
+      const repo = ecr.Repository.fromLookup(stack, 'MyRepo', config);
+
+      // THEN
+      expect(repo.repositoryName).toEqual('DUMMY_ARN');
+      expect(repo.repositoryArn).toEqual(ecr.Repository.arnForLocalRepository('DUMMY_ARN', stack));
+    });
+
+    test('throw error if repository name is a token', () => {
+      // GIVEN
+      const stack = new cdk.Stack(undefined, undefined, { env: { region: 'us-east-1', account: '123456789012' } });
+      const tokenName = new cdk.CfnParameter(stack, 'RepoName');
+      expect(() => ecr.Repository.fromLookup(stack, 'MyRepository', {
+        repositoryName: tokenName.valueAsString,
+      })).toThrow('Cannot look up a repository with a tokenized name or ARN.');
+    });
+
+    test('throw error if repository arn is a token', () => {
+      // GIVEN
+      const stack = new cdk.Stack(undefined, undefined, { env: { region: 'us-east-1', account: '123456789012' } });
+      const tokenName = new cdk.CfnParameter(stack, 'RepoArn');
+      expect(() => ecr.Repository.fromLookup(stack, 'MyRepository', {
+        repositoryArn: tokenName.valueAsString,
+      })).toThrow('Cannot look up a repository with a tokenized name or ARN.');
+    });
+
+    test('throw error if neither repository name nor arn is provided', () => {
+      // GIVEN
+      const stack = new cdk.Stack(undefined, undefined, { env: { region: 'us-east-1', account: '123456789012' } });
+      expect(() => ecr.Repository.fromLookup(stack, 'MyRepository', {})).toThrow('At least one of `repositoryName` or `repositoryArn` must be provided.');
+    });
+  });
+
   test('construct repository', () => {
     // GIVEN
     const stack = new cdk.Stack();
@@ -60,7 +194,7 @@ describe('repository', () => {
     // THEN
     Template.fromStack(stack).hasResourceProperties('AWS::ECR::Repository', {
       LifecyclePolicy: {
-        // eslint-disable-next-line max-len
+
         LifecyclePolicyText: '{"rules":[{"rulePriority":1,"selection":{"tagStatus":"tagged","tagPrefixList":["abc"],"countType":"imageCountMoreThan","countNumber":1},"action":{"type":"expire"}}]}',
       },
     });
@@ -77,7 +211,7 @@ describe('repository', () => {
     // THEN
     Template.fromStack(stack).hasResourceProperties('AWS::ECR::Repository', {
       LifecyclePolicy: {
-        // eslint-disable-next-line max-len
+
         LifecyclePolicyText: '{"rules":[{"rulePriority":1,"selection":{"tagStatus":"tagged","tagPatternList":["abc*"],"countType":"imageCountMoreThan","countNumber":1},"action":{"type":"expire"}}]}',
       },
     });
@@ -138,7 +272,7 @@ describe('repository', () => {
     // THEN
     Template.fromStack(stack).hasResourceProperties('AWS::ECR::Repository', {
       LifecyclePolicy: {
-        // eslint-disable-next-line max-len
+
         LifecyclePolicyText: '{"rules":[{"rulePriority":1,"selection":{"tagStatus":"tagged","tagPatternList":["abc*d*e*f*"],"countType":"imageCountMoreThan","countNumber":1},"action":{"type":"expire"}}]}',
       },
     });
@@ -190,7 +324,7 @@ describe('repository', () => {
     // THEN
     Template.fromStack(stack).hasResourceProperties('AWS::ECR::Repository', {
       LifecyclePolicy: {
-        // eslint-disable-next-line max-len
+
         LifecyclePolicyText: '{"rules":[{"rulePriority":1,"selection":{"tagStatus":"any","countType":"sinceImagePushed","countNumber":5,"countUnit":"days"},"action":{"type":"expire"}}]}',
       },
     });
@@ -209,7 +343,7 @@ describe('repository', () => {
     // THEN
     Template.fromStack(stack).hasResourceProperties('AWS::ECR::Repository', {
       LifecyclePolicy: {
-        // eslint-disable-next-line max-len
+
         LifecyclePolicyText: '{"rules":[{"rulePriority":1,"selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":5},"action":{"type":"expire"}}]}',
       },
     });
@@ -227,7 +361,7 @@ describe('repository', () => {
     // THEN
     Template.fromStack(stack).hasResourceProperties('AWS::ECR::Repository', {
       LifecyclePolicy: {
-        // eslint-disable-next-line max-len
+
         LifecyclePolicyText: '{"rules":[{"rulePriority":10,"selection":{"tagStatus":"tagged","tagPrefixList":["b"],"countType":"imageCountMoreThan","countNumber":5},"action":{"type":"expire"}},{"rulePriority":11,"selection":{"tagStatus":"tagged","tagPrefixList":["a"],"countType":"imageCountMoreThan","countNumber":5},"action":{"type":"expire"}}]}',
       },
     });
@@ -245,7 +379,7 @@ describe('repository', () => {
     // THEN
     Template.fromStack(stack).hasResourceProperties('AWS::ECR::Repository', {
       LifecyclePolicy: {
-        // eslint-disable-next-line max-len
+
         LifecyclePolicyText: '{"rules":[{"rulePriority":1,"selection":{"tagStatus":"tagged","tagPrefixList":["important"],"countType":"imageCountMoreThan","countNumber":999},"action":{"type":"expire"}},{"rulePriority":2,"selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":5},"action":{"type":"expire"}}]}',
       },
     });
@@ -265,7 +399,7 @@ describe('repository', () => {
     // THEN
     Template.fromStack(stack).hasResourceProperties('AWS::ECR::Repository', {
       'LifecyclePolicy': {
-        // eslint-disable-next-line max-len
+
         'LifecyclePolicyText': '{"rules":[{"rulePriority":1,"selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":3},"action":{"type":"expire"}}]}',
       },
     });
@@ -297,6 +431,30 @@ describe('repository', () => {
     });
   });
 
+  test('calculate registry URI', () => {
+    // GIVEN
+    const stack = new cdk.Stack();
+    const repo = new ecr.Repository(stack, 'Repo');
+
+    new cdk.CfnOutput(stack, 'RegistryUri', {
+      value: repo.registryUri,
+    });
+
+    // THEN
+    const arnSplit = { 'Fn::Split': [':', { 'Fn::GetAtt': ['Repo02AC86CF', 'Arn'] }] };
+    Template.fromStack(stack).hasOutput('*', {
+      'Value': {
+        'Fn::Join': ['', [
+          { 'Fn::Select': [4, arnSplit] },
+          '.dkr.ecr.',
+          { 'Fn::Select': [3, arnSplit] },
+          '.',
+          { Ref: 'AWS::URLSuffix' },
+        ]],
+      },
+    });
+  });
+
   test('import with concrete arn', () => {
     // GIVEN
     const stack = new cdk.Stack();
@@ -319,7 +477,7 @@ describe('repository', () => {
     // THEN
     expect(() => {
       ecr.Repository.fromRepositoryArn(stack, 'repo', invalidArn);
-    }).toThrowError(`Repository arn should be in the format 'arn:<PARTITION>:ecr:<REGION>:<ACCOUNT>:repository/<NAME>', got ${invalidArn}.`);
+    }).toThrow(`Repository arn should be in the format 'arn:<PARTITION>:ecr:<REGION>:<ACCOUNT>:repository/<NAME>', got ${invalidArn}.`);
   });
 
   test('fails if importing with token arn and no name', () => {
@@ -1182,7 +1340,7 @@ describe('repository', () => {
           autoDeleteImages: true,
           removalPolicy: cdk.RemovalPolicy.RETAIN,
         });
-      }).toThrowError('Cannot use \'autoDeleteImages\' property on a repository without setting removal policy to \'DESTROY\'.');
+      }).toThrow('Cannot use \'autoDeleteImages\' property on a repository without setting removal policy to \'DESTROY\'.');
     });
   });
 

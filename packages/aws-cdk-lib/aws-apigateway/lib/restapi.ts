@@ -1,29 +1,47 @@
-import { Construct } from 'constructs';
-import { ApiDefinition } from './api-definition';
-import { ApiKey, ApiKeyOptions, IApiKey } from './api-key';
+import type { Construct } from 'constructs';
+import type { ApiDefinition } from './api-definition';
+import type { ApiKeyOptions, IApiKey } from './api-key';
+import { ApiKey } from './api-key';
 import { ApiGatewayMetrics } from './apigateway-canned-metrics.generated';
+import type { IRestApiRef, RestApiReference } from './apigateway.generated';
 import { CfnAccount, CfnRestApi } from './apigateway.generated';
-import { CorsOptions } from './cors';
+import type { CorsOptions } from './cors';
 import { Deployment } from './deployment';
-import { DomainName, DomainNameOptions } from './domain-name';
-import { GatewayResponse, GatewayResponseOptions } from './gateway-response';
-import { Integration } from './integration';
-import { Method, MethodOptions } from './method';
-import { Model, ModelOptions } from './model';
-import { RequestValidator, RequestValidatorOptions } from './requestvalidator';
-import { IResource, ResourceBase, ResourceOptions } from './resource';
-import { Stage, StageOptions } from './stage';
-import { UsagePlan, UsagePlanProps } from './usage-plan';
+import type { DomainNameOptions } from './domain-name';
+import { DomainName } from './domain-name';
+import type { GatewayResponseOptions } from './gateway-response';
+import { GatewayResponse } from './gateway-response';
+import type { Integration } from './integration';
+import type { Method, MethodOptions } from './method';
+import type { ModelOptions } from './model';
+import { Model } from './model';
+import type { RequestValidatorOptions } from './requestvalidator';
+import { RequestValidator } from './requestvalidator';
+import type { IResource, ResourceOptions } from './resource';
+import { ResourceBase } from './resource';
+import type { StageOptions } from './stage';
+import { Stage } from './stage';
+import type { UsagePlanProps } from './usage-plan';
+import { UsagePlan } from './usage-plan';
 import * as cloudwatch from '../../aws-cloudwatch';
-import { IVpcEndpoint } from '../../aws-ec2';
+import type * as ec2 from '../../aws-ec2';
 import * as iam from '../../aws-iam';
-import { ArnFormat, CfnOutput, IResource as IResourceBase, Resource, Stack, Token, FeatureFlags, RemovalPolicy, Size } from '../../core';
+import type { IResource as IResourceBase, Size } from '../../core';
+import { ArnFormat, CfnOutput, FeatureFlags, RemovalPolicy, Resource, Stack, Token } from '../../core';
+import { ValidationError } from '../../core/lib/errors';
+import type { IBox, ISetBox } from '../../core/lib/helpers-internal';
+import { Box } from '../../core/lib/helpers-internal';
+import { addConstructMetadata, MethodMetadata } from '../../core/lib/metadata-resource';
+import { noBoxStackTraces } from '../../core/lib/no-box-stack-traces';
+import { lit } from '../../core/lib/private/literal-string';
+import { propertyInjectable } from '../../core/lib/prop-injectable';
+import { applyInjectors } from '../../core/lib/prop-injectors-helpers';
 import { APIGATEWAY_DISABLE_CLOUDWATCH_ROLE } from '../../cx-api';
 
 const RESTAPI_SYMBOL = Symbol.for('@aws-cdk/aws-apigateway.RestApiBase');
 const APIGATEWAY_RESTAPI_SYMBOL = Symbol.for('@aws-cdk/aws-apigateway.RestApi');
 
-export interface IRestApi extends IResourceBase {
+export interface IRestApi extends IResourceBase, IRestApiRef {
   /**
    * The ID of this API Gateway RestApi.
    * @attribute
@@ -167,7 +185,7 @@ export interface RestApiBaseProps {
   /**
    * The removal policy applied to the AWS CloudWatch role when this resource
    * is removed from the application.
-   * Requires `cloudWatchRole` to be enabled.
+   * Requires `cloudWatchRole` to be enabled.
    *
    * @default - RemovalPolicy.RETAIN
    */
@@ -187,6 +205,14 @@ export interface RestApiBaseProps {
    * @default EndpointType.EDGE
    */
   readonly endpointTypes?: EndpointType[];
+
+  /**
+   * The EndpointConfiguration property type specifies the endpoint types of a REST API
+   * @see https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-apigateway-restapi-endpointconfiguration.html
+   *
+   * @default EndpointType.EDGE
+   */
+  readonly endpointConfiguration?: EndpointConfiguration;
 
   /**
    * Specifies whether clients can invoke the API using the default execute-api
@@ -265,14 +291,6 @@ export interface RestApiProps extends RestApiOptions {
    * @default - Metering is disabled.
    */
   readonly apiKeySourceType?: ApiKeySourceType;
-
-  /**
-   * The EndpointConfiguration property type specifies the endpoint types of a REST API
-   * @see https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-apigateway-restapi-endpointconfiguration.html
-   *
-   * @default EndpointType.EDGE
-   */
-  readonly endpointConfiguration?: EndpointConfiguration;
 }
 
 /**
@@ -286,6 +304,14 @@ export interface SpecRestApiProps extends RestApiBaseProps {
   readonly apiDefinition: ApiDefinition;
 
   /**
+   * The list of binary media mime-types that are supported by the SpecRestApi
+   * resource, such as "image/png" or "application/octet-stream"
+   *
+   * @default - SpecRestApi supports only UTF-8-encoded text payloads.
+   */
+  readonly binaryMediaTypes?: string[];
+
+  /**
    * A Size(in bytes, kibibytes, mebibytes etc) that is used to enable compression (with non-negative
    * between 0 and 10485760 (10M) bytes, inclusive) or disable compression
    * (when undefined) on an API. When compression is enabled, compression or
@@ -296,12 +322,33 @@ export interface SpecRestApiProps extends RestApiBaseProps {
    * @default - Compression is disabled.
    */
   readonly minCompressionSize?: Size;
+
+  /**
+   * The Mode that determines how API Gateway handles resource updates.
+   *
+   * Valid values are `overwrite` or `merge`.
+   *
+   * For `overwrite`, the new API definition replaces the existing one.
+   * The existing API identifier remains unchanged.
+   *
+   * For `merge`, the new API definition is merged with the existing API.
+   *
+   * If you don't specify this property, a default value is chosen:
+   * - For REST APIs created before March 29, 2021, the default is `overwrite`
+   * - For REST APIs created after March 29, 2021, the new API definition takes precedence, but any container types such as endpoint configurations and binary media types are merged with the existing API.
+   *
+   * Use the default mode to define top-level RestApi properties in addition to using OpenAPI.
+   * Generally, it's preferred to use API Gateway's OpenAPI extensions to model these properties.
+   *
+   * @default - `merge` for REST APIs created after March 29, 2021, otherwise `overwrite`
+   */
+  readonly mode?: RestApiMode;
 }
 
 /**
  * Base implementation that are common to various implementations of IRestApi
  */
-export abstract class RestApiBase extends Resource implements IRestApi {
+export abstract class RestApiBase extends Resource implements IRestApi, iam.IResourceWithPolicy {
   /**
    * Checks if the given object is an instance of RestApiBase.
    * @internal
@@ -368,6 +415,20 @@ export abstract class RestApiBase extends Resource implements IRestApi {
 
   private _latestDeployment?: Deployment;
   private _domainName?: DomainName;
+  private allowedVpcEndpoints: ISetBox<ec2.IVPCEndpointRef> = Box.fromSet();
+
+  private readonly _resourcePolicy: IBox<iam.PolicyDocument | undefined> = Box.fromValue<iam.PolicyDocument | undefined>(undefined);
+
+  /**
+   * A policy document that contains the resource policy for this RestApi.
+   */
+  protected get resourcePolicy(): iam.PolicyDocument | undefined {
+    return this._resourcePolicy.get() as iam.PolicyDocument | undefined;
+  }
+
+  protected set resourcePolicy(value: iam.PolicyDocument | undefined) {
+    this._resourcePolicy.set(value);
+  }
 
   protected cloudWatchAccount?: CfnAccount;
 
@@ -381,6 +442,29 @@ export abstract class RestApiBase extends Resource implements IRestApi {
     Object.defineProperty(this, RESTAPI_SYMBOL, { value: true });
   }
 
+  public abstract addToResourcePolicy(statement: iam.PolicyStatement): iam.AddToResourcePolicyResult;
+
+  /**
+   * @internal
+   */
+  protected _setResourcePolicy(policy: iam.PolicyDocument | undefined): void {
+    this._resourcePolicy.set(policy);
+  }
+
+  /**
+   * @internal
+   */
+  protected _updateResourcePolicy(fn: (doc: iam.PolicyDocument | undefined) => iam.PolicyDocument | undefined): void {
+    this._resourcePolicy.update(fn);
+  }
+
+  /**
+   * @internal
+   */
+  protected get _resourcePolicyAsToken(): any {
+    return Token.asAny(this._resourcePolicy);
+  }
+
   /**
    * Returns the URL for an HTTP path.
    *
@@ -388,7 +472,7 @@ export abstract class RestApiBase extends Resource implements IRestApi {
    */
   public urlForPath(path: string = '/'): string {
     if (!this.deploymentStage) {
-      throw new Error('Cannot determine deployment stage for API from "deploymentStage". Use "deploy" or explicitly set "deploymentStage"');
+      throw new ValidationError(lit`CannotDetermineDeploymentStageDeployment`, 'Cannot determine deployment stage for API from "deploymentStage". Use "deploy" or explicitly set "deploymentStage"', this);
     }
 
     return this.deploymentStage.urlForPath(path);
@@ -419,7 +503,7 @@ export abstract class RestApiBase extends Resource implements IRestApi {
 
   public arnForExecuteApi(method: string = '*', path: string = '/*', stage: string = '*') {
     if (!Token.isUnresolved(path) && !path.startsWith('/')) {
-      throw new Error(`"path" must begin with a "/": '${path}'`);
+      throw new ValidationError(lit`MustBePathBegin`, `"path" must begin with a "/": '${path}'`, this);
     }
 
     if (method.toUpperCase() === 'ANY') {
@@ -452,6 +536,39 @@ export abstract class RestApiBase extends Resource implements IRestApi {
       stages: [this.deploymentStage],
       ...options,
     });
+  }
+
+  /**
+   * Add a resource policy that only allows API execution from a VPC Endpoint to create a private API.
+   *
+   * @see https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-resource-policies-examples.html#apigateway-resource-policies-source-vpc-example
+   *
+   * @param vpcEndpoints the interface VPC endpoints to grant access to
+   */
+  public grantInvokeFromVpcEndpointsOnly(vpcEndpoints: ec2.IVpcEndpoint[]): void {
+    vpcEndpoints.forEach(endpoint => this.allowedVpcEndpoints.add(endpoint));
+
+    const endpoints = Token.asList(this.allowedVpcEndpoints.derive(es => {
+      return Array.from(es).map(endpoint => endpoint.vpcEndpointRef.vpcEndpointId);
+    }));
+
+    this.addToResourcePolicy(new iam.PolicyStatement({
+      principals: [new iam.AnyPrincipal()],
+      actions: ['execute-api:Invoke'],
+      resources: ['execute-api:/*'],
+      effect: iam.Effect.DENY,
+      conditions: {
+        StringNotEquals: {
+          'aws:SourceVpce': endpoints,
+        },
+      },
+    }));
+    this.addToResourcePolicy(new iam.PolicyStatement({
+      principals: [new iam.AnyPrincipal()],
+      actions: ['execute-api:Invoke'],
+      resources: ['execute-api:/*'],
+      effect: iam.Effect.ALLOW,
+    }));
   }
 
   /**
@@ -578,7 +695,7 @@ export abstract class RestApiBase extends Resource implements IRestApi {
     cloudWatchRole = cloudWatchRole ?? cloudWatchRoleDefault;
     if (!cloudWatchRole) {
       if (cloudWatchRoleRemovalPolicy) {
-        throw new Error('\'cloudWatchRole\' must be enabled for \'cloudWatchRoleRemovalPolicy\' to be applied.');
+        throw new ValidationError(lit`CloudWatchRoleEnabledCloud`, '\'cloudWatchRole\' must be enabled for \'cloudWatchRoleRemovalPolicy\' to be applied.', this);
       }
       return;
     }
@@ -619,7 +736,6 @@ export abstract class RestApiBase extends Resource implements IRestApi {
   protected _configureDeployment(props: RestApiBaseProps) {
     const deploy = props.deploy ?? true;
     if (deploy) {
-
       this._latestDeployment = new Deployment(this, 'Deployment', {
         description: props.deployOptions?.description ?? props.description ?? 'Automatically created by the RestApi construct',
         api: this,
@@ -638,7 +754,7 @@ export abstract class RestApiBase extends Resource implements IRestApi {
       new CfnOutput(this, 'Endpoint', { exportName: props.endpointExportName, value: this.urlForPath() });
     } else {
       if (props.deployOptions) {
-        throw new Error('Cannot set \'deployOptions\' if \'deploy\' is disabled');
+        throw new ValidationError(lit`CannotSetDeployOptionsDeploy`, 'Cannot set \'deployOptions\' if \'deploy\' is disabled', this);
       }
     }
   }
@@ -648,10 +764,17 @@ export abstract class RestApiBase extends Resource implements IRestApi {
    */
   protected _configureEndpoints(props: RestApiProps): CfnRestApi.EndpointConfigurationProperty | undefined {
     if (props.endpointTypes && props.endpointConfiguration) {
-      throw new Error('Only one of the RestApi props, endpointTypes or endpointConfiguration, is allowed');
+      throw new ValidationError(lit`OneRestApiPropsEndpoint`, 'Only one of the RestApi props, endpointTypes or endpointConfiguration, is allowed', this);
     }
     if (props.endpointConfiguration) {
+      const endpointConfiguration = props.endpointConfiguration;
+      const isPrivateApi = endpointConfiguration.types.includes(EndpointType.PRIVATE);
+      const isIpv4Only = endpointConfiguration.ipAddressType === IpAddressType.IPV4;
+      if (isPrivateApi && isIpv4Only) {
+        throw new ValidationError(lit`PrivateDualstackAddressType`, 'Private APIs can only have a dualstack IP address type.', this);
+      }
       return {
+        ipAddressType: props.endpointConfiguration.ipAddressType,
         types: props.endpointConfiguration.types,
         vpcEndpointIds: props.endpointConfiguration?.vpcEndpoints?.map(vpcEndpoint => vpcEndpoint.vpcEndpointId),
       };
@@ -668,6 +791,12 @@ export abstract class RestApiBase extends Resource implements IRestApi {
       ...props,
     }).attachTo(this);
   }
+
+  public get restApiRef(): RestApiReference {
+    return {
+      restApiId: this.restApiId,
+    };
+  }
 }
 
 /**
@@ -683,7 +812,14 @@ export abstract class RestApiBase extends Resource implements IRestApi {
  *
  * @resource AWS::ApiGateway::RestApi
  */
+@propertyInjectable
+@noBoxStackTraces
 export class SpecRestApi extends RestApiBase {
+  /**
+   * Uniquely identifies this class.
+   */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-apigateway.SpecRestApi';
+
   /**
    * The ID of this API Gateway RestApi.
    */
@@ -700,17 +836,22 @@ export class SpecRestApi extends RestApiBase {
 
   constructor(scope: Construct, id: string, props: SpecRestApiProps) {
     super(scope, id, props);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
     const apiDefConfig = props.apiDefinition.bind(this);
+    this._setResourcePolicy(props.policy);
     const resource = new CfnRestApi(this, 'Resource', {
       name: this.restApiName,
-      policy: props.policy,
+      policy: this._resourcePolicyAsToken,
       failOnWarnings: props.failOnWarnings,
       minimumCompressionSize: props.minCompressionSize?.toBytes(),
+      binaryMediaTypes: props.binaryMediaTypes,
       body: apiDefConfig.inlineDefinition ?? undefined,
       bodyS3Location: apiDefConfig.inlineDefinition ? undefined : apiDefConfig.s3Location,
       endpointConfiguration: this._configureEndpoints(props),
       parameters: props.parameters,
       disableExecuteApiEndpoint: props.disableExecuteApiEndpoint,
+      mode: props.mode,
     });
 
     props.apiDefinition.bindAfterCreate(this, this);
@@ -726,6 +867,25 @@ export class SpecRestApi extends RestApiBase {
     if (props.domainName) {
       this.addDomainName('CustomDomain', props.domainName);
     }
+  }
+
+  /**
+   * Adds a statement to the resource policy associated with this rest api.
+   * A resource policy will be automatically created upon the first call to `addToResourcePolicy`.
+   *
+   * Note that this does not work with imported rest api.
+   *
+   * @param statement The policy statement to add
+   */
+  @MethodMetadata()
+  public addToResourcePolicy(statement: iam.PolicyStatement): iam.AddToResourcePolicyResult {
+    this._updateResourcePolicy(doc => {
+      const d = doc ?? new iam.PolicyDocument();
+      d.addStatements(statement);
+      return d;
+    });
+
+    return { statementAdded: true, policyDependable: this };
   }
 }
 
@@ -759,7 +919,13 @@ export interface RestApiAttributes {
  * By default, the API will automatically be deployed and accessible from a
  * public endpoint.
  */
+@propertyInjectable
+@noBoxStackTraces
 export class RestApi extends RestApiBase {
+  /**
+   * Uniquely identifies this class.
+   */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-apigateway.RestApi';
 
   /**
    * Return whether the given object is a `RestApi`
@@ -775,12 +941,16 @@ export class RestApi extends RestApiBase {
     class Import extends RestApiBase {
       public readonly restApiId = restApiId;
 
+      public addToResourcePolicy(_statement: iam.PolicyStatement): iam.AddToResourcePolicyResult {
+        return { statementAdded: false };
+      }
+
       public get root(): IResource {
-        throw new Error('root is not configured when imported using `fromRestApiId()`. Use `fromRestApiAttributes()` API instead.');
+        throw new ValidationError(lit`RootConfiguredImportedUsing`, 'root is not configured when imported using `fromRestApiId()`. Use `fromRestApiAttributes()` API instead.', scope);
       }
 
       public get restApiRootResourceId(): string {
-        throw new Error('restApiRootResourceId is not configured when imported using `fromRestApiId()`. Use `fromRestApiAttributes()` API instead.');
+        throw new ValidationError(lit`RestApiRootResourceId`, 'restApiRootResourceId is not configured when imported using `fromRestApiId()`. Use `fromRestApiAttributes()` API instead.', scope);
       }
     }
 
@@ -796,6 +966,10 @@ export class RestApi extends RestApiBase {
       public readonly restApiName = attrs.restApiName ?? id;
       public readonly restApiRootResourceId = attrs.rootResourceId;
       public readonly root: IResource = new RootResource(this, {}, this.restApiRootResourceId);
+
+      public addToResourcePolicy(_statement: iam.PolicyStatement): iam.AddToResourcePolicyResult {
+        return { statementAdded: false };
+      }
     }
 
     return new Import(scope, id);
@@ -819,15 +993,19 @@ export class RestApi extends RestApiBase {
 
   constructor(scope: Construct, id: string, props: RestApiProps = { }) {
     super(scope, id, props);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     if (props.minCompressionSize !== undefined && props.minimumCompressionSize !== undefined) {
-      throw new Error('both properties minCompressionSize and minimumCompressionSize cannot be set at once.');
+      throw new ValidationError(lit`PropertiesMinCompressionSizeMinimum`, 'both properties minCompressionSize and minimumCompressionSize cannot be set at once.', scope);
     }
+
+    this._setResourcePolicy(props.policy);
 
     const resource = new CfnRestApi(this, 'Resource', {
       name: this.physicalName,
       description: props.description,
-      policy: props.policy,
+      policy: this._resourcePolicyAsToken,
       failOnWarnings: props.failOnWarnings,
       minimumCompressionSize: props.minCompressionSize?.toBytes() ?? props.minimumCompressionSize,
       binaryMediaTypes: props.binaryMediaTypes,
@@ -856,8 +1034,28 @@ export class RestApi extends RestApiBase {
   }
 
   /**
+   * Adds a statement to the resource policy associated with this rest api.
+   * A resource policy will be automatically created upon the first call to `addToResourcePolicy`.
+   *
+   * Note that this does not work with imported rest api.
+   *
+   * @param statement The policy statement to add
+   */
+  @MethodMetadata()
+  public addToResourcePolicy(statement: iam.PolicyStatement): iam.AddToResourcePolicyResult {
+    this._updateResourcePolicy(doc => {
+      const d = doc ?? new iam.PolicyDocument();
+      d.addStatements(statement);
+      return d;
+    });
+
+    return { statementAdded: true, policyDependable: this };
+  }
+
+  /**
    * Adds a new model.
    */
+  @MethodMetadata()
   public addModel(id: string, props: ModelOptions): Model {
     return new Model(this, id, {
       ...props,
@@ -868,6 +1066,7 @@ export class RestApi extends RestApiBase {
   /**
    * Adds a new request validator.
    */
+  @MethodMetadata()
   public addRequestValidator(id: string, props: RequestValidatorOptions): RequestValidator {
     return new RequestValidator(this, id, {
       ...props,
@@ -938,7 +1137,31 @@ export interface EndpointConfiguration {
    *
    * @default - no ALIASes are created for the endpoint.
    */
-  readonly vpcEndpoints?: IVpcEndpoint[];
+  readonly vpcEndpoints?: ec2.IVpcEndpoint[];
+
+  /**
+   * The IP address types that can invoke the API.
+   *
+   * @see https://docs.aws.amazon.com/apigateway/latest/developerguide/api-gateway-ip-address-type.html
+   *
+   * @default undefined - AWS default is DUAL_STACK for private API, IPV4 for all other APIs.
+   */
+  readonly ipAddressType?: IpAddressType;
+}
+
+/**
+ * Supported IP Address Types
+ */
+export enum IpAddressType {
+  /**
+   * IPv4 address type
+   */
+  IPV4 = 'ipv4',
+
+  /**
+   * IPv4 and IPv6 address type
+   */
+  DUAL_STACK = 'dualstack',
 }
 
 export enum ApiKeySourceType {
@@ -970,7 +1193,23 @@ export enum EndpointType {
   PRIVATE = 'PRIVATE',
 }
 
+/**
+ * The Mode that determines how API Gateway handles resource updates when importing an OpenAPI definition.
+ */
+export enum RestApiMode {
+  /**
+   * The new API definition replaces the existing one.
+   */
+  OVERWRITE = 'overwrite',
+
+  /**
+   * The new API definition is merged with the existing API.
+   */
+  MERGE = 'merge',
+}
+
 class RootResource extends ResourceBase {
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-apigateway.RootResource';
   public readonly parentResource?: IResource;
   public readonly api: RestApiBase;
   public readonly resourceId: string;
@@ -983,6 +1222,12 @@ class RootResource extends ResourceBase {
 
   constructor(api: RestApiBase, props: ResourceOptions, resourceId: string) {
     super(api, 'Default');
+    props = applyInjectors(RootResource.PROPERTY_INJECTION_ID, props, {
+      scope: api,
+      id: resourceId,
+    });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, resourceId);
 
     this.parentResource = undefined;
     this.defaultIntegration = props.defaultIntegration;
@@ -1007,7 +1252,7 @@ class RootResource extends ResourceBase {
    */
   public get restApi(): RestApi {
     if (!this._restApi) {
-      throw new Error('RestApi is not available on Resource not connected to an instance of RestApi. Use `api` instead');
+      throw new ValidationError(lit`RestapiAvailableResourceConnected`, 'RestApi is not available on Resource not connected to an instance of RestApi. Use `api` instead', this);
     }
     return this._restApi;
   }

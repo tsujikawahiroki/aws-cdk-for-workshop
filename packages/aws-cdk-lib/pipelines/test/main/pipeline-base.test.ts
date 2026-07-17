@@ -1,11 +1,11 @@
 import { Construct } from 'constructs';
 import * as cdk from '../../../core';
 import { App } from '../../../core/lib';
-import { PipelineBase, IFileSetProducer, FileSet } from '../../lib';
+import type { IFileSetProducer } from '../../lib';
+import { PipelineBase, FileSet } from '../../lib';
 import { PIPELINE_ENV } from '../testhelpers';
 
 describe('pipeline base', () => {
-
   test('PipelineBase.isPipeline indicates that a construct extends PipelineBase', () => {
     const app = new App();
     const pipelineStack = new cdk.Stack(app, 'PipelineStack', { env: PIPELINE_ENV });
@@ -25,5 +25,4 @@ describe('pipeline base', () => {
     expect(PipelineBase.isPipeline(construct)).toStrictEqual(false);
     expect(PipelineBase.isPipeline(pipeline)).toStrictEqual(true);
   });
-
 });

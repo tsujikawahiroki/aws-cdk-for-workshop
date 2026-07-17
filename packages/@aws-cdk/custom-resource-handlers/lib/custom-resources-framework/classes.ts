@@ -1,30 +1,43 @@
 /* eslint-disable import/no-extraneous-dependencies */
+import type {
+  PropertySpec,
+  InterfaceSpec,
+  Expression,
+  ClassSpec,
+  Statement,
+} from '@cdklabs/typewriter';
 import {
   ClassType,
   stmt,
   expr,
   Type,
   Splat,
-  ExternalModule,
-  PropertySpec,
-  InterfaceSpec,
   InterfaceType,
   ObjectLiteral,
   MemberVisibility,
   SuperInitializer,
-  Expression,
+  $T,
 } from '@cdklabs/typewriter';
-import { Runtime } from './config';
-import { HandlerFrameworkModule } from './framework';
+import type { Runtime } from './config';
 import {
+  CUSTOM_RESOURCE_PROVIDER,
+  CUSTOM_RESOURCE_RUNTIME_FAMILY,
+  CUSTOM_RESOURCE_SINGLETON,
+  CUSTOM_RESOURCE_SINGLETON_LOG_GROUP,
+  CUSTOM_RESOURCE_SINGLETON_LOG_RETENTION,
+} from './config';
+import type { HandlerFrameworkModule } from './framework';
+import {
+  PATH_MODULE,
   CONSTRUCTS_MODULE,
   LAMBDA_MODULE,
   CORE_MODULE,
-  CORE_INTERNAL_STACK,
-  CORE_INTERNAL_CR_PROVIDER,
-  PATH_MODULE,
 } from './modules';
 import { toLambdaRuntime } from './utils/framework-utils';
+
+const CORE_INTERNAL_STACK_IMPORT_PATH = '../../stack';
+const CORE_INTERNAL_CUSTOM_RESOURCE_PROVIDER_IMPORT_PATH = '../../custom-resource-provider';
+const ALPHA_MODULE_LAMBDA_IMPORT_PATH = 'aws-cdk-lib/aws-lambda';
 
 /**
  * Initialization properties for a class constructor.
@@ -48,11 +61,18 @@ interface ConstructorBuildProps {
   readonly optionalConstructorProps?: boolean;
 
   /**
-   * Visbility for the constructor.
+   * Visibility for the constructor.
    *
-   * @default MemberVisbility.Public
+   * @default MemberVisibility.Public
    */
-  readonly constructorVisbility?: MemberVisibility;
+  readonly constructorVisibility?: MemberVisibility;
+
+  /**
+   * These statements are added to the constructor body in the order they appear in this property.
+   *
+   * @default undefined
+   */
+  readonly statements?: Statement[];
 }
 
 /**
@@ -70,14 +90,38 @@ export interface HandlerFrameworkClassProps {
   readonly codeDirectory: string;
 
   /**
-   * The runtime environment for the framework component.
-   */
-  readonly runtime: Runtime;
-
-  /**
    * The name of the method within your code that framework component calls.
    */
   readonly handler: string;
+
+  /**
+   * The runtime environment for the framework component.
+   *
+   * @default - the latest Lambda runtime available in the region.
+   */
+  readonly runtime?: Runtime;
+
+  /**
+   * Visibility for the constructor.
+   *
+   * @default MemberVisibility.Public
+   */
+  readonly constructorVisibility?: MemberVisibility;
+
+  /**
+   * Deterministic content hash of the bundled handler code. When supplied,
+   * the generated class emits this hash as the asset hash so the S3 object
+   * key for the Lambda code remains stable unless the code actually changes.
+   *
+   * @default - asset hash is computed at synth time from the bundled directory
+   */
+  readonly sourceHash?: string;
+}
+
+interface BuildRuntimePropertyOptions {
+  readonly runtime?: Runtime;
+  readonly isCustomResourceProvider?: boolean;
+  readonly isEvalNodejsProvider?: boolean;
 }
 
 export abstract class HandlerFrameworkClass extends ClassType {
@@ -86,8 +130,6 @@ export abstract class HandlerFrameworkClass extends ClassType {
    */
   public static buildFunction(scope: HandlerFrameworkModule, props: HandlerFrameworkClassProps): HandlerFrameworkClass {
     return new (class Function extends HandlerFrameworkClass {
-      protected readonly externalModules = [PATH_MODULE, CONSTRUCTS_MODULE, LAMBDA_MODULE];
-
       public constructor() {
         super(scope, {
           name: props.name,
@@ -95,19 +137,33 @@ export abstract class HandlerFrameworkClass extends ClassType {
           export: true,
         });
 
-        this.importExternalModulesInto(scope);
+        if (scope.isAlphaModule) {
+          scope.registerImport(LAMBDA_MODULE, { fromLocation: ALPHA_MODULE_LAMBDA_IMPORT_PATH });
+        } else {
+          scope.registerImport(LAMBDA_MODULE);
+        }
 
+        const fromAssetArgs: Expression[] = [
+          PATH_MODULE.join.call(expr.directCode(`__dirname, '${props.codeDirectory}'`)),
+        ];
+        if (props.sourceHash) {
+          fromAssetArgs.push(expr.object({ assetHash: expr.lit(props.sourceHash) }));
+        }
         const superProps = new ObjectLiteral([
           new Splat(expr.ident('props')),
-          ['code', expr.directCode(`lambda.Code.fromAsset(path.join(__dirname, '${props.codeDirectory}'))`)],
+          ['code', $T(LAMBDA_MODULE.Code).fromAsset(...fromAssetArgs)],
           ['handler', expr.lit(props.handler)],
-          ['runtime', expr.directCode(toLambdaRuntime(props.runtime))],
+          ['runtime', this.buildRuntimeProperty(scope, { runtime: props.runtime })],
         ]);
+        const metadataStatements: Statement[] = [
+          stmt.directCode(`this.node.addMetadata('${CUSTOM_RESOURCE_RUNTIME_FAMILY}', this.runtime.family)`),
+        ];
         this.buildConstructor({
           constructorPropsType: LAMBDA_MODULE.FunctionOptions,
           superProps,
           optionalConstructorProps: true,
-          constructorVisbility: MemberVisibility.Public,
+          constructorVisibility: MemberVisibility.Public,
+          statements: metadataStatements,
         });
       }
     })();
@@ -118,8 +174,6 @@ export abstract class HandlerFrameworkClass extends ClassType {
    */
   public static buildSingletonFunction(scope: HandlerFrameworkModule, props: HandlerFrameworkClassProps): HandlerFrameworkClass {
     return new (class SingletonFunction extends HandlerFrameworkClass {
-      protected readonly externalModules = [PATH_MODULE, CONSTRUCTS_MODULE, LAMBDA_MODULE];
-
       public constructor() {
         super(scope, {
           name: props.name,
@@ -127,9 +181,15 @@ export abstract class HandlerFrameworkClass extends ClassType {
           export: true,
         });
 
+        if (scope.isAlphaModule) {
+          scope.registerImport(LAMBDA_MODULE, { fromLocation: ALPHA_MODULE_LAMBDA_IMPORT_PATH });
+        } else {
+          scope.registerImport(LAMBDA_MODULE);
+        }
+
         const isEvalNodejsProvider = this.fqn.includes('eval-nodejs-provider');
 
-        this.importExternalModulesInto(scope);
+        scope.registerImport(LAMBDA_MODULE);
 
         const uuid: PropertySpec = {
           name: 'uuid',
@@ -163,7 +223,7 @@ export abstract class HandlerFrameworkClass extends ClassType {
             docs: {
               summary: 'The runtime that this Lambda will use.',
               docTags: {
-                default: 'lambda.Runtime.NODEJS_18_X',
+                default: '- the latest Lambda node runtime available in your region.',
               },
             },
           };
@@ -179,16 +239,30 @@ export abstract class HandlerFrameworkClass extends ClassType {
           },
         });
 
+        const singletonFromAssetArgs: Expression[] = [
+          PATH_MODULE.join.call(expr.directCode(`__dirname, '${props.codeDirectory}'`)),
+        ];
+        if (props.sourceHash) {
+          singletonFromAssetArgs.push(expr.object({ assetHash: expr.lit(props.sourceHash) }));
+        }
         const superProps = new ObjectLiteral([
           new Splat(expr.ident('props')),
-          ['code', expr.directCode(`lambda.Code.fromAsset(path.join(__dirname, '${props.codeDirectory}'))`)],
+          ['code', $T(LAMBDA_MODULE.Code).fromAsset(...singletonFromAssetArgs)],
           ['handler', expr.lit(props.handler)],
-          ['runtime', expr.directCode(`${isEvalNodejsProvider ? 'props.runtime ?? ' : ''}${toLambdaRuntime(props.runtime)}`)],
+          ['runtime', this.buildRuntimeProperty(scope, { runtime: props.runtime, isEvalNodejsProvider })],
         ]);
+        const metadataStatements: Statement[] = [
+          stmt.directCode(`this.addMetadata('${CUSTOM_RESOURCE_SINGLETON}', true)`),
+          stmt.directCode(`this.addMetadata('${CUSTOM_RESOURCE_RUNTIME_FAMILY}', this.runtime.family)`),
+          stmt.directCode(`if (props?.logGroup) { this.logGroup.node.addMetadata('${CUSTOM_RESOURCE_SINGLETON_LOG_GROUP}', true) }`),
+          // We need to access the private `_logRetention` custom resource, the only public property - `logGroup` - provides an ARN reference to the resource, instead of the resource itself.
+          stmt.directCode(`if (props?.logRetention) { ((this as any).lambdaFunction as lambda.Function)._logRetention?.node.addMetadata('${CUSTOM_RESOURCE_SINGLETON_LOG_RETENTION}', true) }`),
+        ];
         this.buildConstructor({
           constructorPropsType: _interface.type,
           superProps,
-          constructorVisbility: MemberVisibility.Public,
+          constructorVisibility: MemberVisibility.Public,
+          statements: metadataStatements,
         });
       }
     })();
@@ -199,23 +273,34 @@ export abstract class HandlerFrameworkClass extends ClassType {
    */
   public static buildCustomResourceProvider(scope: HandlerFrameworkModule, props: HandlerFrameworkClassProps): HandlerFrameworkClass {
     return new (class CustomResourceProvider extends HandlerFrameworkClass {
-      protected readonly externalModules: ExternalModule[] = [PATH_MODULE, CONSTRUCTS_MODULE];
-
       public constructor() {
         super(scope, {
           name: props.name,
-          extends: scope.coreInternal
-            ? CORE_INTERNAL_CR_PROVIDER.CustomResourceProviderBase
-            : CORE_MODULE.CustomResourceProviderBase,
+          extends: CORE_MODULE.CustomResourceProviderBase,
           export: true,
         });
 
-        if (scope.coreInternal) {
-          this.externalModules.push(...[CORE_INTERNAL_STACK, CORE_INTERNAL_CR_PROVIDER]);
+        if (scope.isCoreInternal) {
+          scope.registerImport(CORE_MODULE, {
+            targets: [CORE_MODULE.Stack],
+            fromLocation: CORE_INTERNAL_STACK_IMPORT_PATH,
+          });
+          scope.registerImport(CORE_MODULE, {
+            targets: [
+              CORE_MODULE.CustomResourceProviderBase,
+              CORE_MODULE.CustomResourceProviderOptions,
+            ],
+            fromLocation: CORE_INTERNAL_CUSTOM_RESOURCE_PROVIDER_IMPORT_PATH,
+          });
         } else {
-          this.externalModules.push(CORE_MODULE);
+          scope.registerImport(CORE_MODULE, {
+            targets: [
+              CORE_MODULE.Stack,
+              CORE_MODULE.CustomResourceProviderBase,
+              CORE_MODULE.CustomResourceProviderOptions,
+            ],
+          });
         }
-        this.importExternalModulesInto(scope);
 
         const getOrCreateMethod = this.addMethod({
           name: 'getOrCreate',
@@ -235,9 +320,7 @@ export abstract class HandlerFrameworkClass extends ClassType {
         });
         getOrCreateMethod.addParameter({
           name: 'props',
-          type: scope.coreInternal
-            ? CORE_INTERNAL_CR_PROVIDER.CustomResourceProviderOptions
-            : CORE_MODULE.CustomResourceProviderOptions,
+          type: CORE_MODULE.CustomResourceProviderOptions,
           optional: true,
         });
         getOrCreateMethod.addBody(
@@ -252,7 +335,7 @@ export abstract class HandlerFrameworkClass extends ClassType {
             summary: 'Returns a stack-level singleton for the custom resource provider.',
           },
         });
-        getOrCreateProviderMethod.addParameter({
+        const _scope = getOrCreateProviderMethod.addParameter({
           name: 'scope',
           type: CONSTRUCTS_MODULE.Construct,
         });
@@ -262,83 +345,42 @@ export abstract class HandlerFrameworkClass extends ClassType {
         });
         getOrCreateProviderMethod.addParameter({
           name: 'props',
-          type: scope.coreInternal
-            ? CORE_INTERNAL_CR_PROVIDER.CustomResourceProviderOptions
-            : CORE_MODULE.CustomResourceProviderOptions,
+          type: CORE_MODULE.CustomResourceProviderOptions,
           optional: true,
         });
         getOrCreateProviderMethod.addBody(
           stmt.constVar(expr.ident('id'), expr.directCode('`${uniqueid}CustomResourceProvider`')),
-          stmt.constVar(expr.ident('stack'), expr.directCode('Stack.of(scope)')),
+          stmt.constVar(expr.ident('stack'), $T(CORE_MODULE.Stack).of(expr.directCode(_scope.spec.name))),
           stmt.constVar(expr.ident('existing'), expr.directCode(`stack.node.tryFindChild(id) as ${this.type}`)),
           stmt.ret(expr.directCode(`existing ?? new ${this.name}(stack, id, props)`)),
         );
 
         const superProps = new ObjectLiteral([
           new Splat(expr.ident('props')),
-          ['codeDirectory', expr.directCode(`path.join(__dirname, '${props.codeDirectory}')`)],
-          ['runtimeName', expr.lit(props.runtime)],
+          ['codeDirectory', PATH_MODULE.join.call(expr.directCode(`__dirname, '${props.codeDirectory}'`))],
+          ['runtimeName', this.buildRuntimeProperty(scope, {
+            runtime: props.runtime,
+            isCustomResourceProvider: true,
+          })],
         ]);
+        const metadataStatements: Statement[] = [stmt.directCode(`this.node.addMetadata('${CUSTOM_RESOURCE_PROVIDER}', true)`)];
         this.buildConstructor({
-          constructorPropsType: scope.coreInternal
-            ? CORE_INTERNAL_CR_PROVIDER.CustomResourceProviderOptions
-            : CORE_MODULE.CustomResourceProviderOptions,
+          constructorPropsType: CORE_MODULE.CustomResourceProviderOptions,
           superProps,
-          constructorVisbility: MemberVisibility.Private,
+          constructorVisibility: props.constructorVisibility ?? MemberVisibility.Private,
           optionalConstructorProps: true,
+          statements: metadataStatements,
         });
       }
     })();
   }
 
-  /**
-   * External modules that this class depends on.
-   */
-  protected abstract readonly externalModules: ExternalModule[];
-
-  private importExternalModulesInto(scope: HandlerFrameworkModule) {
-    for (const module of this.externalModules) {
-      if (!scope.hasExternalModule(module)) {
-        scope.addExternalModule(module);
-        this.importExternalModuleInto(scope, module);
-      }
-    }
-  }
-
-  private importExternalModuleInto(scope: HandlerFrameworkModule, module: ExternalModule) {
-    switch (module.fqn) {
-      case PATH_MODULE.fqn: {
-        PATH_MODULE.import(scope, 'path');
-        return;
-      }
-      case CONSTRUCTS_MODULE.fqn: {
-        CONSTRUCTS_MODULE.importSelective(scope, ['Construct']);
-        return;
-      }
-      case CORE_MODULE.fqn: {
-        CORE_MODULE.importSelective(scope, [
-          'Stack',
-          'CustomResourceProviderBase',
-          'CustomResourceProviderOptions',
-        ]);
-        return;
-      }
-      case CORE_INTERNAL_CR_PROVIDER.fqn: {
-        CORE_INTERNAL_CR_PROVIDER.importSelective(scope, [
-          'CustomResourceProviderBase',
-          'CustomResourceProviderOptions',
-        ]);
-        return;
-      }
-      case CORE_INTERNAL_STACK.fqn: {
-        CORE_INTERNAL_STACK.importSelective(scope, ['Stack']);
-        return;
-      }
-      case LAMBDA_MODULE.fqn: {
-        LAMBDA_MODULE.import(scope, 'lambda');
-        return;
-      }
-    }
+  protected constructor(scope: HandlerFrameworkModule, spec: ClassSpec) {
+    super(scope, spec);
+    scope.registerImport(PATH_MODULE);
+    scope.registerImport(CONSTRUCTS_MODULE, {
+      targets: [CONSTRUCTS_MODULE.Construct],
+    });
   }
 
   private getOrCreateInterface(scope: HandlerFrameworkModule, spec: InterfaceSpec) {
@@ -354,7 +396,7 @@ export abstract class HandlerFrameworkClass extends ClassType {
 
   private buildConstructor(props: ConstructorBuildProps) {
     const init = this.addInitializer({
-      visibility: props.constructorVisbility,
+      visibility: props.constructorVisibility,
     });
     const scope = init.addParameter({
       name: 'scope',
@@ -372,5 +414,36 @@ export abstract class HandlerFrameworkClass extends ClassType {
 
     const superInitializerArgs: Expression[] = [scope, id, props.superProps];
     init.addBody(new SuperInitializer(...superInitializerArgs));
+    if (props.statements) {
+      for (const statement of props.statements) {
+        init.addBody(statement);
+      }
+    }
+  }
+
+  private buildRuntimeProperty(scope: HandlerFrameworkModule, options: BuildRuntimePropertyOptions = {}) {
+    const { runtime, isCustomResourceProvider, isEvalNodejsProvider } = options;
+
+    if (runtime) {
+      return isCustomResourceProvider ? expr.lit(runtime) : expr.directCode(toLambdaRuntime(runtime));
+    }
+
+    if (isCustomResourceProvider) {
+      scope.registerImport(CORE_MODULE, {
+        targets: [CORE_MODULE.determineLatestNodeRuntimeName],
+        fromLocation: scope.isCoreInternal
+          ? CORE_INTERNAL_CUSTOM_RESOURCE_PROVIDER_IMPORT_PATH
+          : CORE_MODULE.fqn,
+      });
+    }
+
+    const _scope = expr.ident('scope');
+    const call = isCustomResourceProvider
+      ? CORE_MODULE.determineLatestNodeRuntimeName.call(_scope)
+      : LAMBDA_MODULE.determineLatestNodeRuntime.call(_scope);
+
+    return isEvalNodejsProvider
+      ? expr.cond(expr.directCode('props.runtime'), expr.directCode('props.runtime'), call)
+      : call;
   }
 }

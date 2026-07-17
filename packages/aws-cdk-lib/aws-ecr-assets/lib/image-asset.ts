@@ -1,9 +1,13 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { Construct } from 'constructs';
-import { FingerprintOptions, FollowMode, IAsset } from '../../assets';
+import type { FingerprintOptions, IAsset } from '../../assets';
+import { FollowMode } from '../../assets';
 import * as ecr from '../../aws-ecr';
-import { Annotations, AssetStaging, FeatureFlags, FileFingerprintOptions, IgnoreMode, Stack, SymlinkFollowMode, Token, Stage, CfnResource } from '../../core';
+import type { FileFingerprintOptions, CfnResource } from '../../core';
+import { Annotations, AssetStaging, FeatureFlags, IgnoreMode, Stack, SymlinkFollowMode, Token, Stage, Names, ValidationError, UnscopedValidationError } from '../../core';
+import { lit } from '../../core/lib/private/literal-string';
+import { propertyInjectable } from '../../core/lib/prop-injectable';
 import * as cxapi from '../../cx-api';
 
 /**
@@ -77,7 +81,10 @@ export class Platform {
   /**
    * @param platform The platform to use for docker build
    */
-  private constructor(public readonly platform: string) { }
+  private constructor(
+    /** @jsii suppress JSII5019 For historic reasons */
+    public readonly platform: string,
+  ) { }
 }
 
 /**
@@ -97,6 +104,13 @@ export interface DockerImageAssetInvalidationOptions {
    * @default true
    */
   readonly buildArgs?: boolean;
+
+  /**
+   * Use `buildContexts` while calculating the asset hash
+   *
+   * @default true
+   */
+  readonly buildContexts?: boolean;
 
   /**
    * Use `buildSecrets` while calculating the asset hash
@@ -213,6 +227,23 @@ export interface DockerImageAssetOptions extends FingerprintOptions, FileFingerp
   readonly buildArgs?: { [key: string]: string };
 
   /**
+   * Build contexts to pass to the `docker build` command.
+   *
+   * Build contexts can be used to specify additional directories or images
+   * to use during the build. Each entry specifies a named build context
+   * and its source (a directory path, a URL, or a docker image).
+   *
+   * Since Docker build contexts are resolved before deployment, keys and
+   * values cannot refer to unresolved tokens (such as `lambda.functionArn` or
+   * `queue.queueUrl`).
+   *
+   * @see https://docs.docker.com/build/building/context/#additional-build-contexts
+   *
+   * @default - no additional build contexts
+   */
+  readonly buildContexts?: { [key: string]: string };
+
+  /**
    * Build secrets.
    *
    * Docker BuildKit must be enabled to use build secrets.
@@ -314,6 +345,29 @@ export interface DockerImageAssetOptions extends FingerprintOptions, FileFingerp
    * @default - cache is used
    */
   readonly cacheDisabled?: boolean;
+
+  /**
+   * A display name for this asset
+   *
+   * If supplied, the display name will be used in locations where the asset
+   * identifier is printed, like in the CLI progress information. If the same
+   * asset is added multiple times, the display name of the first occurrence is
+   * used.
+   *
+   * If `assetName` is given, it will also be used as the default `displayName`.
+   * Otherwise, the default is the construct path of the ImageAsset construct,
+   * with respect to the enclosing stack. If the asset is produced by a
+   * construct helper function (such as `lambda.Code.fromAssetImage()`), this
+   * will look like `MyFunction/AssetImage`.
+   *
+   * We use the stack-relative construct path so that in the common case where
+   * you have multiple stacks with the same asset, we won't show something like
+   * `/MyBetaStack/MyFunction/Code` when you are actually deploying to
+   * production.
+   *
+   * @default - Stack-relative construct path
+   */
+  readonly displayName?: string;
 }
 
 /**
@@ -333,7 +387,13 @@ export interface DockerImageAssetProps extends DockerImageAssetOptions {
  *
  * The image will be created in build time and uploaded to an ECR repository.
  */
+@propertyInjectable
 export class DockerImageAsset extends Construct implements IAsset {
+  /**
+   * Uniquely identifies this class.
+   */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-ecr-assets.DockerImageAsset';
+
   /**
    * The full URI of the image (including a tag). Use this reference to pull
    * the asset.
@@ -383,6 +443,11 @@ export class DockerImageAsset extends Construct implements IAsset {
    * Build args to pass to the `docker build` command.
    */
   private readonly dockerBuildArgs?: { [key: string]: string };
+
+  /**
+   * Build contexts to pass to the `docker build` command.
+   */
+  private readonly dockerBuildContexts?: { [key: string]: string };
 
   /**
    * Build secrets to pass to the `docker build` command.
@@ -435,14 +500,14 @@ export class DockerImageAsset extends Construct implements IAsset {
     // resolve full path
     const dir = path.resolve(props.directory);
     if (!fs.existsSync(dir)) {
-      throw new Error(`Cannot find image directory at ${dir}`);
+      throw new ValidationError(lit`CannotFindImageDirectory`, `Cannot find image directory at ${dir}`, this);
     }
 
     // validate the docker file exists
     this.dockerfilePath = props.file || 'Dockerfile';
     const file = path.join(dir, this.dockerfilePath);
     if (!fs.existsSync(file)) {
-      throw new Error(`Cannot find file at ${file}`);
+      throw new ValidationError(lit`CannotFindFile`, `Cannot find file at ${file}`, this);
     }
 
     const defaultIgnoreMode = FeatureFlags.of(this).isEnabled(cxapi.DOCKER_IGNORE_SUPPORT)
@@ -479,6 +544,7 @@ export class DockerImageAsset extends Construct implements IAsset {
     const extraHash: { [field: string]: any } = {};
     if (props.invalidation?.extraHash !== false && props.extraHash) { extraHash.user = props.extraHash; }
     if (props.invalidation?.buildArgs !== false && props.buildArgs) { extraHash.buildArgs = props.buildArgs; }
+    if (props.invalidation?.buildContexts !== false && props.buildContexts) { extraHash.buildContexts = props.buildContexts; }
     if (props.invalidation?.buildSecrets !== false && props.buildSecrets) { extraHash.buildSecrets = props.buildSecrets; }
     if (props.invalidation?.buildSsh !== false && props.buildSsh) {extraHash.buildSsh = props.buildSsh; }
     if (props.invalidation?.target !== false && props.target) { extraHash.target = props.target; }
@@ -511,6 +577,7 @@ export class DockerImageAsset extends Construct implements IAsset {
     this.assetPath = staging.relativeStagedPath(stack);
     this.assetName = props.assetName;
     this.dockerBuildArgs = props.buildArgs;
+    this.dockerBuildContexts = props.buildContexts;
     this.dockerBuildSecrets = props.buildSecrets;
     this.dockerBuildSsh = props.buildSsh;
     this.dockerBuildTarget = props.target;
@@ -523,6 +590,7 @@ export class DockerImageAsset extends Construct implements IAsset {
       directoryName: this.assetPath,
       assetName: this.assetName,
       dockerBuildArgs: this.dockerBuildArgs,
+      dockerBuildContexts: this.dockerBuildContexts,
       dockerBuildSecrets: this.dockerBuildSecrets,
       dockerBuildSsh: this.dockerBuildSsh,
       dockerBuildTarget: this.dockerBuildTarget,
@@ -534,6 +602,7 @@ export class DockerImageAsset extends Construct implements IAsset {
       dockerCacheFrom: this.dockerCacheFrom,
       dockerCacheTo: this.dockerCacheTo,
       dockerCacheDisabled: this.dockerCacheDisabled,
+      displayName: props.displayName ?? props.assetName ?? Names.stackRelativeConstructPath(this),
     });
 
     this.repository = ecr.Repository.fromRepositoryName(this, 'Repository', location.repositoryName);
@@ -568,6 +637,7 @@ export class DockerImageAsset extends Construct implements IAsset {
     resource.cfnOptions.metadata[cxapi.ASSET_RESOURCE_METADATA_PATH_KEY] = this.assetPath;
     resource.cfnOptions.metadata[cxapi.ASSET_RESOURCE_METADATA_DOCKERFILE_PATH_KEY] = this.dockerfilePath;
     resource.cfnOptions.metadata[cxapi.ASSET_RESOURCE_METADATA_DOCKER_BUILD_ARGS_KEY] = this.dockerBuildArgs;
+    resource.cfnOptions.metadata[cxapi.ASSET_RESOURCE_METADATA_DOCKER_BUILD_CONTEXTS_KEY] = this.dockerBuildContexts;
     resource.cfnOptions.metadata[cxapi.ASSET_RESOURCE_METADATA_DOCKER_BUILD_SECRETS_KEY] = this.dockerBuildSecrets;
     resource.cfnOptions.metadata[cxapi.ASSET_RESOURCE_METADATA_DOCKER_BUILD_SSH_KEY] = this.dockerBuildSsh;
     resource.cfnOptions.metadata[cxapi.ASSET_RESOURCE_METADATA_DOCKER_BUILD_TARGET_KEY] = this.dockerBuildTarget;
@@ -577,30 +647,34 @@ export class DockerImageAsset extends Construct implements IAsset {
     resource.cfnOptions.metadata[cxapi.ASSET_RESOURCE_METADATA_DOCKER_CACHE_TO_KEY] = this.dockerCacheTo;
     resource.cfnOptions.metadata[cxapi.ASSET_RESOURCE_METADATA_DOCKER_CACHE_DISABLED_KEY] = this.dockerCacheDisabled;
   }
-
 }
 
 function validateProps(props: DockerImageAssetProps) {
   for (const [key, value] of Object.entries(props)) {
     if (Token.isUnresolved(value)) {
-      throw new Error(`Cannot use Token as value of '${key}': this value is used before deployment starts`);
+      throw new UnscopedValidationError(lit`CannotTokenValue`, `Cannot use Token as value of '${key}': this value is used before deployment starts`);
     }
   }
 
   validateBuildArgs(props.buildArgs);
+  validateBuildContexts(props.buildContexts);
   validateBuildSecrets(props.buildSecrets);
 }
 
 function validateBuildProps(buildPropName: string, buildProps?: { [key: string]: string }) {
   for (const [key, value] of Object.entries(buildProps || {})) {
     if (Token.isUnresolved(key) || Token.isUnresolved(value)) {
-      throw new Error(`Cannot use tokens in keys or values of "${buildPropName}" since they are needed before deployment`);
+      throw new UnscopedValidationError(lit`CannotTokensKeysValues`, `Cannot use tokens in keys or values of "${buildPropName}" since they are needed before deployment`);
     }
   }
 }
 
 function validateBuildArgs(buildArgs?: { [key: string]: string }) {
   validateBuildProps('buildArgs', buildArgs);
+}
+
+function validateBuildContexts(buildContexts?: { [key: string]: string }) {
+  validateBuildProps('buildContexts', buildContexts);
 }
 
 function validateBuildSecrets(buildSecrets?: { [key: string]: string }) {

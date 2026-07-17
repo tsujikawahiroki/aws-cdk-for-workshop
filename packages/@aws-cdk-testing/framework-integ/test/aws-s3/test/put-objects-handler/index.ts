@@ -1,4 +1,4 @@
-// eslint-disable-next-line import/no-extraneous-dependencies
+
 import { S3 } from '@aws-sdk/client-s3';
 
 const s3 = new S3();
@@ -22,6 +22,8 @@ export async function handler(event: AWSLambda.CloudFormationCustomResourceEvent
 
 async function putObjects(bucketName: string, n = 5) {
   // Put n objects in parallel
+  // Bounded by human input
+  // eslint-disable-next-line @cdklabs/promiseall-no-unbounded-parallelism
   await Promise.all([...Array(n).keys()]
     .map(key => s3.putObject({
       Bucket: bucketName,

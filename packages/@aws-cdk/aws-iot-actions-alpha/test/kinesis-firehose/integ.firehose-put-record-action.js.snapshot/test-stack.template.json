@@ -219,6 +219,9 @@
    "ap-east-1": {
     "FirehoseCidrBlock": "18.162.221.32/27"
    },
+   "ap-east-2": {
+    "FirehoseCidrBlock": "43.212.53.160/27"
+   },
    "ap-northeast-1": {
     "FirehoseCidrBlock": "13.113.196.224/27"
    },
@@ -246,8 +249,17 @@
    "ap-southeast-4": {
     "FirehoseCidrBlock": "16.50.161.128/27"
    },
+   "ap-southeast-5": {
+    "FirehoseCidrBlock": "43.216.58.0/27"
+   },
+   "ap-southeast-7": {
+    "FirehoseCidrBlock": "43.208.112.96/27"
+   },
    "ca-central-1": {
     "FirehoseCidrBlock": "35.183.92.128/27"
+   },
+   "ca-west-1": {
+    "FirehoseCidrBlock": "40.176.98.192/27"
    },
    "cn-north-1": {
     "FirehoseCidrBlock": "52.81.151.32/27"

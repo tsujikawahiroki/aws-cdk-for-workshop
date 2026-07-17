@@ -1,14 +1,14 @@
 import { testDeprecated } from '@aws-cdk/cdk-build-tools';
+import { KubectlV31Layer } from '@aws-cdk/lambda-layer-kubectl-v31';
 import { testFixture } from './util';
-import { Template } from '../../assertions';
+import { Annotations, Match, Template } from '../../assertions';
 import * as ec2 from '../../aws-ec2';
 import * as iam from '../../aws-iam';
 import * as cdk from '../../core';
 import * as cxapi from '../../cx-api';
 import * as eks from '../lib';
 import { NodegroupAmiType, TaintEffect } from '../lib';
-
-/* eslint-disable max-len */
+import { isGpuInstanceType } from '../lib/private/nodegroup';
 
 const CLUSTER_VERSION = eks.KubernetesVersion.V1_21;
 
@@ -28,6 +28,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     new eks.Nodegroup(stack, 'Nodegroup', {
       cluster,
@@ -59,6 +60,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     new eks.Nodegroup(stack, 'Nodegroup', {
       cluster,
@@ -84,6 +86,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     new eks.Nodegroup(stack, 'Nodegroup', {
       cluster,
@@ -105,6 +108,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     new eks.Nodegroup(stack, 'Nodegroup', { cluster });
 
@@ -145,6 +149,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     new eks.Nodegroup(stack, 'Nodegroup', {
       cluster,
@@ -189,6 +194,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     new eks.Nodegroup(stack, 'Nodegroup', {
       cluster,
@@ -233,6 +239,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     new eks.Nodegroup(stack, 'Nodegroup', {
       cluster,
@@ -277,6 +284,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     new eks.Nodegroup(stack, 'Nodegroup', {
       cluster,
@@ -321,6 +329,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     new eks.Nodegroup(stack, 'Nodegroup', {
       cluster,
@@ -379,6 +388,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     new eks.Nodegroup(stack, 'Nodegroup', {
       cluster,
@@ -437,6 +447,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     new eks.Nodegroup(stack, 'Nodegroup', {
       cluster,
@@ -495,6 +506,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     new eks.Nodegroup(stack, 'Nodegroup', {
       cluster,
@@ -557,6 +569,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     new eks.Nodegroup(stack, 'Nodegroup', {
       cluster,
@@ -585,6 +598,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     new eks.Nodegroup(stack, 'Nodegroup', {
       cluster,
@@ -613,12 +627,13 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     new eks.Nodegroup(stack, 'Nodegroup', {
       cluster,
       instanceTypes: [
-        new ec2.InstanceType('p3.large'),
-        new ec2.InstanceType('g3.large'),
+        new ec2.InstanceType('g6e.large'),
+        new ec2.InstanceType('g5.large'),
       ],
     });
 
@@ -626,6 +641,178 @@ describe('node group', () => {
     Template.fromStack(stack).hasResourceProperties('AWS::EKS::Nodegroup', {
       AmiType: 'AL2_x86_64_GPU',
     });
+  });
+
+  /**
+   * g7e instances (NVIDIA Blackwell B200) should be recognised as GPU and select
+   * AL2_x86_64_GPU automatically, matching the behaviour of g6e instances.
+   */
+  test('amiType should be AL2_x86_64_GPU with g7e instanceType', () => {
+    // GIVEN
+    const { stack, vpc } = testFixture();
+
+    // WHEN
+    const cluster = new eks.Cluster(stack, 'Cluster', {
+      vpc,
+      defaultCapacity: 0,
+      version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
+    });
+    new eks.Nodegroup(stack, 'Nodegroup', {
+      cluster,
+      instanceTypes: [new ec2.InstanceType('g7e.2xlarge')],
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::EKS::Nodegroup', {
+      AmiType: 'AL2_x86_64_GPU',
+    });
+  });
+
+  /**
+   * When EKS_DEFAULT_AL2023 feature flag is disabled, the amiType should remain AL2.
+   */
+  test('amiType defaults to AL2_x86_64 when EKS_DEFAULT_AL2023 flag is disabled', () => {
+    // GIVEN
+    const app = new cdk.App();
+    const stack = new cdk.Stack(app, 'Stack');
+    stack.node.setContext(cxapi.EKS_DEFAULT_AL2023, false);
+
+    // WHEN
+    const cluster = new eks.Cluster(stack, 'Cluster', {
+      defaultCapacity: 0,
+      version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
+    });
+    new eks.Nodegroup(stack, 'Nodegroup', {
+      cluster,
+      instanceTypes: [new ec2.InstanceType('m5.large')],
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::EKS::Nodegroup', {
+      AmiType: 'AL2_x86_64',
+    });
+  });
+
+  /**
+   * When EKS_DEFAULT_AL2023 feature flag is enabled and instanceTypes are x86_64,
+   * the amiType should be implicitly set as AL2023_x86_64_STANDARD.
+   */
+  test('amiType should be AL2023_x86_64_STANDARD when EKS_DEFAULT_AL2023 flag is enabled and instanceTypes is x86_64', () => {
+    // GIVEN
+    const app = new cdk.App();
+    const stack = new cdk.Stack(app, 'Stack');
+    stack.node.setContext(cxapi.EKS_DEFAULT_AL2023, true);
+
+    // WHEN
+    const cluster = new eks.Cluster(stack, 'Cluster', {
+      defaultCapacity: 0,
+      version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
+    });
+    new eks.Nodegroup(stack, 'Nodegroup', {
+      cluster,
+      instanceTypes: [
+        new ec2.InstanceType('m5.large'),
+        new ec2.InstanceType('c5.large'),
+      ],
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::EKS::Nodegroup', {
+      AmiType: 'AL2023_x86_64_STANDARD',
+    });
+  });
+
+  /**
+   * When EKS_DEFAULT_AL2023 feature flag is enabled and instanceTypes are ARM64,
+   * the amiType should be implicitly set as AL2023_ARM_64_STANDARD.
+   */
+  test('amiType should be AL2023_ARM_64_STANDARD when EKS_DEFAULT_AL2023 flag is enabled and instanceTypes is ARM_64', () => {
+    // GIVEN
+    const app = new cdk.App();
+    const stack = new cdk.Stack(app, 'Stack');
+    stack.node.setContext(cxapi.EKS_DEFAULT_AL2023, true);
+
+    // WHEN
+    const cluster = new eks.Cluster(stack, 'Cluster', {
+      defaultCapacity: 0,
+      version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
+    });
+    new eks.Nodegroup(stack, 'Nodegroup', {
+      cluster,
+      instanceTypes: [
+        new ec2.InstanceType('c6g.large'),
+        new ec2.InstanceType('t4g.large'),
+      ],
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::EKS::Nodegroup', {
+      AmiType: 'AL2023_ARM_64_STANDARD',
+    });
+  });
+
+  /**
+   * When EKS_DEFAULT_AL2023 feature flag is enabled and instanceTypes are GPU,
+   * the amiType should remain AL2_x86_64_GPU (GPU instances are excluded from the flag).
+   */
+  test('amiType should remain AL2_x86_64_GPU when EKS_DEFAULT_AL2023 flag is enabled and instanceTypes is GPU', () => {
+    // GIVEN
+    const app = new cdk.App();
+    const stack = new cdk.Stack(app, 'Stack');
+    stack.node.setContext(cxapi.EKS_DEFAULT_AL2023, true);
+
+    // WHEN
+    const cluster = new eks.Cluster(stack, 'Cluster', {
+      defaultCapacity: 0,
+      version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
+    });
+    new eks.Nodegroup(stack, 'Nodegroup', {
+      cluster,
+      instanceTypes: [
+        new ec2.InstanceType('g6e.large'),
+        new ec2.InstanceType('g5.large'),
+      ],
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::EKS::Nodegroup', {
+      AmiType: 'AL2_x86_64_GPU',
+    });
+
+    Annotations.fromStack(stack).hasWarning('/Stack/Nodegroup',
+      Match.stringLikeRegexp('GPU instance types will continue to use AL2'));
+  });
+
+  /**
+   * When EKS_DEFAULT_AL2023 flag is enabled and the user explicitly sets amiType, no
+   * warning should fire (explicit user choice opts out of both warnings).
+   */
+  test('no warning when EKS_DEFAULT_AL2023 flag is enabled and amiType is set explicitly', () => {
+    // GIVEN
+    const app = new cdk.App();
+    const stack = new cdk.Stack(app, 'Stack');
+    stack.node.setContext(cxapi.EKS_DEFAULT_AL2023, true);
+
+    // WHEN
+    const cluster = new eks.Cluster(stack, 'Cluster', {
+      defaultCapacity: 0,
+      version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
+    });
+    new eks.Nodegroup(stack, 'Nodegroup', {
+      cluster,
+      instanceTypes: [new ec2.InstanceType('m5.large')],
+      amiType: NodegroupAmiType.AL2_X86_64,
+    });
+
+    // THEN
+    Annotations.fromStack(stack).hasNoWarning('/Stack/Nodegroup',
+      Match.stringLikeRegexp('GPU instance types will continue to use AL2'));
   });
 
   /**
@@ -639,6 +826,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     // THEN
     expect(() => cluster.addNodegroupCapacity('ng', {
@@ -647,7 +835,7 @@ describe('node group', () => {
         new ec2.InstanceType('p3.large'),
         new ec2.InstanceType('g3.large'),
       ],
-    })).toThrow(/The specified AMI does not match the instance types architecture, either specify one of AL2_X86_64_GPU, BOTTLEROCKET_X86_64_NVIDIA, BOTTLEROCKET_ARM_64_NVIDIA or don't specify any/);
+    })).toThrow(/The specified AMI does not match the instance types architecture, either specify one of AL2_X86_64_GPU, AL2023_X86_64_NEURON, AL2023_X86_64_NVIDIA, AL2023_ARM_64_NVIDIA, BOTTLEROCKET_X86_64_NVIDIA, BOTTLEROCKET_ARM_64_NVIDIA or don't specify any/);
   });
 
   /**
@@ -661,6 +849,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     // THEN
     expect(() => cluster.addNodegroupCapacity('ng', {
@@ -683,6 +872,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     // THEN
     expect(() => cluster.addNodegroupCapacity('ng', {
@@ -705,6 +895,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     // THEN
     expect(() => cluster.addNodegroupCapacity('ng', {
@@ -723,6 +914,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     // THEN
     expect(() => cluster.addNodegroupCapacity('ng', {
@@ -744,6 +936,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     // THEN
     expect(() => cluster.addNodegroupCapacity('ng', {
@@ -762,6 +955,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     // THEN
     expect(() => cluster.addNodegroupCapacity('ng', {
@@ -780,6 +974,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     // THEN
     expect(() => cluster.addNodegroupCapacity('ng', {
@@ -804,6 +999,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     const ng = new eks.Nodegroup(stack, 'Nodegroup', {
       cluster,
@@ -833,6 +1029,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     const ng = new eks.Nodegroup(stack, 'Nodegroup', {
       cluster,
@@ -862,6 +1059,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     const ng = new eks.Nodegroup(stack, 'Nodegroup', {
       cluster,
@@ -888,6 +1086,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     // THEN
     cluster.addNodegroupCapacity('bottlerocket', {
@@ -911,6 +1110,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
       // THEN
     cluster.addNodegroupCapacity('bottlerocket', {
@@ -934,6 +1134,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     // THEN
     cluster.addNodegroupCapacity('windows', {
@@ -957,6 +1158,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     // THEN
     cluster.addNodegroupCapacity('windows', {
@@ -980,6 +1182,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     // THEN
     cluster.addNodegroupCapacity('windows', {
@@ -1003,6 +1206,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     // THEN
     cluster.addNodegroupCapacity('windows', {
@@ -1028,6 +1232,7 @@ describe('node group', () => {
       mastersRole: new iam.Role(stack, 'MastersRole', {
         assumedBy: new iam.ArnPrincipal('arn:aws:iam:123456789012:user/user-name'),
       }),
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     new eks.Nodegroup(stack, 'Nodegroup', { cluster });
 
@@ -1084,6 +1289,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     new eks.Nodegroup(stack, 'Nodegroup', {
       cluster,
@@ -1108,6 +1314,29 @@ describe('node group', () => {
     });
   });
 
+  test('create nodegroup correctly with enableNodeAutoRepair provided', () => {
+    // GIVEN
+    const { stack, vpc } = testFixture();
+
+    // WHEN
+    const cluster = new eks.Cluster(stack, 'Cluster', {
+      vpc,
+      defaultCapacity: 0,
+      version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
+    });
+    new eks.Nodegroup(stack, 'Nodegroup', {
+      cluster,
+      enableNodeAutoRepair: true,
+    });
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::EKS::Nodegroup', {
+      NodeRepairConfig: {
+        Enabled: true,
+      },
+    });
+  });
+
   test('create nodegroup with forceUpdate disabled', () => {
     // GIVEN
     const { stack, vpc } = testFixture();
@@ -1117,6 +1346,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     new eks.Nodegroup(stack, 'Nodegroup', { cluster, forceUpdate: false });
 
@@ -1135,6 +1365,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     new eks.Nodegroup(stack, 'Nodegroup', {
       cluster,
@@ -1158,6 +1389,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     new eks.Nodegroup(stack, 'Nodegroup', {
       cluster,
@@ -1183,6 +1415,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     new eks.Nodegroup(stack, 'Nodegroup', {
       cluster,
@@ -1213,6 +1446,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     new eks.Nodegroup(stack, 'Nodegroup', {
       cluster,
@@ -1243,6 +1477,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     // THEN
     expect(() => cluster.addNodegroupCapacity('ng', {
@@ -1264,6 +1499,7 @@ describe('node group', () => {
     const cluster = new eks.Cluster(stack, 'Cluster', {
       vpc,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     new eks.Nodegroup(stack, 'Nodegroup', {
       cluster,
@@ -1282,6 +1518,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     // THEN
     expect(() => cluster.addNodegroupCapacity('ng', {
@@ -1302,6 +1539,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     // THEN
     expect(() => cluster.addNodegroupCapacity('ng', {
@@ -1324,6 +1562,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     new eks.Nodegroup(stack, 'Nodegroup', {
       cluster,
@@ -1348,6 +1587,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack1, 'KubectlLayer'),
     });
 
     // WHEN
@@ -1375,6 +1615,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
 
     // WHEN
@@ -1415,6 +1656,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
 
     // WHEN
@@ -1450,6 +1692,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     // THEN
     expect(() => cluster.addNodegroupCapacity('ng', { desiredSize: 3, maxSize: 2 })).toThrow(/Desired capacity 3 can't be greater than max size 2/);
@@ -1462,6 +1705,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     // THEN
     expect(() => cluster.addNodegroupCapacity('ng', { desiredSize: 2, minSize: 3 })).toThrow(/Minimum capacity 3 can't be greater than desired size 2/);
@@ -1474,6 +1718,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     // WHEN
     new eks.Nodegroup(stack, 'NodeGroup', {
@@ -1499,6 +1744,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     // WHEN
     new eks.Nodegroup(stack, 'NodeGroup', {
@@ -1526,6 +1772,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     const userData = ec2.UserData.forLinux();
     userData.addCommands(
@@ -1571,6 +1818,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     const userData = ec2.UserData.forLinux();
     userData.addCommands(
@@ -1604,6 +1852,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     new eks.Nodegroup(stack, 'Nodegroup', {
       cluster,
@@ -1628,6 +1877,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     new eks.Nodegroup(stack, 'Nodegroup', {
       cluster,
@@ -1654,6 +1904,7 @@ describe('node group', () => {
     const cluster = new eks.Cluster(stackWithFlag, 'Cluster', {
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stackWithFlag, 'KubectlLayer'),
     });
     const ng = new eks.Nodegroup(stackWithFlag, 'Nodegroup', {
       cluster,
@@ -1670,6 +1921,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     // THEN
     expect(() => cluster.addNodegroupCapacity('ng', { maxUnavailable: 3, maxUnavailablePercentage: 2 })).toThrow(/maxUnavailable and maxUnavailablePercentage are not allowed to be defined together/);
@@ -1682,6 +1934,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     // THEN
     expect(() => cluster.addNodegroupCapacity('ng', { maxUnavailable: 5, maxSize: 4 })).toThrow(/maxUnavailable must be lower than maxSize/);
@@ -1694,6 +1947,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     // THEN
     expect(() => cluster.addNodegroupCapacity('ng', { maxUnavailable: -3, maxSize: 10 })).toThrow(/maxUnavailable must be between 1 and 100/);
@@ -1706,6 +1960,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     // THEN
     expect(() => cluster.addNodegroupCapacity('ng', { maxUnavailable: 101, maxSize: 200 })).toThrow(/maxUnavailable must be between 1 and 100/);
@@ -1718,6 +1973,7 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     // THEN
     expect(() => cluster.addNodegroupCapacity('ng', { maxUnavailablePercentage: -3, maxSize: 10 })).toThrow(/maxUnavailablePercentage must be between 1 and 100/);
@@ -1730,8 +1986,89 @@ describe('node group', () => {
       vpc,
       defaultCapacity: 0,
       version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
     });
     // THEN
     expect(() => cluster.addNodegroupCapacity('ng', { maxUnavailablePercentage: 101 })).toThrow(/maxUnavailablePercentage must be between 1 and 100/);
+  });
+
+  test('supports custom removal policy', () => {
+    // GIVEN
+    const { stack, vpc } = testFixture();
+    const cluster = new eks.Cluster(stack, 'Cluster', {
+      vpc,
+      defaultCapacity: 0,
+      version: CLUSTER_VERSION,
+      kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
+    });
+
+    // WHEN
+    new eks.Nodegroup(stack, 'Nodegroup', {
+      cluster,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResource('AWS::EKS::Nodegroup', {
+      DeletionPolicy: 'Retain',
+    });
+  });
+});
+
+describe('isGpuInstanceType', () => {
+  it('should return true for known GPU instance types', () => {
+    const gpuInstanceTypes = [
+      ec2.InstanceType.of(ec2.InstanceClass.P2, ec2.InstanceSize.XLARGE),
+      ec2.InstanceType.of(ec2.InstanceClass.G3, ec2.InstanceSize.XLARGE),
+      ec2.InstanceType.of(ec2.InstanceClass.P4D, ec2.InstanceSize.LARGE),
+      ec2.InstanceType.of(ec2.InstanceClass.G6, ec2.InstanceSize.MEDIUM),
+      ec2.InstanceType.of(ec2.InstanceClass.G6E, ec2.InstanceSize.XLARGE2),
+      ec2.InstanceType.of(ec2.InstanceClass.G7E, ec2.InstanceSize.XLARGE2),
+      ec2.InstanceType.of(ec2.InstanceClass.INF1, ec2.InstanceSize.XLARGE),
+      ec2.InstanceType.of(ec2.InstanceClass.INF2, ec2.InstanceSize.XLARGE),
+      ec2.InstanceType.of(ec2.InstanceClass.P3, ec2.InstanceSize.XLARGE),
+      ec2.InstanceType.of(ec2.InstanceClass.P3DN, ec2.InstanceSize.XLARGE),
+      ec2.InstanceType.of(ec2.InstanceClass.P4DE, ec2.InstanceSize.XLARGE),
+      ec2.InstanceType.of(ec2.InstanceClass.G4AD, ec2.InstanceSize.XLARGE),
+      ec2.InstanceType.of(ec2.InstanceClass.G4DN, ec2.InstanceSize.XLARGE),
+      ec2.InstanceType.of(ec2.InstanceClass.G3S, ec2.InstanceSize.XLARGE),
+      ec2.InstanceType.of(ec2.InstanceClass.G5, ec2.InstanceSize.XLARGE),
+      ec2.InstanceType.of(ec2.InstanceClass.G5G, ec2.InstanceSize.XLARGE),
+      ec2.InstanceType.of(ec2.InstanceClass.TRN1, ec2.InstanceSize.XLARGE2),
+      ec2.InstanceType.of(ec2.InstanceClass.TRN1N, ec2.InstanceSize.XLARGE32),
+      ec2.InstanceType.of(ec2.InstanceClass.TRN2, ec2.InstanceSize.XLARGE48),
+      ec2.InstanceType.of(ec2.InstanceClass.P5, ec2.InstanceSize.XLARGE48),
+      ec2.InstanceType.of(ec2.InstanceClass.P5E, ec2.InstanceSize.XLARGE48),
+      ec2.InstanceType.of(ec2.InstanceClass.P5EN, ec2.InstanceSize.XLARGE48),
+    ];
+    gpuInstanceTypes.forEach(instanceType => {
+      expect(isGpuInstanceType(instanceType)).toBe(true);
+    });
+  });
+  it('should return false for non-GPU instance types', () => {
+    const nonGpuInstanceTypes = [
+      ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.MICRO),
+      ec2.InstanceType.of(ec2.InstanceClass.M5, ec2.InstanceSize.LARGE),
+      ec2.InstanceType.of(ec2.InstanceClass.C5, ec2.InstanceSize.XLARGE),
+    ];
+    nonGpuInstanceTypes.forEach(instanceType => {
+      expect(isGpuInstanceType(instanceType)).toBe(false);
+    });
+  });
+  it('should return true for different sizes of GPU instance types', () => {
+    const gpuInstanceTypes = [
+      ec2.InstanceType.of(ec2.InstanceClass.G6, ec2.InstanceSize.XLARGE),
+      ec2.InstanceType.of(ec2.InstanceClass.G6, ec2.InstanceSize.XLARGE16),
+      ec2.InstanceType.of(ec2.InstanceClass.G6, ec2.InstanceSize.XLARGE48),
+      ec2.InstanceType.of(ec2.InstanceClass.G6, ec2.InstanceSize.LARGE),
+      ec2.InstanceType.of(ec2.InstanceClass.G6, ec2.InstanceSize.MEDIUM),
+      ec2.InstanceType.of(ec2.InstanceClass.G6, ec2.InstanceSize.SMALL),
+      ec2.InstanceType.of(ec2.InstanceClass.G6, ec2.InstanceSize.NANO),
+      ec2.InstanceType.of(ec2.InstanceClass.G6, ec2.InstanceSize.MICRO),
+      ec2.InstanceType.of(ec2.InstanceClass.G6, ec2.InstanceSize.METAL),
+    ];
+    gpuInstanceTypes.forEach(instanceType => {
+      expect(isGpuInstanceType(instanceType)).toBe(true);
+    });
   });
 });

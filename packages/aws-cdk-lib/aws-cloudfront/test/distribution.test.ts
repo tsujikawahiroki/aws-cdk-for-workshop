@@ -1,14 +1,18 @@
-import { defaultOrigin, defaultOriginGroup } from './test-origin';
-import { Match, Template } from '../../assertions';
+import { defaultOrigin, defaultOriginGroup, defaultOriginWithOriginAccessControl } from './test-origin';
+import { Annotations, Match, Template } from '../../assertions';
 import * as acm from '../../aws-certificatemanager';
 import * as cloudwatch from '../../aws-cloudwatch';
 import * as iam from '../../aws-iam';
 import * as kinesis from '../../aws-kinesis';
 import * as lambda from '../../aws-lambda';
 import * as s3 from '../../aws-s3';
-import { App, Duration, Stack } from '../../core';
-import {
+import { App, Aws, Duration, Stack, Token } from '../../core';
+import type {
   CfnDistribution,
+  IOrigin,
+} from '../lib';
+import {
+  AllowedMethods,
   Distribution,
   Endpoint,
   Function,
@@ -16,13 +20,13 @@ import {
   FunctionEventType,
   GeoRestriction,
   HttpVersion,
-  IOrigin,
   LambdaEdgeEventType,
   PriceClass,
   RealtimeLogConfig,
   SecurityPolicyProtocol,
   SSLMethod,
 } from '../lib';
+import { DistributionGrants } from '../lib/cloudfront-grants.generated';
 
 let app: App;
 let stack: Stack;
@@ -36,7 +40,7 @@ beforeEach(() => {
 
 test('minimal example renders correctly', () => {
   const origin = defaultOrigin();
-  new Distribution(stack, 'MyDist', { defaultBehavior: { origin } });
+  const dist = new Distribution(stack, 'MyDist', { defaultBehavior: { origin } });
 
   Template.fromStack(stack).hasResourceProperties('AWS::CloudFront::Distribution', {
     DistributionConfig: {
@@ -58,6 +62,31 @@ test('minimal example renders correctly', () => {
       }],
     },
   });
+
+  expect(dist.distributionArn).toEqual(`arn:${Aws.PARTITION}:cloudfront::1234:distribution/${dist.distributionId}`);
+});
+
+test('distribution without additional behaviors or origin groups omits those properties', () => {
+  const origin = defaultOrigin();
+  new Distribution(stack, 'MyDist', { defaultBehavior: { origin } });
+
+  Template.fromStack(stack).hasResourceProperties('AWS::CloudFront::Distribution', {
+    DistributionConfig: {
+      CacheBehaviors: Match.absent(),
+      OriginGroups: Match.absent(),
+    },
+  });
+});
+
+test('existing distributions can be imported', () => {
+  const dist = Distribution.fromDistributionAttributes(stack, 'ImportedDist', {
+    domainName: 'd111111abcdef8.cloudfront.net',
+    distributionId: '012345ABCDEF',
+  });
+
+  expect(dist.distributionDomainName).toEqual('d111111abcdef8.cloudfront.net');
+  expect(dist.distributionId).toEqual('012345ABCDEF');
+  expect(dist.distributionArn).toEqual(`arn:${Aws.PARTITION}:cloudfront::1234:distribution/012345ABCDEF`);
 });
 
 test('exhaustive example of props renders correctly and SSL method sni-only', () => {
@@ -457,23 +486,23 @@ describe('certificates', () => {
     }).toThrow(/Distribution certificates must be in the us-east-1 region and the certificate you provided is in eu-west-1./);
   });
 
-  test('adding a certificate without a domain name throws', () => {
+  test('adding a certificate without a domain name', () => {
     const certificate = acm.Certificate.fromCertificateArn(stack, 'Cert', 'arn:aws:acm:us-east-1:123456789012:certificate/12345678-1234-1234-1234-123456789012');
 
-    expect(() => {
-      new Distribution(stack, 'Dist1', {
-        defaultBehavior: { origin: defaultOrigin() },
-        certificate,
-      });
-    }).toThrow(/Must specify at least one domain name/);
+    new Distribution(stack, 'Dist1', {
+      defaultBehavior: { origin: defaultOrigin() },
+      certificate,
+    });
 
-    expect(() => {
-      new Distribution(stack, 'Dist2', {
-        defaultBehavior: { origin: defaultOrigin() },
-        domainNames: [],
-        certificate,
-      });
-    }).toThrow(/Must specify at least one domain name/);
+    Template.fromStack(stack).hasResourceProperties('AWS::CloudFront::Distribution', {
+      DistributionConfig: {
+        Aliases: Match.absent(),
+        ViewerCertificate: {
+          AcmCertificateArn: 'arn:aws:acm:us-east-1:123456789012:certificate/12345678-1234-1234-1234-123456789012',
+        },
+      },
+    });
+    Annotations.fromStack(stack).hasWarning('/Stack/Dist1', 'No domain names are specified. You will need to specify it after running associate-alias CLI command manually. See the "Moving an alternate domain name to a different distribution" section of module\'s README for more info. [ack: @aws-cdk/aws-cloudfront:emptyDomainNames]');
   });
 
   test('use the TLSv1.2_2021 security policy by default', () => {
@@ -935,7 +964,7 @@ test('price class is included if provided', () => {
 
 test('escape hatches are supported', () => {
   const dist = new Distribution(stack, 'Dist', {
-    defaultBehavior: { origin: defaultOrigin },
+    defaultBehavior: { origin: defaultOrigin() },
   });
   const cfnDist = dist.node.defaultChild as CfnDistribution;
   cfnDist.addPropertyOverride('DistributionConfig.DefaultCacheBehavior.ForwardedValues.Headers', ['*']);
@@ -1099,11 +1128,118 @@ test('grants custom actions', () => {
   const role = new iam.Role(stack, 'Role', {
     assumedBy: new iam.AccountRootPrincipal(),
   });
-  distribution.grant(role, 'cloudfront:ListInvalidations', 'cloudfront:GetInvalidation');
+  distribution.grant(
+    role,
+    'cloudfront:ListInvalidations',
+    'cloudfront:GetInvalidation',
+    'cloudfront:CreateFieldLevelEncryptionConfig',
+    'cloudfront:CreateFieldLevelEncryptionProfile',
+    'cloudfront:CreateKeyGroup',
+    'cloudfront:CreateMonitoringSubscription',
+    'cloudfront:CreateOriginAccessControl',
+    'cloudfront:CreatePublicKey',
+    'cloudfront:CreateSavingsPlan',
+    'cloudfront:DeleteKeyGroup',
+    'cloudfront:DeleteMonitoringSubscription',
+    'cloudfront:DeletePublicKey',
+    'cloudfront:GetKeyGroup',
+    'cloudfront:GetKeyGroupConfig',
+    'cloudfront:GetMonitoringSubscription',
+    'cloudfront:GetPublicKey',
+    'cloudfront:GetPublicKeyConfig',
+    'cloudfront:GetSavingsPlan',
+    'cloudfront:ListAnycastIpLists',
+    'cloudfront:ListCachePolicies',
+    'cloudfront:ListCloudFrontOriginAccessIdentities',
+    'cloudfront:ListContinuousDeploymentPolicies',
+    'cloudfront:ListDistributions',
+    'cloudfront:ListDistributionsByAnycastIpListId',
+    'cloudfront:ListDistributionsByCachePolicyId',
+    'cloudfront:ListDistributionsByKeyGroup',
+    'cloudfront:ListDistributionsByLambdaFunction',
+    'cloudfront:ListDistributionsByOriginRequestPolicyId',
+    'cloudfront:ListDistributionsByRealtimeLogConfig',
+    'cloudfront:ListDistributionsByResponseHeadersPolicyId',
+    'cloudfront:ListDistributionsByVpcOriginId',
+    'cloudfront:ListDistributionsByWebACLId',
+    'cloudfront:ListFieldLevelEncryptionConfigs',
+    'cloudfront:ListFieldLevelEncryptionProfiles',
+    'cloudfront:ListFunctions',
+    'cloudfront:ListKeyGroups',
+    'cloudfront:ListKeyValueStores',
+    'cloudfront:ListOriginAccessControls',
+    'cloudfront:ListOriginRequestPolicies',
+    'cloudfront:ListPublicKeys',
+    'cloudfront:ListRateCards',
+    'cloudfront:ListRealtimeLogConfigs',
+    'cloudfront:ListResponseHeadersPolicies',
+    'cloudfront:ListSavingsPlans',
+    'cloudfront:ListStreamingDistributions',
+    'cloudfront:ListUsages',
+    'cloudfront:ListVpcOrigins',
+    'cloudfront:UpdateFieldLevelEncryptionConfig',
+    'cloudfront:UpdateKeyGroup',
+    'cloudfront:UpdatePublicKey',
+    'cloudfront:UpdateSavingsPlan',
+  );
 
   Template.fromStack(stack).hasResourceProperties('AWS::IAM::Policy', {
     PolicyDocument: {
       Statement: [
+        {
+          Action: [
+            'cloudfront:CreateFieldLevelEncryptionConfig',
+            'cloudfront:CreateFieldLevelEncryptionProfile',
+            'cloudfront:CreateKeyGroup',
+            'cloudfront:CreateMonitoringSubscription',
+            'cloudfront:CreateOriginAccessControl',
+            'cloudfront:CreatePublicKey',
+            'cloudfront:CreateSavingsPlan',
+            'cloudfront:DeleteKeyGroup',
+            'cloudfront:DeleteMonitoringSubscription',
+            'cloudfront:DeletePublicKey',
+            'cloudfront:GetKeyGroup',
+            'cloudfront:GetKeyGroupConfig',
+            'cloudfront:GetMonitoringSubscription',
+            'cloudfront:GetPublicKey',
+            'cloudfront:GetPublicKeyConfig',
+            'cloudfront:GetSavingsPlan',
+            'cloudfront:ListAnycastIpLists',
+            'cloudfront:ListCachePolicies',
+            'cloudfront:ListCloudFrontOriginAccessIdentities',
+            'cloudfront:ListContinuousDeploymentPolicies',
+            'cloudfront:ListDistributions',
+            'cloudfront:ListDistributionsByAnycastIpListId',
+            'cloudfront:ListDistributionsByCachePolicyId',
+            'cloudfront:ListDistributionsByKeyGroup',
+            'cloudfront:ListDistributionsByLambdaFunction',
+            'cloudfront:ListDistributionsByOriginRequestPolicyId',
+            'cloudfront:ListDistributionsByRealtimeLogConfig',
+            'cloudfront:ListDistributionsByResponseHeadersPolicyId',
+            'cloudfront:ListDistributionsByVpcOriginId',
+            'cloudfront:ListDistributionsByWebACLId',
+            'cloudfront:ListFieldLevelEncryptionConfigs',
+            'cloudfront:ListFieldLevelEncryptionProfiles',
+            'cloudfront:ListFunctions',
+            'cloudfront:ListKeyGroups',
+            'cloudfront:ListKeyValueStores',
+            'cloudfront:ListOriginAccessControls',
+            'cloudfront:ListOriginRequestPolicies',
+            'cloudfront:ListPublicKeys',
+            'cloudfront:ListRateCards',
+            'cloudfront:ListRealtimeLogConfigs',
+            'cloudfront:ListResponseHeadersPolicies',
+            'cloudfront:ListSavingsPlans',
+            'cloudfront:ListStreamingDistributions',
+            'cloudfront:ListUsages',
+            'cloudfront:ListVpcOrigins',
+            'cloudfront:UpdateFieldLevelEncryptionConfig',
+            'cloudfront:UpdateKeyGroup',
+            'cloudfront:UpdatePublicKey',
+            'cloudfront:UpdateSavingsPlan',
+          ],
+          Resource: '*',
+        },
         {
           Action: [
             'cloudfront:ListInvalidations',
@@ -1131,6 +1267,38 @@ test('grants createInvalidation', () => {
     assumedBy: new iam.AccountRootPrincipal(),
   });
   distribution.grantCreateInvalidation(role);
+
+  Template.fromStack(stack).hasResourceProperties('AWS::IAM::Policy', {
+    PolicyDocument: {
+      Statement: [
+        {
+          Action: 'cloudfront:CreateInvalidation',
+          Resource: {
+            'Fn::Join': [
+              '', [
+                'arn:', { Ref: 'AWS::Partition' }, ':cloudfront::1234:distribution/',
+                { Ref: 'Distribution830FAC52' },
+              ],
+            ],
+          },
+        },
+      ],
+    },
+  });
+});
+
+test('grants createInvalidation to L1', () => {
+  const distribution = new Distribution(stack, 'Distribution', {
+    defaultBehavior: { origin: defaultOrigin() },
+  });
+
+  const role = new iam.Role(stack, 'Role', {
+    assumedBy: new iam.AccountRootPrincipal(),
+  });
+
+  DistributionGrants.
+    fromDistribution(distribution.node.defaultChild as CfnDistribution)
+    .createInvalidation(role);
 
   Template.fromStack(stack).hasResourceProperties('AWS::IAM::Policy', {
     PolicyDocument: {
@@ -1182,7 +1350,7 @@ test('render distribution behavior with realtime log config', () => {
       DistributionConfig: {
         DefaultCacheBehavior: {
           RealtimeLogConfigArn: {
-            'Fn::GetAtt': ['RealtimeConfigB6004E8E', 'Arn'],
+            Ref: 'RealtimeConfigB6004E8E',
           },
         },
       },
@@ -1228,14 +1396,14 @@ test('render distribution behavior with realtime log config - multiple behaviors
       DistributionConfig: {
         DefaultCacheBehavior: {
           RealtimeLogConfigArn: {
-            'Fn::GetAtt': ['RealtimeConfigB6004E8E', 'Arn'],
+            Ref: 'RealtimeConfigB6004E8E',
           },
           TargetOriginId: 'StackMyDistOrigin1D6D5E535',
         },
         CacheBehaviors: [{
           PathPattern: '/api/*',
           RealtimeLogConfigArn: {
-            'Fn::GetAtt': ['RealtimeConfigB6004E8E', 'Arn'],
+            Ref: 'RealtimeConfigB6004E8E',
           },
           TargetOriginId: 'StackMyDistOrigin20B96F3AD',
         }],
@@ -1282,6 +1450,36 @@ test('with publish additional metrics', () => {
   });
 });
 
+test('with origin access control id', () => {
+  const origin = defaultOriginWithOriginAccessControl();
+  new Distribution(stack, 'MyDist', {
+    defaultBehavior: { origin },
+    publishAdditionalMetrics: true,
+  });
+
+  Template.fromStack(stack).hasResourceProperties('AWS::CloudFront::Distribution', {
+    DistributionConfig: {
+      DefaultCacheBehavior: {
+        CachePolicyId: '658327ea-f89d-4fab-a63d-7e88639e58f6',
+        Compress: true,
+        TargetOriginId: 'StackMyDistOrigin1D6D5E535',
+        ViewerProtocolPolicy: 'allow-all',
+      },
+      Enabled: true,
+      HttpVersion: 'http2',
+      IPV6Enabled: true,
+      Origins: [{
+        DomainName: 'www.example.com',
+        Id: 'StackMyDistOrigin1D6D5E535',
+        CustomOriginConfig: {
+          OriginProtocolPolicy: 'https-only',
+        },
+        OriginAccessControlId: 'test-origin-access-control-id',
+      }],
+    },
+  });
+});
+
 describe('Distribution metrics tests', () => {
   const additionalMetrics = [
     { name: 'OriginLatency', method: 'metricOriginLatency', statistic: 'Average', additionalMetricsRequired: true, errorMetricName: 'Origin latency' },
@@ -1293,7 +1491,7 @@ describe('Distribution metrics tests', () => {
       additionalMetricsRequired: true,
       errorMetricName: `${errorCode} error rate`,
     })),
-  ];
+  ] as const;
 
   const defaultMetrics = [
     { name: 'Requests', method: 'metricRequests', statistic: 'Sum', additionalMetricsRequired: false, errorMetricName: '' },
@@ -1302,16 +1500,16 @@ describe('Distribution metrics tests', () => {
     { name: 'TotalErrorRate', method: 'metricTotalErrorRate', statistic: 'Average', additionalMetricsRequired: false, errorMetricName: '' },
     { name: '4xxErrorRate', method: 'metric4xxErrorRate', statistic: 'Average', additionalMetricsRequired: false, errorMetricName: '' },
     { name: '5xxErrorRate', method: 'metric5xxErrorRate', statistic: 'Average', additionalMetricsRequired: false, errorMetricName: '' },
-  ];
+  ] as const;
 
-  test.each(additionalMetrics.concat(defaultMetrics))('get %s metric', (metric) => {
+  test.each([... additionalMetrics, ...defaultMetrics])('get %s metric', (metric) => {
     const origin = defaultOrigin();
     const dist = new Distribution(stack, 'MyDist', {
       defaultBehavior: { origin },
       publishAdditionalMetrics: metric.additionalMetricsRequired,
     });
 
-    const metricObj = dist[metric.method]();
+    const metricObj = (dist as any)[metric.method]();
 
     expect(metricObj).toEqual(new cloudwatch.Metric({
       namespace: 'AWS/CloudFront',
@@ -1330,7 +1528,189 @@ describe('Distribution metrics tests', () => {
     });
 
     expect(() => {
-      dist[metric.method]();
+      (dist as any)[metric.method]();
     }).toThrow(new RegExp(`${metric.errorMetricName} metric is only available if 'publishAdditionalMetrics' is set 'true'`));
+  });
+});
+
+describe('attachWebAclId', () => {
+  test('can attach WebAcl to the distribution by the method', () => {
+    const origin = defaultOrigin();
+
+    const distribution = new Distribution(stack, 'MyDist', {
+      defaultBehavior: { origin },
+    });
+
+    distribution.attachWebAclId('473e64fd-f30b-4765-81a0-62ad96dd167a');
+
+    Template.fromStack(stack).hasResourceProperties('AWS::CloudFront::Distribution', {
+      DistributionConfig: {
+        WebACLId: '473e64fd-f30b-4765-81a0-62ad96dd167a',
+      },
+    });
+  });
+
+  test('throws if a WebAcl is already attached to the distribution', () => {
+    const origin = defaultOrigin();
+
+    const distribution = new Distribution(stack, 'MyDist', {
+      defaultBehavior: { origin },
+      webAclId: '473e64fd-f30b-4765-81a0-62ad96dd167a',
+    });
+
+    expect(() => {
+      distribution.attachWebAclId('473e64fd-f30b-4765-81a0-62ad96dd167b');
+    }).toThrow(/A WebACL has already been attached to this distribution/);
+  });
+
+  describe('throws if the WebAcl is not in us-east-1 region', () => {
+    test('when try to attach WebACL using `attachWebAclId` method', () => {
+      const origin = defaultOrigin();
+
+      const distribution = new Distribution(stack, 'MyDist', {
+        defaultBehavior: { origin },
+      });
+
+      expect(() => {
+        distribution.attachWebAclId('arn:aws:wafv2:ap-northeast-1:123456789012:global/web-acl/MyWebAcl/473e64fd-f30b-4765-81a0-62ad96dd167a');
+      }).toThrow(/WebACL for CloudFront distributions must be created in the us-east-1 region; received ap-northeast-1/);
+    });
+
+    test('when try to attach WebACL by specifying value for props', () => {
+      const origin = defaultOrigin();
+
+      expect(() => {
+        new Distribution(stack, 'MyDist', {
+          defaultBehavior: { origin },
+          webAclId: 'arn:aws:wafv2:ap-northeast-1:123456789012:global/web-acl/MyWebAcl/473e64fd-f30b-4765-81a0-62ad96dd167a',
+        });
+      }).toThrow(/WebACL for CloudFront distributions must be created in the us-east-1 region; received ap-northeast-1/);
+    });
+
+    test('does not validate unresolved token webAclId', () => {
+      const origin = defaultOrigin();
+
+      new Distribution(stack, 'MyDist', {
+        defaultBehavior: { origin },
+        webAclId: Token.asString({ Ref: 'SomeWebAcl' }), // unresolved token
+      });
+
+      // Should synthesize without error
+      Template.fromStack(stack);
+    });
+  });
+});
+
+describe('gRPC', () => {
+  test.each([
+    true,
+    false,
+    undefined,
+  ])('set gRPC to %s in defaultBehavior', (enableGrpc) => {
+    const origin = defaultOrigin();
+    new Distribution(stack, 'MyDist', {
+      httpVersion: HttpVersion.HTTP2,
+      defaultBehavior: {
+        origin,
+        allowedMethods: AllowedMethods.ALLOW_ALL,
+        enableGrpc,
+      },
+    });
+
+    const grpcConfig = enableGrpc !== undefined ? {
+      Enabled: enableGrpc,
+    } : Match.absent();
+
+    Template.fromStack(stack).hasResourceProperties('AWS::CloudFront::Distribution', {
+      DistributionConfig: {
+        DefaultCacheBehavior: {
+          GrpcConfig: grpcConfig,
+        },
+      },
+    });
+  });
+
+  test.each([
+    true,
+    false,
+    undefined,
+  ])('set gRPC to %s in additionalBehaviors', (enableGrpc) => {
+    const origin = defaultOrigin();
+    new Distribution(stack, 'MyDist', {
+      httpVersion: HttpVersion.HTTP2,
+      defaultBehavior: {
+        origin,
+      },
+      additionalBehaviors: {
+        '/second': {
+          origin,
+          allowedMethods: AllowedMethods.ALLOW_ALL,
+          enableGrpc,
+        },
+      },
+    });
+
+    const grpcConfig = enableGrpc !== undefined ? {
+      Enabled: enableGrpc,
+    } : Match.absent();
+
+    Template.fromStack(stack).hasResourceProperties('AWS::CloudFront::Distribution', {
+      DistributionConfig: {
+        CacheBehaviors: [{
+          PathPattern: '/second',
+          GrpcConfig: grpcConfig,
+        }],
+      },
+    });
+  });
+
+  test.each([
+    HttpVersion.HTTP1_1,
+    HttpVersion.HTTP3,
+  ])('throws if httpVersion is %s and enableGrpc in defaultBehavior is true', (httpVersion) => {
+    const origin = defaultOrigin();
+    const msg = `'httpVersion' must be http2 or http2and3 if 'enableGrpc' in 'defaultBehavior' or 'additionalBehaviors' is true, got ${httpVersion}`;
+
+    expect(() => {
+      new Distribution(stack, 'MyDist', {
+        httpVersion,
+        defaultBehavior: {
+          origin,
+          enableGrpc: true,
+          allowedMethods: AllowedMethods.ALLOW_ALL,
+        },
+      });
+    }).toThrow(msg);
+  });
+
+  test.each([
+    HttpVersion.HTTP1_1,
+    HttpVersion.HTTP3,
+  ])('throws if httpVersion is %s and enableGrpc in additionalBehaviors is true', (httpVersion) => {
+    const origin = defaultOrigin();
+    const msg = `'httpVersion' must be http2 or http2and3 if 'enableGrpc' in 'defaultBehavior' or 'additionalBehaviors' is true, got ${httpVersion}`;
+
+    expect(() => {
+      new Distribution(stack, 'MyDist', {
+        httpVersion,
+        defaultBehavior: {
+          origin,
+          enableGrpc: false,
+          allowedMethods: AllowedMethods.ALLOW_ALL,
+        },
+        additionalBehaviors: {
+          '/second': {
+            origin,
+            enableGrpc: false,
+            allowedMethods: AllowedMethods.ALLOW_ALL,
+          },
+          '/third': {
+            origin,
+            enableGrpc: true,
+            allowedMethods: AllowedMethods.ALLOW_ALL,
+          },
+        },
+      });
+    }).toThrow(msg);
   });
 });

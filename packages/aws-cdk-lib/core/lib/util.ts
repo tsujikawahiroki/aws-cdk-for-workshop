@@ -1,6 +1,6 @@
-import { IConstruct } from 'constructs';
+import type { IConstruct } from 'constructs';
 import { Intrinsic } from './private/intrinsic';
-import { IPostProcessor, IResolveContext } from './resolvable';
+import type { IPostProcessor, IResolveContext } from './resolvable';
 import { Stack } from './stack';
 
 /**
@@ -121,6 +121,6 @@ export function findLastCommonElement<T>(path1: T[], path2: T[]): T | undefined 
   return path1[i - 1];
 }
 
-export function undefinedIfAllValuesAreEmpty(object: object): object | undefined {
+export function undefinedIfAllValuesAreEmpty<A extends object>(object: A): A | undefined {
   return Object.values(object).some(v => v !== undefined) ? object : undefined;
 }

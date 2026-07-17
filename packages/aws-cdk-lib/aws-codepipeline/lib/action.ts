@@ -1,10 +1,15 @@
-import { Construct } from 'constructs';
-import { Artifact } from './artifact';
-import * as notifications from '../../aws-codestarnotifications';
+import type { Construct } from 'constructs';
+import type { Artifact } from './artifact';
+import type * as notifications from '../../aws-codestarnotifications';
 import * as events from '../../aws-events';
-import * as iam from '../../aws-iam';
-import * as s3 from '../../aws-s3';
-import { IResource, Lazy } from '../../core';
+import type * as iam from '../../aws-iam';
+import type * as s3 from '../../aws-s3';
+import type { Duration, IResource } from '../../core';
+import { Token, UnscopedValidationError } from '../../core';
+import type { IBox } from '../../core/lib/helpers-internal';
+import { Box } from '../../core/lib/helpers-internal';
+import { lit } from '../../core/lib/private/literal-string';
+import type { IPipelineRef } from '../../interfaces/generated/aws-codepipeline-interfaces.generated';
 
 export enum ActionCategory {
   SOURCE = 'Source',
@@ -13,6 +18,7 @@ export enum ActionCategory {
   APPROVAL = 'Approval',
   DEPLOY = 'Deploy',
   INVOKE = 'Invoke',
+  COMPUTE = 'Compute',
 }
 
 /**
@@ -104,6 +110,33 @@ export interface ActionProperties {
    * @default - a name will be generated, based on the stage and action names
    */
   readonly variablesNamespace?: string;
+
+  /**
+   * Shell commands for the Commands action to run.
+   *
+   * @default - no commands
+   */
+  readonly commands?: string[];
+
+  /**
+   * The names of the variables in your environment that you want to export.
+   *
+   * @default - no output variables
+   */
+  readonly outputVariables?: string[];
+
+  /**
+   * A timeout duration that can be applied against the ActionType’s default timeout value
+   * specified in Quotas for AWS CodePipeline.
+   *
+   * This attribute is available only to the `ManualApprovalAction`.
+   *
+   * It is configurable up to 86400 minutes (60 days) with a minimum value of 5 minutes.
+   *
+   * @default - default timeout value defined by each ActionType
+   * @see https://docs.aws.amazon.com/codepipeline/latest/userguide/limits.html
+   */
+  readonly timeout?: Duration;
 }
 
 export interface ActionBindOptions {
@@ -167,7 +200,7 @@ export interface IAction {
  * It extends `events.IRuleTarget`,
  * so this interface can be used as a Target for CloudWatch Events.
  */
-export interface IPipeline extends IResource, notifications.INotificationRuleSource {
+export interface IPipeline extends IResource, IPipelineRef, notifications.INotificationRuleSource {
   /**
    * The name of the Pipeline.
    *
@@ -360,38 +393,38 @@ export abstract class Action implements IAction {
   private __stage?: IStage;
   private __scope?: Construct;
   private readonly _namespaceToken: string;
-  private _customerProvidedNamespace?: string;
-  private _actualNamespace?: string;
-
-  private _variableReferenced = false;
+  private readonly _customerProvidedNamespace: IBox<string | undefined> = Box.fromValue<string | undefined>(undefined);
+  private readonly _actualNamespace: IBox<string | undefined> = Box.fromValue<string | undefined>(undefined);
+  private readonly _variableReferenced: IBox<boolean> = Box.fromValue(false);
 
   protected constructor() {
-    this._namespaceToken = Lazy.string({
-      produce: () => {
-        // make sure the action was bound (= added to a pipeline)
-        if (this._actualNamespace === undefined) {
-          throw new Error(`Cannot reference variables of action '${this.actionProperties.actionName}', ` +
-            'as that action was never added to a pipeline');
+    // eslint-disable-next-line @cdklabs/no-unconditional-token-allocation
+    this._namespaceToken = Token.asString(
+      Box.combine({
+        actual: this._actualNamespace,
+        customer: this._customerProvidedNamespace,
+        referenced: this._variableReferenced,
+      }, ({ actual, customer, referenced }) => {
+        if (actual === undefined) {
+          throw new UnscopedValidationError(lit`CannotReferenceVariablesAction`, `Cannot reference variables of action '${this.actionProperties.actionName}', as that action was never added to a pipeline`);
         } else {
-          return this._customerProvidedNamespace !== undefined
-            // if a customer passed a namespace explicitly, always use that
-            ? this._customerProvidedNamespace
-            // otherwise, only return a namespace if any variable was referenced
-            : (this._variableReferenced ? this._actualNamespace : undefined);
+          return customer !== undefined
+            ? customer
+            : (referenced ? actual : undefined);
         }
-      },
-    });
+      }),
+    );
   }
 
   public get actionProperties(): ActionProperties {
     if (this.__actionProperties === undefined) {
       const actionProperties = this.providedActionProperties;
-      this._customerProvidedNamespace = actionProperties.variablesNamespace;
+      this._customerProvidedNamespace.set(actionProperties.variablesNamespace);
       this.__actionProperties = {
         ...actionProperties,
-        variablesNamespace: this._customerProvidedNamespace === undefined
+        variablesNamespace: this._customerProvidedNamespace.get() === undefined
           ? this._namespaceToken
-          : this._customerProvidedNamespace,
+          : this._customerProvidedNamespace.get(),
       };
     }
     return this.__actionProperties;
@@ -402,10 +435,9 @@ export abstract class Action implements IAction {
     this.__stage = stage;
     this.__scope = scope;
 
-    this._actualNamespace = this._customerProvidedNamespace === undefined
-      // default a namespace name, based on the stage and action names
+    this._actualNamespace.set(this._customerProvidedNamespace.get() === undefined
       ? `${stage.stageName}_${this.actionProperties.actionName}_NS`
-      : this._customerProvidedNamespace;
+      : this._customerProvidedNamespace.get());
 
     return this.bound(scope, stage, options);
   }
@@ -426,7 +458,7 @@ export abstract class Action implements IAction {
   }
 
   protected variableExpression(variableName: string): string {
-    this._variableReferenced = true;
+    this._variableReferenced.set(true);
     return `#{${this._namespaceToken}.${variableName}}`;
   }
 
@@ -439,7 +471,7 @@ export abstract class Action implements IAction {
     if (this.__pipeline) {
       return this.__pipeline;
     } else {
-      throw new Error('Action must be added to a stage that is part of a pipeline before using onStateChange');
+      throw new UnscopedValidationError(lit`MustBeActionAddedStage`, 'Action must be added to a stage that is part of a pipeline before using onStateChange');
     }
   }
 
@@ -447,7 +479,7 @@ export abstract class Action implements IAction {
     if (this.__stage) {
       return this.__stage;
     } else {
-      throw new Error('Action must be added to a stage that is part of a pipeline before using onStateChange');
+      throw new UnscopedValidationError(lit`MustBeActionAddedStage`, 'Action must be added to a stage that is part of a pipeline before using onStateChange');
     }
   }
 
@@ -460,7 +492,7 @@ export abstract class Action implements IAction {
     if (this.__scope) {
       return this.__scope;
     } else {
-      throw new Error('Action must be added to a stage that is part of a pipeline first');
+      throw new UnscopedValidationError(lit`MustBeActionAddedStage`, 'Action must be added to a stage that is part of a pipeline first');
     }
   }
 }
@@ -506,23 +538,23 @@ export enum PipelineNotificationEvents {
   STAGE_EXECUTION_STARTED = 'codepipeline-pipeline-stage-execution-started',
 
   /**
-  * Trigger notification when pipeline stage execution succeeded
-  */
+   * Trigger notification when pipeline stage execution succeeded
+   */
   STAGE_EXECUTION_SUCCEEDED = 'codepipeline-pipeline-stage-execution-succeeded',
 
   /**
-  * Trigger notification when pipeline stage execution resumed
-  */
+   * Trigger notification when pipeline stage execution resumed
+   */
   STAGE_EXECUTION_RESUMED = 'codepipeline-pipeline-stage-execution-resumed',
 
   /**
-  * Trigger notification when pipeline stage execution canceled
-  */
+   * Trigger notification when pipeline stage execution canceled
+   */
   STAGE_EXECUTION_CANCELED = 'codepipeline-pipeline-stage-execution-canceled',
 
   /**
-  * Trigger notification when pipeline stage execution failed
-  */
+   * Trigger notification when pipeline stage execution failed
+   */
   STAGE_EXECUTION_FAILED = 'codepipeline-pipeline-stage-execution-failed',
 
   /**

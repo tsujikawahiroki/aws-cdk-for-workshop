@@ -1,21 +1,26 @@
 import { App, Stack, CfnOutput } from 'aws-cdk-lib';
 import { IntegTest } from '@aws-cdk/integ-tests-alpha';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import * as cxapi from 'aws-cdk-lib/cx-api';
 
-const app = new App();
+const app = new App({
+  postCliContext: {
+    [cxapi.IAM_OIDC_REJECT_UNAUTHORIZED_CONNECTIONS]: false,
+  },
+});
 const stack = new Stack(app, 'oidc-provider-integ-test');
 
 const noClients = new iam.OpenIdConnectProvider(stack, 'NoClientsNoThumbprint', {
-  url: 'https://oidc.eks.us-east-1.amazonaws.com/id/test2',
+  url: 'https://oidc.eks.us-east-1.amazonaws.com/id/test2noreject',
 });
 
 const clients = new iam.OpenIdConnectProvider(stack, 'Clients', {
-  url: 'https://oidc.eks.us-east-1.amazonaws.com/id/test3',
+  url: 'https://oidc.eks.us-east-1.amazonaws.com/id/test3noreject',
   clientIds: ['foo', 'bar'],
 });
 
 const thumbprints = new iam.OpenIdConnectProvider(stack, 'Thumbprints', {
-  url: 'https://oidc.eks.us-east-1.amazonaws.com/id/test4',
+  url: 'https://oidc.eks.us-east-1.amazonaws.com/id/test4noreject',
   thumbprints: [
     'aa00aa1122aa00aa1122aa00aa1122aa00aa1122',
     'aa00aa1122aa00aa1122aa00aa1122aa00aa1111',

@@ -1,5 +1,6 @@
 import { App, RemovalPolicy, Stack, Tags } from 'aws-cdk-lib';
-import { Attribute, AttributeType, BillingMode, ProjectionType, StreamViewType, Table, TableEncryption } from 'aws-cdk-lib/aws-dynamodb';
+import type { Attribute } from 'aws-cdk-lib/aws-dynamodb';
+import { AttributeType, BillingMode, ProjectionType, StreamViewType, Table, TableEncryption } from 'aws-cdk-lib/aws-dynamodb';
 
 // CDK parameters
 const STACK_NAME = 'aws-cdk-dynamodb';
@@ -45,10 +46,12 @@ new Table(stack, TABLE, {
   billingMode: BillingMode.PAY_PER_REQUEST,
   partitionKey: TABLE_PARTITION_KEY,
   removalPolicy: RemovalPolicy.DESTROY,
+  maxReadRequestUnits: 100,
+  maxWriteRequestUnits: 200,
 });
 
 const tableWithGlobalAndLocalSecondaryIndex = new Table(stack, TABLE_WITH_GLOBAL_AND_LOCAL_SECONDARY_INDEX, {
-  pointInTimeRecovery: true,
+  pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
   encryption: TableEncryption.AWS_MANAGED,
   stream: StreamViewType.KEYS_ONLY,
   billingMode: BillingMode.PAY_PER_REQUEST,
@@ -63,6 +66,8 @@ Tags.of(tableWithGlobalAndLocalSecondaryIndex).add('Environment', 'Production');
 tableWithGlobalAndLocalSecondaryIndex.addGlobalSecondaryIndex({
   indexName: GSI_TEST_CASE_1,
   partitionKey: GSI_PARTITION_KEY,
+  maxReadRequestUnits: 100,
+  maxWriteRequestUnits: 100,
 });
 tableWithGlobalAndLocalSecondaryIndex.addGlobalSecondaryIndex({
   indexName: GSI_TEST_CASE_2,

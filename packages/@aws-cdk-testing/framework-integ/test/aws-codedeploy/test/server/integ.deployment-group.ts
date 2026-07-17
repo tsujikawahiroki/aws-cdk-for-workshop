@@ -4,6 +4,7 @@ import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as lb from 'aws-cdk-lib/aws-elasticloadbalancing';
 import * as cdk from 'aws-cdk-lib';
 import * as codedeploy from 'aws-cdk-lib/aws-codedeploy';
+import { IntegTest } from '@aws-cdk/integ-tests-alpha';
 
 const app = new cdk.App();
 
@@ -25,7 +26,7 @@ elb.addListener({
 new codedeploy.ServerDeploymentGroup(stack, 'CodeDeployGroup', {
   deploymentConfig: codedeploy.ServerDeploymentConfig.ALL_AT_ONCE,
   autoScalingGroups: [asg],
-  loadBalancer: codedeploy.LoadBalancer.classic(elb),
+  loadBalancers: [codedeploy.LoadBalancer.classic(elb)],
   alarms: [
     new cloudwatch.Alarm(stack, 'Alarm1', {
       metric: new cloudwatch.Metric({
@@ -40,6 +41,9 @@ new codedeploy.ServerDeploymentGroup(stack, 'CodeDeployGroup', {
     failedDeployment: false,
     deploymentInAlarm: false,
   },
+  terminationHook: true,
 });
 
-app.synth();
+new IntegTest(app, 'integ-deployment-group', {
+  testCases: [stack],
+});

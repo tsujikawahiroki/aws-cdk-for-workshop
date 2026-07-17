@@ -1,10 +1,15 @@
+import { UnscopedValidationError, ValidationError } from 'aws-cdk-lib';
 import { CfnTable } from 'aws-cdk-lib/aws-glue';
-import * as iam from 'aws-cdk-lib/aws-iam';
+import type * as iam from 'aws-cdk-lib/aws-iam';
 import * as kms from 'aws-cdk-lib/aws-kms';
 import * as s3 from 'aws-cdk-lib/aws-s3';
-import { Construct } from 'constructs';
-import { Column } from './schema';
-import { PartitionIndex, TableBase, TableBaseProps } from './table-base';
+import { memoizedGetter, lit } from 'aws-cdk-lib/core/lib/helpers-internal';
+import { addConstructMetadata, MethodMetadata } from 'aws-cdk-lib/core/lib/metadata-resource';
+import { propertyInjectable } from 'aws-cdk-lib/core/lib/prop-injectable';
+import type { Construct } from 'constructs';
+import type { Column } from './schema';
+import type { PartitionIndex, TableBaseProps } from './table-base';
+import { TableBase } from './table-base';
 
 /**
  * Encryption options for a Table.
@@ -41,10 +46,10 @@ export enum TableEncryption {
 
 export interface S3TableProps extends TableBaseProps {
   /**
- * S3 bucket in which to store data.
- *
- * @default one is created for you
- */
+   * S3 bucket in which to store data.
+   *
+   * @default one is created for you
+   */
   readonly bucket?: s3.IBucket;
 
   /**
@@ -80,16 +85,12 @@ export interface S3TableProps extends TableBaseProps {
  * A Glue table that targets a S3 dataset.
  * @resource AWS::Glue::Table
  */
+@propertyInjectable
 export class S3Table extends TableBase {
-  /**
-   * Name of this table.
-   */
-  public readonly tableName: string;
+  /** Uniquely identifies this class. */
+  public static readonly PROPERTY_INJECTION_ID: string = '@aws-cdk.aws-glue-alpha.S3Table';
 
-  /**
-   * ARN of this table.
-   */
-  public readonly tableArn: string;
+  private resource: CfnTable;
 
   /**
    * S3 bucket in which the table's data resides.
@@ -120,13 +121,15 @@ export class S3Table extends TableBase {
 
   constructor(scope: Construct, id: string, props: S3TableProps) {
     super(scope, id, props);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
     this.s3Prefix = props.s3Prefix ?? '';
     const { bucket, encryption, encryptionKey } = createBucket(this, props);
     this.bucket = bucket;
     this.encryption = encryption;
     this.encryptionKey = encryptionKey;
 
-    this.tableResource = new CfnTable(this, 'Table', {
+    this.resource = new CfnTable(this, 'Table', {
       catalogId: props.database.catalogId,
 
       databaseName: props.database.databaseName,
@@ -155,7 +158,7 @@ export class S3Table extends TableBase {
           },
           parameters: props.storageParameters ? props.storageParameters.reduce((acc, param) => {
             if (param.key in acc) {
-              throw new Error(`Duplicate storage parameter key: ${param.key}`);
+              throw new ValidationError(lit`DuplicateStorageParameterKey`, `Duplicate storage parameter key: ${param.key}`, this);
             }
             const key = param.key;
             acc[key] = param.value;
@@ -167,13 +170,8 @@ export class S3Table extends TableBase {
       },
     });
 
-    this.tableName = this.getResourceNameAttribute(this.tableResource.ref);
-    this.tableArn = this.stack.formatArn({
-      service: 'glue',
-      resource: 'table',
-      resourceName: `${this.database.databaseName}/${this.tableName}`,
-    });
-    this.node.defaultChild = this.tableResource;
+    this.tableResource = this.resource;
+    this.node.defaultChild = this.resource;
 
     // Partition index creation relies on created table.
     if (props.partitionIndexes) {
@@ -183,10 +181,32 @@ export class S3Table extends TableBase {
   }
 
   /**
+   * Name of this table.
+   */
+  @memoizedGetter
+  public get tableName(): string {
+    return this.getResourceNameAttribute(this.resource.ref);
+  }
+
+  /**
+   * ARN of this table.
+   */
+  @memoizedGetter
+  public get tableArn(): string {
+    return this.stack.formatArn({
+      service: 'glue',
+      resource: 'table',
+      resourceName: `${this.database.databaseName}/${this.tableName}`,
+    });
+  }
+
+  /**
    * Grant read permissions to the table and the underlying data stored in S3 to an IAM principal.
+   * [disable-awslint:no-grants]
    *
    * @param grantee the principal
    */
+  @MethodMetadata()
   public grantRead(grantee: iam.IGrantable): iam.Grant {
     const ret = this.grant(grantee, readPermissions);
     if (this.encryptionKey && this.encryption === TableEncryption.CLIENT_SIDE_KMS) { this.encryptionKey.grantDecrypt(grantee); }
@@ -196,9 +216,11 @@ export class S3Table extends TableBase {
 
   /**
    * Grant write permissions to the table and the underlying data stored in S3 to an IAM principal.
+   * [disable-awslint:no-grants]
    *
    * @param grantee the principal
    */
+  @MethodMetadata()
   public grantWrite(grantee: iam.IGrantable): iam.Grant {
     const ret = this.grant(grantee, writePermissions);
     if (this.encryptionKey && this.encryption === TableEncryption.CLIENT_SIDE_KMS) { this.encryptionKey.grantEncrypt(grantee); }
@@ -208,9 +230,11 @@ export class S3Table extends TableBase {
 
   /**
    * Grant read and write permissions to the table and the underlying data stored in S3 to an IAM principal.
+   * [disable-awslint:no-grants]
    *
    * @param grantee the principal
    */
+  @MethodMetadata()
   public grantReadWrite(grantee: iam.IGrantable): iam.Grant {
     const ret = this.grant(grantee, [...readPermissions, ...writePermissions]);
     if (this.encryptionKey && this.encryption === TableEncryption.CLIENT_SIDE_KMS) { this.encryptionKey.grantEncryptDecrypt(grantee); }
@@ -254,7 +278,7 @@ function createBucket(table: S3Table, props: S3TableProps) {
   let bucket = props.bucket;
 
   if (bucket && (props.encryption !== undefined && props.encryption !== TableEncryption.CLIENT_SIDE_KMS)) {
-    throw new Error('you can not specify encryption settings if you also provide a bucket');
+    throw new UnscopedValidationError(lit`EncryptionWithProvidedBucket`, 'you can not specify encryption settings if you also provide a bucket');
   }
 
   const encryption = props.encryption || TableEncryption.S3_MANAGED;

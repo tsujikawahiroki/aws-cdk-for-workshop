@@ -1,7 +1,9 @@
-import { Construct, IConstruct } from 'constructs';
+import type { Construct, IConstruct } from 'constructs';
 import { Architecture } from './architecture';
-import { IFunction } from './function-base';
+import type { IFunction } from './function-base';
 import { Lazy, Stack, Token } from '../../core';
+import { ValidationError } from '../../core/lib/errors';
+import { lit } from '../../core/lib/private/literal-string';
 import { FactName, RegionInfo } from '../../region-info';
 
 /**
@@ -66,6 +68,46 @@ export abstract class LambdaInsightsVersion {
   public static readonly VERSION_1_0_229_0 = LambdaInsightsVersion.fromInsightsVersion('1.0.229.0');
 
   /**
+   * Version 1.0.273.0
+   */
+  public static readonly VERSION_1_0_273_0 = LambdaInsightsVersion.fromInsightsVersion('1.0.273.0');
+
+  /**
+   * Version 1.0.275.0
+   */
+  public static readonly VERSION_1_0_275_0 = LambdaInsightsVersion.fromInsightsVersion('1.0.275.0');
+
+  /**
+   * Version 1.0.295.0
+   */
+  public static readonly VERSION_1_0_295_0 = LambdaInsightsVersion.fromInsightsVersion('1.0.295.0');
+
+  /**
+   * Version 1.0.317.0
+   */
+  public static readonly VERSION_1_0_317_0 = LambdaInsightsVersion.fromInsightsVersion('1.0.317.0');
+
+  /**
+   * Version 1.0.333.0
+   */
+  public static readonly VERSION_1_0_333_0 = LambdaInsightsVersion.fromInsightsVersion('1.0.333.0');
+
+  /**
+   * Version 1.0.391.0
+   */
+  public static readonly VERSION_1_0_391_0 = LambdaInsightsVersion.fromInsightsVersion('1.0.391.0');
+
+  /**
+   * Version 1.0.404.0
+   */
+  public static readonly VERSION_1_0_404_0 = LambdaInsightsVersion.fromInsightsVersion('1.0.404.0');
+
+  /**
+   * Version 1.0.498.0
+   */
+  public static readonly VERSION_1_0_498_0 = LambdaInsightsVersion.fromInsightsVersion('1.0.498.0');
+
+  /**
    * Use the insights extension associated with the provided ARN. Make sure the ARN is associated
    * with same region as your function
    *
@@ -81,23 +123,23 @@ export abstract class LambdaInsightsVersion {
     return new InsightsArn();
   }
 
-  // Use the verison to build the object. Not meant to be called by the user -- user should use e.g. VERSION_1_0_54_0
+  // Use the version to build the object. Not meant to be called by the user -- user should use e.g. VERSION_1_0_54_0
   private static fromInsightsVersion(insightsVersion: string): LambdaInsightsVersion {
     class InsightsVersion extends LambdaInsightsVersion {
-      public readonly layerVersionArn = Lazy.uncachedString({
+      public readonly layerVersionArn = Lazy.uncachedString({ // eslint-disable-line no-restricted-syntax
         produce: (context) => getVersionArn(context.scope, insightsVersion),
       });
 
-      public _bind(_scope: Construct, _function: IFunction): InsightsBindConfig {
-        const arch = _function.architecture?.name ?? Architecture.X86_64.name;
+      public _bind(scope: Construct, fn: IFunction): InsightsBindConfig {
+        const arch = fn.architecture?.name ?? Architecture.X86_64.name;
         // Check if insights version is valid. This should only happen if one of the public static readonly versions are set incorrectly
         // or if the version is not available for the Lambda Architecture
         const versionExists = RegionInfo.regions.some(regionInfo => regionInfo.cloudwatchLambdaInsightsArn(insightsVersion, arch));
         if (!versionExists) {
-          throw new Error(`Insights version ${insightsVersion} does not exist.`);
+          throw new ValidationError(lit`InsightsVersion`, `Insights version ${insightsVersion} does not exist.`, fn);
         }
         return {
-          arn: getVersionArn(_scope, insightsVersion, arch),
+          arn: getVersionArn(scope, insightsVersion, arch),
         };
       }
     }
@@ -124,7 +166,6 @@ export abstract class LambdaInsightsVersion {
  * This function is run on CDK synthesis.
  */
 function getVersionArn(scope: IConstruct, insightsVersion: string, architecture?: string): string {
-
   const scopeStack = Stack.of(scope);
   const region = scopeStack.region;
   const arch = architecture ?? Architecture.X86_64.name;
@@ -133,7 +174,7 @@ function getVersionArn(scope: IConstruct, insightsVersion: string, architecture?
   if (region !== undefined && !Token.isUnresolved(region)) {
     const arn = RegionInfo.get(region).cloudwatchLambdaInsightsArn(insightsVersion, arch);
     if (arn === undefined) {
-      throw new Error(`Insights version ${insightsVersion} is not supported in region ${region}`);
+      throw new ValidationError(lit`InsightsVersion`, `Insights version ${insightsVersion} is not supported in region ${region}`, scope);
     }
     return arn;
   }

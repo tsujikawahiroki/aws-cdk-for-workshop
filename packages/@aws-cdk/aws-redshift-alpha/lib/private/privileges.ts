@@ -1,11 +1,13 @@
-import * as cdk from 'aws-cdk-lib/core';
+import type { IArrayBox } from 'aws-cdk-lib/core/lib/helpers-internal';
+import { Box, noBoxStackTraces } from 'aws-cdk-lib/core/lib/helpers-internal';
 import { Construct } from 'constructs';
-import { DatabaseOptions } from '../database-options';
-import { ITable, TableAction } from '../table';
-import { IUser } from '../user';
+import type { DatabaseOptions } from '../database-options';
+import type { ITable } from '../table';
+import { TableAction } from '../table';
+import type { IUser } from '../user';
 import { DatabaseQuery } from './database-query';
 import { HandlerName } from './database-query-provider/handler-name';
-import { TablePrivilege as SerializedTablePrivilege, UserTablePrivilegesHandlerProps } from './handler-props';
+import type { UserTablePrivilegesHandlerProps } from './handler-props';
 
 /**
  * The Redshift table and action that make up a privilege that can be granted to a Redshift user.
@@ -47,50 +49,29 @@ export interface UserTablePrivilegesProps extends DatabaseOptions {
  * method. Thus, each `User` will have at most one `UserTablePrivileges` construct to manage its privileges. For details
  * on why this is a Good Thing, see the README, under "Granting Privileges".
  */
+@noBoxStackTraces
 export class UserTablePrivileges extends Construct {
-  private privileges: TablePrivilege[];
+  private privileges: IArrayBox<TablePrivilege>;
 
   constructor(scope: Construct, id: string, props: UserTablePrivilegesProps) {
     super(scope, id);
 
-    this.privileges = props.privileges ?? [];
+    this.privileges = Box.fromArray(props.privileges ?? [], { omitEmpty: false });
 
     new DatabaseQuery<UserTablePrivilegesHandlerProps>(this, 'Resource', {
       ...props,
       handler: HandlerName.UserTablePrivileges,
       properties: {
         username: props.user.username,
-        tablePrivileges: cdk.Lazy.any({
-          produce: () => {
-            const reducedPrivileges = this.privileges.reduce((privileges, { table, actions }) => {
-              const tableId = table.node.id;
-              if (!(tableId in privileges)) {
-                privileges[tableId] = {
-                  tableName: table.tableName,
-                  actions: [],
-                };
-              }
-              actions = actions.concat(privileges[tableId].actions);
-              if (actions.includes(TableAction.ALL)) {
-                actions = [TableAction.ALL];
-              }
-              if (actions.includes(TableAction.UPDATE) || actions.includes(TableAction.DELETE)) {
-                actions.push(TableAction.SELECT);
-              }
-              privileges[tableId] = {
-                tableName: table.tableName,
-                actions: Array.from(new Set(actions)),
-              };
-              return privileges;
-            }, {} as { [key: string]: { tableName: string; actions: TableAction[] } });
-            const serializedPrivileges: SerializedTablePrivilege[] = Object.entries(reducedPrivileges).map(([tableId, config]) => ({
+        tablePrivileges: this.privileges.derive(privs =>
+          Object.entries(groupPrivilegesByTable(privs))
+            .map(([tableId, tablePrivileges]) => ({
               tableId,
-              tableName: config.tableName,
-              actions: config.actions.map(action => TableAction[action]),
-            }));
-            return serializedPrivileges;
-          },
-        }) as any,
+              // The first element always exists since the groupBy element is at least a singleton.
+              tableName: tablePrivileges[0]!.table.tableName,
+              actions: unifyTableActions(tablePrivileges).map(action => TableAction[action]),
+            })),
+        ) as any,
       },
     });
   }
@@ -102,3 +83,29 @@ export class UserTablePrivileges extends Construct {
     this.privileges.push({ table, actions });
   }
 }
+
+const unifyTableActions = (tablePrivileges: TablePrivilege[]): TableAction[] => {
+  const set = new Set<TableAction>(tablePrivileges.flatMap(x => x.actions));
+
+  if (set.has(TableAction.ALL)) {
+    return [TableAction.ALL];
+  }
+
+  if (set.has(TableAction.UPDATE) || set.has(TableAction.DELETE)) {
+    set.add(TableAction.SELECT);
+  }
+
+  return [...set];
+};
+
+const groupPrivilegesByTable = (privileges: readonly TablePrivilege[]): Record<string, TablePrivilege[]> => {
+  return privileges.reduce((grouped, privilege) => {
+    const { table } = privilege;
+    const tableId = table.node.id;
+    const tablePrivileges = grouped[tableId] ?? [];
+    return {
+      ...grouped,
+      [tableId]: [...tablePrivileges, privilege],
+    };
+  }, {} as Record<string, TablePrivilege[]>);
+};

@@ -1,6 +1,8 @@
 import { Match } from '.';
 import { Matcher, MatchResult } from './matcher';
-import { Type, getType } from './private/type';
+import { AssertionError } from './private/error';
+import type { Type } from './private/type';
+import { getType } from './private/type';
 
 /**
  * Capture values while matching templates.
@@ -124,12 +126,12 @@ export class Capture extends Matcher {
 
   private validate(): void {
     if (this._captured.length === 0) {
-      throw new Error('No value captured');
+      throw new AssertionError('No value captured');
     }
   }
 
   private reportIncorrectType(expected: Type): never {
-    throw new Error(`Captured value is expected to be ${expected} but found ${getType(this._captured[this.idx])}. ` +
+    throw new AssertionError(`Captured value is expected to be ${expected} but found ${getType(this._captured[this.idx])}. ` +
       `Value is ${JSON.stringify(this._captured[this.idx], undefined, 2)}`);
   }
 }

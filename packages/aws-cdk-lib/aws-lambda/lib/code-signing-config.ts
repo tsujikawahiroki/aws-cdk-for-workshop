@@ -1,7 +1,13 @@
-import { Construct } from 'constructs';
+import type { Construct } from 'constructs';
+import type { CodeSigningConfigReference, ICodeSigningConfigRef } from './lambda.generated';
 import { CfnCodeSigningConfig } from './lambda.generated';
-import { ISigningProfile } from '../../aws-signer';
-import { ArnFormat, IResource, Resource, Stack } from '../../core';
+import type { ISigningProfile } from '../../aws-signer';
+import type { IResource } from '../../core';
+import { ArnFormat, Resource, Stack } from '../../core';
+import { ValidationError } from '../../core/lib/errors';
+import { addConstructMetadata } from '../../core/lib/metadata-resource';
+import { lit } from '../../core/lib/private/literal-string';
+import { propertyInjectable } from '../../core/lib/prop-injectable';
 
 /**
  * Code signing configuration policy for deployment validation failure.
@@ -22,7 +28,7 @@ export enum UntrustedArtifactOnDeployment {
 /**
  * A Code Signing Config
  */
-export interface ICodeSigningConfig extends IResource {
+export interface ICodeSigningConfig extends IResource, ICodeSigningConfigRef {
   /**
    * The ARN of Code Signing Config
    * @attribute
@@ -70,7 +76,13 @@ export interface CodeSigningConfigProps {
  *
  * @resource AWS::Lambda::CodeSigningConfig
  */
+@propertyInjectable
 export class CodeSigningConfig extends Resource implements ICodeSigningConfig {
+  /**
+   * Uniquely identifies this class.
+   */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-lambda.CodeSigningConfig';
+
   /**
    * Creates a Signing Profile construct that represents an external Signing Profile.
    *
@@ -78,10 +90,10 @@ export class CodeSigningConfig extends Resource implements ICodeSigningConfig {
    * @param id The construct's name.
    * @param codeSigningConfigArn The ARN of code signing config.
    */
-  public static fromCodeSigningConfigArn( scope: Construct, id: string, codeSigningConfigArn: string): ICodeSigningConfig {
+  public static fromCodeSigningConfigArn(scope: Construct, id: string, codeSigningConfigArn: string): ICodeSigningConfig {
     const codeSigningProfileId = Stack.of(scope).splitArn(codeSigningConfigArn, ArnFormat.SLASH_RESOURCE_NAME).resourceName;
     if (!codeSigningProfileId) {
-      throw new Error(`Code signing config ARN must be in the format 'arn:<partition>:lambda:<region>:<account>:code-signing-config:<codeSigningConfigArn>', got: '${codeSigningConfigArn}'`);
+      throw new ValidationError(lit`MustBeCodeSigningConfig`, `Code signing config ARN must be in the format 'arn:<partition>:lambda:<region>:<account>:code-signing-config:<codeSigningConfigArn>', got: '${codeSigningConfigArn}'`, scope);
     }
     const assertedCodeSigningProfileId = codeSigningProfileId;
     class Import extends Resource implements ICodeSigningConfig {
@@ -90,6 +102,12 @@ export class CodeSigningConfig extends Resource implements ICodeSigningConfig {
 
       constructor() {
         super(scope, id);
+      }
+
+      public get codeSigningConfigRef(): CodeSigningConfigReference {
+        return {
+          codeSigningConfigArn: this.codeSigningConfigArn,
+        };
       }
     }
     return new Import();
@@ -100,6 +118,8 @@ export class CodeSigningConfig extends Resource implements ICodeSigningConfig {
 
   constructor(scope: Construct, id: string, props: CodeSigningConfigProps) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     const signingProfileVersionArns = props.signingProfiles.map(signingProfile => {
       return signingProfile.signingProfileVersionArn;
@@ -116,5 +136,11 @@ export class CodeSigningConfig extends Resource implements ICodeSigningConfig {
     });
     this.codeSigningConfigArn = resource.attrCodeSigningConfigArn;
     this.codeSigningConfigId = resource.attrCodeSigningConfigId;
+  }
+
+  public get codeSigningConfigRef(): CodeSigningConfigReference {
+    return {
+      codeSigningConfigArn: this.codeSigningConfigArn,
+    };
   }
 }

@@ -77,7 +77,7 @@ export enum WindowsVersion {
   WINDOWS_SERVER_2008_R2_SP1_PORTUGUESE_BRAZIL_64BIT_BASE = 'Windows_Server-2008-R2_SP1-Portuguese_Brazil-64Bit-Base',
   /** @deprecated - use WINDOWS_SERVER_2008_R2_SP1_PORTUGUESE_BRAZIL_64BIT_BASE */
   WINDOWS_SERVER_2008_R2_SP1_PORTUGESE_BRAZIL_64BIT_BASE = 'Windows_Server-2008-R2_SP1-Portugese_Brazil-64Bit-Base',
-  // eslint-disable-next-line max-len
+
   WINDOWS_SERVER_2008_R2_SP1_LANGUAGE_PACKS_64BIT_SQL_2008_R2_SP3_STANDARD = 'Windows_Server-2008-R2_SP1-Language_Packs-64Bit-SQL_2008_R2_SP3_Standard',
   WINDOWS_SERVER_2008_R2_SP1_ENGLISH_61BIT_SQL_2012_RTM_SP2_ENTERPRISE = 'Windows_Server-2008-R2_SP1-English-64Bit-SQL_2012_RTM_SP2_Enterprise',
   WINDOWS_SERVER_2008_R2_SP1_ENGLISH_64BIT_SQL_2012_SP4_STANDARD = 'Windows_Server-2008-R2_SP1-English-64Bit-SQL_2012_SP4_Standard',
@@ -417,4 +417,16 @@ export enum WindowsVersion {
   WINDOWS_SERVER_2022_JAPANESE_FULL_SQL_2022_STANDARD = 'Windows_Server-2022-Japanese-Full-SQL_2022_Standard',
   WINDOWS_SERVER_2022_JAPANESE_FULL_SQL_2022_ENTERPRISE = 'Windows_Server-2022-Japanese-Full-SQL_2022_Enterprise',
   /** 2022 - End */
+  /** 2025 - Start */
+  WINDOWS_SERVER_2025_CHINESE_SIMPLIFIED_FULL_BASE = 'Windows_Server-2025-Chinese_Simplified-Full-Base',
+  WINDOWS_SERVER_2025_CHINESE_TRADITIONAL_FULL_BASE = 'Windows_Server-2025-Chinese_Traditional-Full-Base',
+  WINDOWS_SERVER_2025_ENGLISH_CORE_BASE = 'Windows_Server-2025-English-Core-Base',
+  WINDOWS_SERVER_2025_ENGLISH_FULL_BASE = 'Windows_Server-2025-English-Full-Base',
+  WINDOWS_SERVER_2025_ENGLISH_FULL_SQL_2022_ENTERPRISE = 'Windows_Server-2025-English-Full-SQL_2022_Enterprise',
+  WINDOWS_SERVER_2025_ENGLISH_FULL_SQL_2022_EXPRESS = 'Windows_Server-2025-English-Full-SQL_2022_Express',
+  WINDOWS_SERVER_2025_ENGLISH_FULL_SQL_2022_STANDARD = 'Windows_Server-2025-English-Full-SQL_2022_Standard',
+  WINDOWS_SERVER_2025_ENGLISH_FULL_SQL_2022_WEB = 'Windows_Server-2025-English-Full-SQL_2022_Web',
+  WINDOWS_SERVER_2025_JAPANESE_FULL_BASE = 'Windows_Server-2025-Japanese-Full-Base',
+  WINDOWS_SERVER_2025_KOREAN_FULL_BASE = 'Windows_Server-2025-Korean-Full-Base',
+  /** 2025 - End */
 }

@@ -33,11 +33,15 @@ In addition, the library also supports defining Kubernetes resource manifests wi
     - [ARM64 Support](#arm64-support)
     - [Masters Role](#masters-role)
     - [Encryption](#encryption)
+    - [Hybrid nodes](#hybrid-nodes)
   - [Permissions and Security](#permissions-and-security)
     - [AWS IAM Mapping](#aws-iam-mapping)
+    - [Access Config](#access-config)
+    - [Access Entry](#access-mapping)
     - [Cluster Security Group](#cluster-security-group)
     - [Node SSH Access](#node-ssh-access)
     - [Service Accounts](#service-accounts)
+    - [Pod Identities](#pod-identities)
   - [Applying Kubernetes Resources](#applying-kubernetes-resources)
     - [Kubernetes Manifests](#kubernetes-manifests)
       - [ALB Controller Integration](#alb-controller-integration)
@@ -52,6 +56,7 @@ In addition, the library also supports defining Kubernetes resource manifests wi
       - [Manually importing k8s specs and CRD's](#manually-importing-k8s-specs-and-crds)
   - [Patching Kubernetes Resources](#patching-kubernetes-resources)
   - [Querying Kubernetes Resources](#querying-kubernetes-resources)
+  - [Add-ons](#add-ons)
   - [Using existing clusters](#using-existing-clusters)
   - [Logging](#logging)
   - [Known Issues and Limitations](#known-issues-and-limitations)
@@ -64,12 +69,12 @@ This example defines an Amazon EKS cluster with the following configuration:
 * A Kubernetes pod with a container based on the [paulbouwer/hello-kubernetes](https://github.com/paulbouwer/hello-kubernetes) image.
 
 ```ts
-import { KubectlV29Layer } from '@aws-cdk/lambda-layer-kubectl-v29';
+import { KubectlV35Layer } from '@aws-cdk/lambda-layer-kubectl-v35';
 
 // provisioning a cluster
 const cluster = new eks.Cluster(this, 'hello-eks', {
-  version: eks.KubernetesVersion.V1_29,
-  kubectlLayer: new KubectlV29Layer(this, 'kubectl'),
+  version: eks.KubernetesVersion.V1_35,
+  kubectlLayer: new KubectlV35Layer(this, 'kubectl'),
 });
 
 // apply a kubernetes manifest to the cluster
@@ -131,19 +136,60 @@ A more detailed breakdown of each is provided further down this README.
 
 ## Provisioning clusters
 
-Creating a new cluster is done using the `Cluster` or `FargateCluster` constructs. The only required property is the kubernetes `version`.
+Creating a new cluster is done using the `Cluster` or `FargateCluster` constructs. The only required properties are the kubernetes `version` and `kubectlLayer`.
 
 ```ts
+import { KubectlV35Layer } from '@aws-cdk/lambda-layer-kubectl-v35';
+
 new eks.Cluster(this, 'HelloEKS', {
-  version: eks.KubernetesVersion.V1_29,
+  version: eks.KubernetesVersion.V1_35,
+  kubectlLayer: new KubectlV35Layer(this, 'kubectl'),
+});
+```
+
+You can control what happens to the resources created by the cluster construct when they are no longer managed by CloudFormation by specifying a `removalPolicy`.
+
+This can happen in one of three situations:
+- The resource is removed from the template, so CloudFormation stops managing it;
+- A change to the resource is made that requires it to be replaced, so CloudFormation stops managing it;
+- The stack is deleted, so CloudFormation stops managing all resources in it.
+
+This affects the EKS cluster itself, the custom resource that created the cluster, associated IAM roles, node groups, security groups, VPC and any other CloudFormation resources managed by this construct.
+
+```ts
+import { KubectlV35Layer } from '@aws-cdk/lambda-layer-kubectl-v35';
+import * as core from 'aws-cdk-lib/core';
+
+new eks.Cluster(this, 'HelloEKS', {
+  version: eks.KubernetesVersion.V1_35,
+  kubectlLayer: new KubectlV35Layer(this, 'kubectl'),
+  removalPolicy: core.RemovalPolicy.RETAIN, // Keep all resources created by the construct.
 });
 ```
 
 You can also use `FargateCluster` to provision a cluster that uses only fargate workers.
 
 ```ts
+import { KubectlV35Layer } from '@aws-cdk/lambda-layer-kubectl-v35';
+
 new eks.FargateCluster(this, 'HelloEKS', {
-  version: eks.KubernetesVersion.V1_29,
+  version: eks.KubernetesVersion.V1_35,
+  kubectlLayer: new KubectlV35Layer(this, 'kubectl'),
+});
+```
+
+You can enable deletion protection for your cluster to prevent accidental deletion. When deletion protection is enabled,
+the cluster cannot be deleted until protection is disabled. This setting only applies to clusters in an active state.
+
+> For more details visit [Deletion protection](https://docs.aws.amazon.com/eks/latest/userguide/deletion-protection.html).
+
+```ts
+import { KubectlV35Layer } from '@aws-cdk/lambda-layer-kubectl-v35';
+
+new eks.Cluster(this, 'HelloEKS', {
+  version: eks.KubernetesVersion.V1_35,
+  kubectlLayer: new KubectlV35Layer(this, 'kubectl'),
+  deletionProtection: true,
 });
 ```
 
@@ -155,7 +201,7 @@ Capacity is the amount and the type of worker nodes that are available to the cl
 ### Managed node groups
 
 Amazon EKS managed node groups automate the provisioning and lifecycle management of nodes (Amazon EC2 instances) for Amazon EKS Kubernetes clusters.
-With Amazon EKS managed node groups, you don’t need to separately provision or register the Amazon EC2 instances that provide compute capacity to run your Kubernetes applications. You can create, update, or terminate nodes for your cluster with a single operation. Nodes run using the latest Amazon EKS optimized AMIs in your AWS account while node updates and terminations gracefully drain nodes to ensure that your applications stay available.
+With Amazon EKS managed node groups, you don't need to separately provision or register the Amazon EC2 instances that provide compute capacity to run your Kubernetes applications. You can create, update, or terminate nodes for your cluster with a single operation. Nodes run using the latest Amazon EKS optimized AMIs in your AWS account while node updates and terminations gracefully drain nodes to ensure that your applications stay available.
 
 > For more details visit [Amazon EKS Managed Node Groups](https://docs.aws.amazon.com/eks/latest/userguide/managed-node-groups.html).
 
@@ -166,10 +212,13 @@ By default, this library will allocate a managed node group with 2 *m5.large* in
 At cluster instantiation time, you can customize the number of instances and their type:
 
 ```ts
+import { KubectlV35Layer } from '@aws-cdk/lambda-layer-kubectl-v35';
+
 new eks.Cluster(this, 'HelloEKS', {
-  version: eks.KubernetesVersion.V1_29,
+  version: eks.KubernetesVersion.V1_35,
   defaultCapacity: 5,
   defaultCapacityInstance: ec2.InstanceType.of(ec2.InstanceClass.M5, ec2.InstanceSize.SMALL),
+  kubectlLayer: new KubectlV35Layer(this, 'kubectl'),
 });
 ```
 
@@ -178,9 +227,12 @@ To access the node group that was created on your behalf, you can use `cluster.d
 Additional customizations are available post instantiation. To apply them, set the default capacity to 0, and use the `cluster.addNodegroupCapacity` method:
 
 ```ts
+import { KubectlV35Layer } from '@aws-cdk/lambda-layer-kubectl-v35';
+
 const cluster = new eks.Cluster(this, 'HelloEKS', {
-  version: eks.KubernetesVersion.V1_29,
+  version: eks.KubernetesVersion.V1_35,
   defaultCapacity: 0,
+  kubectlLayer: new KubectlV35Layer(this, 'kubectl'),
 });
 
 cluster.addNodegroupCapacity('custom-node-group', {
@@ -245,9 +297,48 @@ cluster.addNodegroupCapacity('custom-node-group', {
 });
 ```
 
-> **NOTE:** If you add instances with the inferentia class (`inf1` or `inf2`) or trainium class (`trn1` or `trn1n`) 
+> **NOTE:** If you add instances with the inferentia class (`inf1` or `inf2`) or trainium class (`trn1`, `trn1n`, or `trn2`) 
 > the [neuron plugin](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/containers/dlc-then-eks-devflow.html)
 > will be automatically installed in the kubernetes cluster.
+
+##### Default AMI type (under feature flag)
+
+By default, managed node groups that do not set `amiType` use `AL2_X86_64` (or `AL2_ARM_64` for
+ARM instances). Amazon Linux 2 EKS-optimized AMIs reached end of support on **November 26, 2025**. 
+AL2023 is the AWS-recommended default.
+
+New applications should enable the `@aws-cdk/aws-eks:defaultToAL2023` feature flag in `cdk.json`:
+
+```json
+{
+  "context": {
+    "@aws-cdk/aws-eks:defaultToAL2023": true
+  }
+}
+```
+
+When the flag is enabled, the default AMI type for x86_64 instances becomes
+`AL2023_X86_64_STANDARD`, and for ARM instances it becomes `AL2023_ARM_64_STANDARD`. GPU
+instances continue to default to `AL2_X86_64_GPU` because AL2023 splits GPU support into
+separate NVIDIA and Neuron AMI variants — GPU users must pick a variant explicitly.
+
+**Migration for existing applications.** Enabling this flag on an existing app will cause
+managed node groups that previously defaulted to AL2 to be replaced with AL2023 on the next
+deploy, which terminates running pods. To roll out safely, pin every existing node group to its
+current AMI type first, and only then enable the flag as shown below. Then gradually unpin the
+AMI for the nodes you want to upgrade.
+
+```ts
+declare const cluster: eks.Cluster;
+
+// Pin existing node groups to AL2 explicitly before enabling the flag.
+cluster.addNodegroupCapacity('workers', {
+  instanceTypes: [new ec2.InstanceType('m5.large')],
+  amiType: eks.NodegroupAmiType.AL2_X86_64,
+});
+```
+
+Explicitly setting `amiType` will pin it — it is not affected by the feature flag.
 
 #### Node Groups with IPv6 Support
 
@@ -256,6 +347,8 @@ Node groups are available with IPv6 configured networks.  For custom roles assig
 > For more details visit [Configuring the Amazon VPC CNI plugin for Kubernetes to use IAM roles for service accounts](https://docs.aws.amazon.com/eks/latest/userguide/cni-iam-role.html#cni-iam-role-create-role)
 
 ```ts
+import { KubectlV35Layer } from '@aws-cdk/lambda-layer-kubectl-v35';
+
 const ipv6Management = new iam.PolicyDocument({
     statements: [new iam.PolicyStatement({
     resources: ['arn:aws:ec2:*:*:network-interface/*'],
@@ -280,8 +373,9 @@ const eksClusterNodeGroupRole = new iam.Role(this, 'eksClusterNodeGroupRole', {
 });
 
 const cluster = new eks.Cluster(this, 'HelloEKS', {
-  version: eks.KubernetesVersion.V1_29,
+  version: eks.KubernetesVersion.V1_35,
   defaultCapacity: 0,
+  kubectlLayer: new KubectlV35Layer(this, 'kubectl'),
 });
 
 cluster.addNodegroupCapacity('custom-node-group', {
@@ -393,9 +487,12 @@ has been changed. As a workaround, you need to add a temporary policy to the clu
 successful replacement. Consider this example if you are renaming the cluster from `foo` to `bar`:
 
 ```ts
+import { KubectlV35Layer } from '@aws-cdk/lambda-layer-kubectl-v35';
+
 const cluster = new eks.Cluster(this, 'cluster-to-rename', {
   clusterName: 'foo', // rename this to 'bar'
-  version: eks.KubernetesVersion.V1_29,
+  kubectlLayer: new KubectlV35Layer(this, 'kubectl'),
+  version: eks.KubernetesVersion.V1_35,
 });
 
 // allow the cluster admin role to delete the cluster 'foo'
@@ -448,8 +545,11 @@ To create an EKS cluster that **only** uses Fargate capacity, you can use `Farga
 The following code defines an Amazon EKS cluster with a default Fargate Profile that matches all pods from the "kube-system" and "default" namespaces. It is also configured to [run CoreDNS on Fargate](https://docs.aws.amazon.com/eks/latest/userguide/fargate-getting-started.html#fargate-gs-coredns).
 
 ```ts
+import { KubectlV35Layer } from '@aws-cdk/lambda-layer-kubectl-v35';
+
 const cluster = new eks.FargateCluster(this, 'MyCluster', {
-  version: eks.KubernetesVersion.V1_29,
+  version: eks.KubernetesVersion.V1_35,
+  kubectlLayer: new KubectlV35Layer(this, 'kubectl'),
 });
 ```
 
@@ -525,9 +625,12 @@ To disable bootstrapping altogether (i.e. to fully customize user-data), set `bo
 You can also configure the cluster to use an auto-scaling group as the default capacity:
 
 ```ts
+import { KubectlV35Layer } from '@aws-cdk/lambda-layer-kubectl-v35';
+
 const cluster = new eks.Cluster(this, 'HelloEKS', {
-  version: eks.KubernetesVersion.V1_29,
+  version: eks.KubernetesVersion.V1_35,
   defaultCapacityType: eks.DefaultCapacityType.EC2,
+  kubectlLayer: new KubectlV35Layer(this, 'kubectl'),
 });
 ```
 
@@ -629,9 +732,12 @@ AWS Identity and Access Management (IAM) and native Kubernetes [Role Based Acces
 You can configure the [cluster endpoint access](https://docs.aws.amazon.com/eks/latest/userguide/cluster-endpoint.html) by using the `endpointAccess` property:
 
 ```ts
+import { KubectlV35Layer } from '@aws-cdk/lambda-layer-kubectl-v35';
+
 const cluster = new eks.Cluster(this, 'hello-eks', {
-  version: eks.KubernetesVersion.V1_29,
+  version: eks.KubernetesVersion.V1_35,
   endpointAccess: eks.EndpointAccess.PRIVATE, // No access outside of your VPC.
+  kubectlLayer: new KubectlV35Layer(this, 'kubectl'),
 });
 ```
 
@@ -639,7 +745,7 @@ The default value is `eks.EndpointAccess.PUBLIC_AND_PRIVATE`. Which means the cl
 
 ### Alb Controller
 
-Some Kubernetes resources are commonly implemented on AWS with the help of the [ALB Controller](https://kubernetes-sigs.github.io/aws-load-balancer-controller/v2.5/).
+Some Kubernetes resources are commonly implemented on AWS with the help of the [ALB Controller](https://kubernetes-sigs.github.io/aws-load-balancer-controller/latest/).
 
 From the docs:
 
@@ -651,11 +757,46 @@ From the docs:
 To deploy the controller on your EKS cluster, configure the `albController` property:
 
 ```ts
+import { KubectlV35Layer } from '@aws-cdk/lambda-layer-kubectl-v35';
+
 new eks.Cluster(this, 'HelloEKS', {
-  version: eks.KubernetesVersion.V1_29,
+  version: eks.KubernetesVersion.V1_35,
   albController: {
-    version: eks.AlbControllerVersion.V2_6_2,
+    version: eks.AlbControllerVersion.V3_2_2,
   },
+  kubectlLayer: new KubectlV35Layer(this, 'kubectl'),
+});
+```
+
+To provide additional Helm chart values supported by `albController` in CDK, use the `additionalHelmChartValues` property. For example, the following code snippet shows how to set the `enableWafV2` flag:
+
+```ts
+import { KubectlV35Layer } from '@aws-cdk/lambda-layer-kubectl-v35';
+
+new eks.Cluster(this, 'HelloEKS', {
+  version: eks.KubernetesVersion.V1_35,
+  albController: {
+    version: eks.AlbControllerVersion.V3_2_2,
+    additionalHelmChartValues: {
+      enableWafv2: false
+    }
+  },
+  kubectlLayer: new KubectlV35Layer(this, 'kubectl'),
+});
+```
+
+To overwrite an existing ALB controller service account, use the `overwriteServiceAccount` property:
+
+```ts
+import { KubectlV35Layer } from '@aws-cdk/lambda-layer-kubectl-v35';
+
+new eks.Cluster(this, 'HelloEKS', {
+  version: eks.KubernetesVersion.V1_35,
+  albController: {
+    version: eks.AlbControllerVersion.V3_2_2,
+    overwriteServiceAccount: true
+  },
+  kubectlLayer: new KubectlV35Layer(this, 'kubectl'),
 });
 ```
 
@@ -673,7 +814,7 @@ aws-load-balancer-controller-76bd6c7586-fqxph   1/1     Running   0          109
 ...
 ```
 
-Every Kubernetes manifest that utilizes the ALB Controller is effectively dependant on the controller.
+Every Kubernetes manifest that utilizes the ALB Controller is effectively dependent on the controller.
 If the controller is deleted before the manifest, it might result in dangling ELB/ALB resources.
 Currently, the EKS construct library does not detect such dependencies, and they should be done explicitly.
 
@@ -692,12 +833,15 @@ if (cluster.albController) {
 You can specify the VPC of the cluster using the `vpc` and `vpcSubnets` properties:
 
 ```ts
+import { KubectlV35Layer } from '@aws-cdk/lambda-layer-kubectl-v35';
+
 declare const vpc: ec2.Vpc;
 
 new eks.Cluster(this, 'HelloEKS', {
-  version: eks.KubernetesVersion.V1_29,
+  version: eks.KubernetesVersion.V1_35,
   vpc,
   vpcSubnets: [{ subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS }],
+  kubectlLayer: new KubectlV35Layer(this, 'kubectl'),
 });
 ```
 
@@ -740,9 +884,11 @@ The `ClusterHandler` is a set of Lambda functions (`onEventHandler`, `isComplete
 You can configure the environment of the Cluster Handler functions by specifying it at cluster instantiation. For example, this can be useful in order to configure an http proxy:
 
 ```ts
+import { KubectlV35Layer } from '@aws-cdk/lambda-layer-kubectl-v35';
+
 declare const proxyInstanceSecurityGroup: ec2.SecurityGroup;
 const cluster = new eks.Cluster(this, 'hello-eks', {
-  version: eks.KubernetesVersion.V1_29,
+  version: eks.KubernetesVersion.V1_35,
   clusterHandlerEnvironment: {
     https_proxy: 'http://proxy.myproxy.com',
   },
@@ -751,6 +897,7 @@ const cluster = new eks.Cluster(this, 'hello-eks', {
    * Cluster Handler Lambdas so that it can reach the proxy.
    */
   clusterHandlerSecurityGroup: proxyInstanceSecurityGroup,
+  kubectlLayer: new KubectlV35Layer(this, 'kubectl'),
 });
 ```
 
@@ -759,6 +906,7 @@ const cluster = new eks.Cluster(this, 'hello-eks', {
 You can optionally choose to configure your cluster to use IPv6 using the [`ipFamily`](https://docs.aws.amazon.com/eks/latest/APIReference/API_KubernetesNetworkConfigRequest.html#AmazonEKS-Type-KubernetesNetworkConfigRequest-ipFamily) definition for your cluster.  Note that this will require the underlying subnets to have an associated IPv6 CIDR.
 
 ```ts
+import { KubectlV35Layer } from '@aws-cdk/lambda-layer-kubectl-v35';
 declare const vpc: ec2.Vpc;
 
 function associateSubnetWithV6Cidr(vpc: ec2.Vpc, count: number, subnet: ec2.ISubnet) {
@@ -784,10 +932,11 @@ for (let subnet of subnets) {
 }
 
 const cluster = new eks.Cluster(this, 'hello-eks', {
-  version: eks.KubernetesVersion.V1_29,
+  version: eks.KubernetesVersion.V1_35,
   vpc: vpc,
   ipFamily: eks.IpFamily.IP_V6,
   vpcSubnets: [{ subnets: vpc.publicSubnets }],
+  kubectlLayer: new KubectlV35Layer(this, 'kubectl'),
 });
 ```
 
@@ -799,7 +948,7 @@ By default, CDK will create a new python lambda function to apply your k8s manif
 
 ```ts
 const handlerRole = iam.Role.fromRoleArn(this, 'HandlerRole', 'arn:aws:iam::123456789012:role/lambda-role');
-// get the serivceToken from the custom resource provider
+// get the serviceToken from the custom resource provider
 const functionArn = lambda.Function.fromFunctionName(this, 'ProviderOnEventFunc', 'ProviderframeworkonEvent-XXX').functionArn;
 const kubectlProvider = eks.KubectlProvider.fromKubectlProviderAttributes(this, 'KubectlProvider', {
   functionArn,
@@ -818,11 +967,14 @@ const cluster = eks.Cluster.fromClusterAttributes(this, 'Cluster', {
 You can configure the environment of this function by specifying it at cluster instantiation. For example, this can be useful in order to configure an http proxy:
 
 ```ts
+import { KubectlV35Layer } from '@aws-cdk/lambda-layer-kubectl-v35';
+
 const cluster = new eks.Cluster(this, 'hello-eks', {
-  version: eks.KubernetesVersion.V1_29,
+  version: eks.KubernetesVersion.V1_35,
   kubectlEnvironment: {
     'http_proxy': 'http://proxy.myproxy.com',
   },
+  kubectlLayer: new KubectlV35Layer(this, 'kubectl'),
 });
 ```
 
@@ -839,11 +991,11 @@ Depending on which version of kubernetes you're targeting, you will need to use 
 the `@aws-cdk/lambda-layer-kubectl-vXY` packages.
 
 ```ts
-import { KubectlV29Layer } from '@aws-cdk/lambda-layer-kubectl-v29';
+import { KubectlV35Layer } from '@aws-cdk/lambda-layer-kubectl-v35';
 
 const cluster = new eks.Cluster(this, 'hello-eks', {
-  version: eks.KubernetesVersion.V1_29,
-  kubectlLayer: new KubectlV29Layer(this, 'kubectl'),
+  version: eks.KubernetesVersion.V1_35,
+  kubectlLayer: new KubectlV35Layer(this, 'kubectl'),
 });
 ```
 
@@ -878,7 +1030,7 @@ const cluster1 = new eks.Cluster(this, 'MyCluster', {
   kubectlLayer: layer,
   vpc,
   clusterName: 'cluster-name',
-  version: eks.KubernetesVersion.V1_29,
+  version: eks.KubernetesVersion.V1_35,
 });
 
 // or
@@ -894,9 +1046,12 @@ const cluster2 = eks.Cluster.fromClusterAttributes(this, 'MyCluster', {
 By default, the kubectl provider is configured with 1024MiB of memory. You can use the `kubectlMemory` option to specify the memory size for the AWS Lambda function:
 
 ```ts
+import { KubectlV35Layer } from '@aws-cdk/lambda-layer-kubectl-v35';
+
 new eks.Cluster(this, 'MyCluster', {
   kubectlMemory: Size.gibibytes(4),
-  version: eks.KubernetesVersion.V1_29,
+  version: eks.KubernetesVersion.V1_35,
+  kubectlLayer: new KubectlV35Layer(this, 'kubectl'),
 });
 
 // or
@@ -933,10 +1088,13 @@ cluster.addAutoScalingGroupCapacity('self-ng-arm', {
 When you create a cluster, you can specify a `mastersRole`. The `Cluster` construct will associate this role with the `system:masters` [RBAC](https://kubernetes.io/docs/reference/access-authn-authz/rbac/) group, giving it super-user access to the cluster.
 
 ```ts
+import { KubectlV35Layer } from '@aws-cdk/lambda-layer-kubectl-v35';
+
 declare const role: iam.Role;
 new eks.Cluster(this, 'HelloEKS', {
-  version: eks.KubernetesVersion.V1_29,
+  version: eks.KubernetesVersion.V1_35,
   mastersRole: role,
+  kubectlLayer: new KubectlV35Layer(this, 'kubectl'),
 });
 ```
 
@@ -982,20 +1140,26 @@ You can use the `secretsEncryptionKey` to configure which key the cluster will u
 > This setting can only be specified when the cluster is created and cannot be updated.
 
 ```ts
+import { KubectlV35Layer } from '@aws-cdk/lambda-layer-kubectl-v35';
+
 const secretsKey = new kms.Key(this, 'SecretsKey');
 const cluster = new eks.Cluster(this, 'MyCluster', {
   secretsEncryptionKey: secretsKey,
-  version: eks.KubernetesVersion.V1_29,
+  version: eks.KubernetesVersion.V1_35,
+  kubectlLayer: new KubectlV35Layer(this, 'kubectl'),
 });
 ```
 
 You can also use a similar configuration for running a cluster built using the FargateCluster construct.
 
 ```ts
+import { KubectlV35Layer } from '@aws-cdk/lambda-layer-kubectl-v35';
+
 const secretsKey = new kms.Key(this, 'SecretsKey');
 const cluster = new eks.FargateCluster(this, 'MyFargateCluster', {
   secretsEncryptionKey: secretsKey,
-  version: eks.KubernetesVersion.V1_29,
+  version: eks.KubernetesVersion.V1_35,
+  kubectlLayer: new KubectlV35Layer(this, 'kubectl'),
 });
 ```
 
@@ -1005,6 +1169,37 @@ The Amazon Resource Name (ARN) for that CMK can be retrieved.
 declare const cluster: eks.Cluster;
 const clusterEncryptionConfigKeyArn = cluster.clusterEncryptionConfigKeyArn;
 ```
+
+### Hybrid Nodes
+
+When you create an Amazon EKS cluster, you can configure it to leverage the [EKS Hybrid Nodes](https://aws.amazon.com/eks/hybrid-nodes/) feature, allowing you to use your on-premises and edge infrastructure as nodes in your EKS cluster. Refer to the Hyrid Nodes [networking documentation](https://docs.aws.amazon.com/eks/latest/userguide/hybrid-nodes-networking.html) to configure your on-premises network, node and pod CIDRs, access control, etc before creating your EKS Cluster.
+
+Once you have identified the on-premises node and pod (optional) CIDRs you will use for your hybrid nodes and the workloads running on them, you can specify them during cluster creation using the `remoteNodeNetworks` and `remotePodNetworks` (optional) properties:
+
+```ts
+import { KubectlV35Layer } from '@aws-cdk/lambda-layer-kubectl-v35';
+
+new eks.Cluster(this, 'Cluster', {
+  version: eks.KubernetesVersion.V1_35,
+  kubectlLayer: new KubectlV35Layer(this, 'KubectlLayer'),
+  remoteNodeNetworks: [
+    {
+      cidrs: ['10.0.0.0/16'],
+    },
+  ],
+  remotePodNetworks: [
+    {
+      cidrs: ['192.168.0.0/16'],
+    },
+  ],
+});
+```
+
+### Self-Managed Add-ons
+
+Amazon EKS automatically installs self-managed add-ons such as the Amazon VPC CNI plugin for Kubernetes, kube-proxy, and CoreDNS for every cluster. You can change the default configuration of the add-ons and update them when desired. If you wish to create a cluster without the default add-ons, set `bootstrapSelfManagedAddons` as `false`. When this is set to false, make sure to install the necessary alternatives which provide functionality that enables pod and service operations for your EKS cluster.
+
+> Changing the value of `bootstrapSelfManagedAddons` after the EKS cluster creation will result in a replacement of the cluster.
 
 ## Permissions and Security
 
@@ -1039,7 +1234,7 @@ To access the Kubernetes resources from the console, make sure your viewing prin
 in the `aws-auth` ConfigMap. Some options to consider:
 
 ```ts
-import { KubectlV29Layer } from '@aws-cdk/lambda-layer-kubectl-v29';
+import { KubectlV35Layer } from '@aws-cdk/lambda-layer-kubectl-v35';
 declare const cluster: eks.Cluster;
 declare const your_current_role: iam.Role;
 declare const vpc: ec2.Vpc;
@@ -1059,8 +1254,9 @@ your_current_role.addToPolicy(new iam.PolicyStatement({
 
 ```ts
 // Option 2: create your custom mastersRole with scoped assumeBy arn as the Cluster prop. Switch to this role from the AWS console.
-import { KubectlV29Layer } from '@aws-cdk/lambda-layer-kubectl-v29';
+import { KubectlV35Layer } from '@aws-cdk/lambda-layer-kubectl-v35';
 declare const vpc: ec2.Vpc;
+
 
 const mastersRole = new iam.Role(this, 'MastersRole', {
   assumedBy: new iam.ArnPrincipal('arn_for_trusted_principal'),
@@ -1068,8 +1264,8 @@ const mastersRole = new iam.Role(this, 'MastersRole', {
 
 const cluster = new eks.Cluster(this, 'EksCluster', {
   vpc,
-  version: eks.KubernetesVersion.V1_29,
-  kubectlLayer: new KubectlV29Layer(this, 'KubectlLayer'),
+  version: eks.KubernetesVersion.V1_35,
+  kubectlLayer: new KubectlV35Layer(this, 'KubectlLayer'),
   mastersRole,
 });
 
@@ -1102,6 +1298,143 @@ consoleReadOnlyRole.addToPolicy(new iam.PolicyStatement({
 // Add this role to system:masters RBAC group
 cluster.awsAuth.addMastersRole(consoleReadOnlyRole)
 ```
+
+### Access Config
+
+Amazon EKS supports three modes of authentication: `CONFIG_MAP`, `API_AND_CONFIG_MAP`, and `API`. You can enable cluster
+to use access entry APIs by using authenticationMode `API` or `API_AND_CONFIG_MAP`. Use authenticationMode `CONFIG_MAP`
+to continue using aws-auth configMap exclusively. When `API_AND_CONFIG_MAP` is enabled, the cluster will source authenticated
+AWS IAM principals from both Amazon EKS access entry APIs and the aws-auth configMap, with priority given to the access entry API.
+
+To specify the `authenticationMode`:
+
+```ts
+import { KubectlV35Layer } from '@aws-cdk/lambda-layer-kubectl-v35';
+declare const vpc: ec2.Vpc;
+
+new eks.Cluster(this, 'Cluster', {
+  vpc,
+  version: eks.KubernetesVersion.V1_35,
+  kubectlLayer: new KubectlV35Layer(this, 'KubectlLayer'),
+  authenticationMode: eks.AuthenticationMode.API_AND_CONFIG_MAP,
+});
+```
+
+> **Note** - Switching authentication modes on an existing cluster is a one-way operation. You can switch from
+> `CONFIG_MAP` to `API_AND_CONFIG_MAP`. You can then switch from `API_AND_CONFIG_MAP` to `API`.
+> You cannot revert these operations in the opposite direction. Meaning you cannot switch back to
+> `CONFIG_MAP` or `API_AND_CONFIG_MAP` from `API`. And you cannot switch back to `CONFIG_MAP` from `API_AND_CONFIG_MAP`.
+
+Read [A deep dive into simplified Amazon EKS access management controls
+](https://aws.amazon.com/blogs/containers/a-deep-dive-into-simplified-amazon-eks-access-management-controls/) for more details.
+
+You can disable granting the cluster admin permissions to the cluster creator role on bootstrapping by setting 
+`bootstrapClusterCreatorAdminPermissions` to false. 
+
+> **Note** - Switching `bootstrapClusterCreatorAdminPermissions` on an existing cluster would cause cluster replacement and should be avoided in production.
+
+
+### Access Entry
+
+An access entry is a cluster identity—directly linked to an AWS IAM principal user or role that is used to authenticate to
+an Amazon EKS cluster. An Amazon EKS access policy authorizes an access entry to perform specific cluster actions.
+
+Access policies are Amazon EKS-specific policies that assign Kubernetes permissions to access entries. Amazon EKS supports
+only predefined and AWS managed policies. Access policies are not AWS IAM entities and are defined and managed by Amazon EKS.
+Amazon EKS access policies include permission sets that support common use cases of administration, editing, or read-only access
+to Kubernetes resources. See [Access Policy Permissions](https://docs.aws.amazon.com/eks/latest/userguide/access-policies.html#access-policy-permissions) for more details.
+
+Use `AccessPolicy` to include predefined AWS managed policies:
+
+```ts
+// AmazonEKSClusterAdminPolicy with `cluster` scope
+eks.AccessPolicy.fromAccessPolicyName('AmazonEKSClusterAdminPolicy', {
+  accessScopeType: eks.AccessScopeType.CLUSTER,
+});
+// AmazonEKSAdminPolicy with `namespace` scope
+eks.AccessPolicy.fromAccessPolicyName('AmazonEKSAdminPolicy', {
+  accessScopeType: eks.AccessScopeType.NAMESPACE,
+  namespaces: ['foo', 'bar'] } );
+```
+
+Use `grantAccess()` to grant the AccessPolicy to an IAM principal:
+
+```ts
+import { KubectlV35Layer } from '@aws-cdk/lambda-layer-kubectl-v35';
+declare const vpc: ec2.Vpc;
+
+const clusterAdminRole = new iam.Role(this, 'ClusterAdminRole', {
+  assumedBy: new iam.ArnPrincipal('arn_for_trusted_principal'),
+});
+
+const eksAdminRole = new iam.Role(this, 'EKSAdminRole', {
+  assumedBy: new iam.ArnPrincipal('arn_for_trusted_principal'),
+});
+
+const eksAdminViewRole = new iam.Role(this, 'EKSAdminViewRole', {
+  assumedBy: new iam.ArnPrincipal('arn_for_trusted_principal'),
+});
+
+const cluster = new eks.Cluster(this, 'Cluster', {
+  vpc,
+  mastersRole: clusterAdminRole,
+  version: eks.KubernetesVersion.V1_35,
+  kubectlLayer: new KubectlV35Layer(this, 'KubectlLayer'),
+  authenticationMode: eks.AuthenticationMode.API_AND_CONFIG_MAP,
+});
+
+// Cluster Admin role for this cluster
+cluster.grantAccess('clusterAdminAccess', clusterAdminRole.roleArn, [
+  eks.AccessPolicy.fromAccessPolicyName('AmazonEKSClusterAdminPolicy', {
+    accessScopeType: eks.AccessScopeType.CLUSTER,
+  }),
+]);
+
+// EKS Admin role for specified namespaces of this cluster
+cluster.grantAccess('eksAdminRoleAccess', eksAdminRole.roleArn, [
+  eks.AccessPolicy.fromAccessPolicyName('AmazonEKSAdminPolicy', { 
+    accessScopeType: eks.AccessScopeType.NAMESPACE,
+    namespaces: ['foo', 'bar'],
+  }),
+]);
+
+// EKS Admin Viewer role for specified namespaces of this cluster
+cluster.grantAccess('eksAdminViewRoleAccess', eksAdminViewRole.roleArn, [
+  eks.AccessPolicy.fromAccessPolicyName('AmazonEKSAdminViewPolicy', {
+    accessScopeType: eks.AccessScopeType.NAMESPACE,
+    namespaces: ['foo', 'bar'],
+  }),
+]);
+```
+
+You can optionally specify an access entry type when granting access:
+
+```ts
+declare const cluster: eks.Cluster;
+declare const nodeRole: iam.Role;
+
+// For EKS Auto Mode node roles
+cluster.grantAccess('NodeAccess', nodeRole.roleArn, [], { accessEntryType: eks.AccessEntryType.EC2 });
+```
+
+Supported types: `STANDARD` (default), `FARGATE_LINUX`, `EC2_LINUX`, `EC2_WINDOWS`, `EC2`, `HYBRID_LINUX`, `HYPERPOD_LINUX`.
+
+**Note**: `EC2`, `HYBRID_LINUX`, and `HYPERPOD_LINUX` types cannot have access policies attached.
+
+### Migrating from ConfigMap to Access Entry
+
+If the cluster is created with the `authenticationMode` property left undefined,
+it will default to `CONFIG_MAP`. 
+
+The update path is: 
+
+`undefined`(`CONFIG_MAP`) -> `API_AND_CONFIG_MAP` -> `API`
+
+If you have explicitly declared `AwsAuth` resources and then try to switch to the `API` mode, which no longer supports the
+`ConfigMap`, AWS CDK will throw an error as a protective measure to prevent you from losing all the access entries in the `ConfigMap`. In this case, you will need to remove all the declared `AwsAuth` resources explicitly and define the access entries before you are allowed to transition to the `API` mode.
+
+> **Note** - This is a one-way transition. Once you switch to the `API` mode,
+you will not be able to switch back. Therefore, it is crucial to ensure that you have defined all the necessary access entries before making the switch to the `API` mode.
 
 ### Cluster Security Group
 
@@ -1180,16 +1513,26 @@ const serviceAccount = cluster.addServiceAccount('MyServiceAccount', {
 });
 ```
 
+To overwrite an existing service account, use the `overwriteServiceAccount` property:
+
+```ts
+declare const cluster: eks.Cluster;
+// overwrite existing service account
+const serviceAccount = cluster.addServiceAccount('MyServiceAccount', {
+  overwriteServiceAccount: true,
+});
+```
+
 You can also add service accounts to existing clusters.
 To do so, pass the `openIdConnectProvider` property when you import the cluster into the application.
 
 ```ts
 // you can import an existing provider
-const provider = eks.OpenIdConnectProvider.fromOpenIdConnectProviderArn(this, 'Provider', 'arn:aws:iam::123456:oidc-provider/oidc.eks.eu-west-1.amazonaws.com/id/AB123456ABC');
+const provider = eks.OidcProviderNative.fromOidcProviderArn(this, 'Provider', 'arn:aws:iam::123456:oidc-provider/oidc.eks.eu-west-1.amazonaws.com/id/AB123456ABC');
 
 // or create a new one using an existing issuer url
 declare const issuerUrl: string;
-const provider2 = new eks.OpenIdConnectProvider(this, 'Provider', {
+const provider2 = new eks.OidcProviderNative(this, 'Provider', {
   url: issuerUrl,
 });
 
@@ -1208,6 +1551,127 @@ bucket.grantReadWrite(serviceAccount);
 Note that adding service accounts requires running `kubectl` commands against the cluster.
 This means you must also pass the `kubectlRoleArn` when importing the cluster.
 See [Using existing Clusters](https://github.com/aws/aws-cdk/tree/main/packages/aws-cdk-lib/aws-eks#using-existing-clusters).
+
+
+##### Migrating from eks.OpenIdConnectProvider to eks.OidcProviderNative
+
+`eks.OpenIdConnectProvider` creates an IAM OIDC (OpenId Connect) provider using a custom resource while `eks.OidcProviderNative` uses the CFN L1 (AWS::IAM::OidcProvider) to create the provider. It is recommended for new and existing projects to use `eks.OidcProviderNative`. Migrating from the `eks.OpenIdConnectProvider` is not as trivial as switching out the property since the property controls the creation of a resource whose type is changing. Due to the potential complexlity of the migration and the requirement of a manual step (`cdk import`) we are not deprecating the `eks.OpenIdConnectProvider` construct but encourge you to migrate.
+
+To migrate without temporarily removing the OIDCProvider, follow these steps:
+
+1. Set the `removalPolicy` of `cluster.openIdConnectProvider` to `RETAIN`.
+
+   ```ts
+   import * as cdk from 'aws-cdk-lib';
+   declare const cluster: eks.Cluster;
+
+   cdk.RemovalPolicies.of(cluster.openIdConnectProvider).apply(cdk.RemovalPolicy.RETAIN);
+   ```
+
+2. Run `cdk diff` to verify the changes are expected then `cdk deploy`.
+
+3. Add the following to the `context` field of your `cdk.json` to enable the feature flag that creates the native oidc provider.
+
+   ```json
+   "@aws-cdk/aws-eks:useNativeOidcProvider": true,
+   ```
+
+4. Run `cdk diff` and ensure the changes are expected. Example of an expected diff:
+
+   ```bash
+   Resources
+   [-] Custom::AWSCDKOpenIdConnectProvider TestCluster/OpenIdConnectProvider/Resource TestClusterOpenIdConnectProviderE18F0FD0 orphan
+   [-] AWS::IAM::Role Custom::AWSCDKOpenIdConnectProviderCustomResourceProvider/Role CustomAWSCDKOpenIdConnectProviderCustomResourceProviderRole517FED65 destroy
+   [-] AWS::Lambda::Function Custom::AWSCDKOpenIdConnectProviderCustomResourceProvider/Handler CustomAWSCDKOpenIdConnectProviderCustomResourceProviderHandlerF2C543E0 destroy
+   [+] AWS::IAM::OIDCProvider TestCluster/OidcProviderNative TestClusterOidcProviderNative0BE3F155
+   ```
+
+5. Run `cdk import --force` and provide the ARN of the existing OpenIdConnectProvider when prompted. You will get a warning about pending changes to existing resources which is expected.
+
+6. Run `cdk deploy` to apply any pending changes. This will apply the destroy/orphan changes in the above example.
+
+If you are creating the OpenIdConnectProvider manually via `new eks.OpenIdConnectProvider`, follow these steps:
+
+1. Set the `removalPolicy` of the existing `OpenIdConnectProvider` to `RemovalPolicy.RETAIN`.
+
+   ```ts
+   import * as cdk from 'aws-cdk-lib';
+   // Step 1: Add retain policy to existing provider
+   const existingProvider = new eks.OpenIdConnectProvider(this, 'Provider', {
+     url: 'https://oidc.eks.us-west-2.amazonaws.com/id/EXAMPLE',
+     removalPolicy: cdk.RemovalPolicy.RETAIN, // Add this line
+   });
+   ```
+
+2. Deploy with the retain policy to avoid deletion of the underlying resource.
+
+   ```bash
+   cdk deploy
+   ```
+
+3. Replace `OpenIdConnectProvider` with `OidcProviderNative` in your code.
+
+   ```ts
+   // Step 3: Replace with native provider
+   const nativeProvider = new eks.OidcProviderNative(this, 'Provider', {
+     url: 'https://oidc.eks.us-west-2.amazonaws.com/id/EXAMPLE',
+   });
+   ```
+
+4. Run `cdk diff` and verify the changes are expected. Example of an expected diff:
+
+   ```bash
+   Resources
+   [-] Custom::AWSCDKOpenIdConnectProvider TestCluster/OpenIdConnectProvider/Resource TestClusterOpenIdConnectProviderE18F0FD0 orphan
+   [-] AWS::IAM::Role Custom::AWSCDKOpenIdConnectProviderCustomResourceProvider/Role CustomAWSCDKOpenIdConnectProviderCustomResourceProviderRole517FED65 destroy
+   [-] AWS::Lambda::Function Custom::AWSCDKOpenIdConnectProviderCustomResourceProvider/Handler CustomAWSCDKOpenIdConnectProviderCustomResourceProviderHandlerF2C543E0 destroy
+   [+] AWS::IAM::OIDCProvider TestCluster/OidcProviderNative TestClusterOidcProviderNative0BE3F155
+   ```
+
+5. Run `cdk import --force` to import the existing OIDC provider resource by providing the existing ARN.
+
+6. Run `cdk deploy` to apply any pending changes. This will apply the destroy/orphan operations in the example diff above.
+
+
+### Pod Identities
+
+[Amazon EKS Pod Identities](https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html) is a feature that simplifies how
+Kubernetes applications running on Amazon EKS can obtain AWS IAM credentials. It provides a way to associate an IAM role with a
+Kubernetes service account, allowing pods to retrieve temporary AWS credentials without the need
+to manage IAM roles and policies directly.
+
+By default, `ServiceAccount` creates an `OpenIdConnectProvider` for 
+[IRSA(IAM roles for service accounts)](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html) if
+`identityType` is `undefined` or `IdentityType.IRSA`.
+
+You may opt in Amaozn EKS Pod Identities as below:
+
+```ts
+declare const cluster: eks.Cluster;
+
+new eks.ServiceAccount(this, 'ServiceAccount', {
+  cluster,
+  name: 'test-sa',
+  namespace: 'default',
+  identityType: eks.IdentityType.POD_IDENTITY,
+});
+```
+
+When you create the ServiceAccount with the `identityType` set to `POD_IDENTITY`,
+`ServiceAccount` contruct will perform the following actions behind the scenes:
+
+1. It will create an IAM role with the necessary trust policy to allow the "pods.eks.amazonaws.com" principal to assume the role.
+This trust policy grants the EKS service the permission to retrieve temporary AWS credentials on behalf of the pods using this service account.
+
+2. It will enable the "Amazon EKS Pod Identity Agent" add-on on the EKS cluster. This add-on is responsible for managing the temporary
+AWS credentials and making them available to the pods.
+
+3. It will create an association between the IAM role and the Kubernetes service account. This association allows the pods using this
+service account to obtain the temporary AWS credentials from the associated IAM role.
+
+This simplifies the process of configuring IAM permissions for your Kubernetes applications running on Amazon EKS. It handles the creation of the IAM role,
+the installation of the Pod Identity Agent add-on, and the association between the role and the service account, making it easier to manage AWS credentials
+for your applications.
 
 ## Applying Kubernetes Resources
 
@@ -1352,9 +1816,12 @@ Pruning is enabled by default but can be disabled through the `prune` option
 when a cluster is defined:
 
 ```ts
+import { KubectlV35Layer } from '@aws-cdk/lambda-layer-kubectl-v35';
+
 new eks.Cluster(this, 'MyCluster', {
-  version: eks.KubernetesVersion.V1_29,
+  version: eks.KubernetesVersion.V1_35,
   prune: false,
+  kubectlLayer: new KubectlV35Layer(this, 'kubectl'),
 });
 ```
 
@@ -1515,7 +1982,7 @@ To get started, add the following dependencies to your `package.json` file:
 "dependencies": {
   "cdk8s": "^2.0.0",
   "cdk8s-plus-25": "^2.0.0",
-  "constructs": "^10.0.0"
+  "constructs": "^10.5.0"
 }
 ```
 
@@ -1670,6 +2137,25 @@ declare const cluster: eks.Cluster;
 const loadBalancerAddress = cluster.getServiceLoadBalancerAddress('my-service');
 ```
 
+## Add-ons
+
+[Add-ons](https://docs.aws.amazon.com/eks/latest/userguide/eks-add-ons.html) is a software that provides supporting operational capabilities to Kubernetes applications. The EKS module supports adding add-ons to your cluster using the `eks.Addon` class.
+
+```ts
+declare const cluster: eks.Cluster;
+
+new eks.Addon(this, 'Addon', {
+  cluster,
+  addonName: 'coredns',
+  addonVersion: 'v1.11.4-eksbuild.2',
+  // whether to preserve the add-on software on your cluster but Amazon EKS stops managing any settings for the add-on.
+  preserveOnDelete: false,
+  configurationValues: {
+    replicaCount: 2,
+  },
+});
+```
+
 ## Using existing clusters
 
 The Amazon EKS library allows defining Kubernetes resources such as [Kubernetes
@@ -1738,14 +2224,30 @@ You can enable logging for each one separately using the `clusterLogging`
 property. For example:
 
 ```ts
+import { KubectlV35Layer } from '@aws-cdk/lambda-layer-kubectl-v35';
+
 const cluster = new eks.Cluster(this, 'Cluster', {
   // ...
-  version: eks.KubernetesVersion.V1_29,
+  version: eks.KubernetesVersion.V1_35,
   clusterLogging: [
     eks.ClusterLoggingTypes.API,
     eks.ClusterLoggingTypes.AUTHENTICATOR,
     eks.ClusterLoggingTypes.SCHEDULER,
   ],
+  kubectlLayer: new KubectlV35Layer(this, 'kubectl'),
+});
+```
+
+## NodeGroup Repair Config
+
+You can enable Managed Node Group [auto-repair config](https://docs.aws.amazon.com/eks/latest/userguide/node-health.html#node-auto-repair) using `enableNodeAutoRepair`
+property. For example:
+
+```ts
+declare const cluster: eks.Cluster;
+
+cluster.addNodegroupCapacity('NodeGroup', {
+  enableNodeAutoRepair:true,
 });
 ```
 

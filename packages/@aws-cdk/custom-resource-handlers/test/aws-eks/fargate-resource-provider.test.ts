@@ -1,4 +1,4 @@
-/* eslint-disable import/no-extraneous-dependencies */
+
 import * as eks from '@aws-sdk/client-eks';
 import * as sinon from 'sinon';
 import { FARGATE_PROFILE_RESOURCE_TYPE } from '../../lib/aws-eks/cluster-resource-handler/consts';
@@ -173,7 +173,6 @@ describe('fargate resource provider', () => {
   });
 
   describe('delete', () => {
-
     test('calls deleteFargateProfile', async () => {
       // GIVEN
       const client = newEksClientMock();
@@ -288,7 +287,7 @@ function newEksClientMock() {
     updateClusterConfig: sinon.fake.throws('not implemented'),
     updateClusterVersion: sinon.fake.throws('not implemented'),
     configureAssumeRole: sinon.fake(),
-    createFargateProfile: sinon.fake.returns({
+    createFargateProfile: sinon.fake.resolves({
       fargateProfile: {
         fargateProfileName: 'MockProfileName',
         fargateProfileArn: 'MockProfileArn',
@@ -296,5 +295,7 @@ function newEksClientMock() {
     }),
     deleteFargateProfile: sinon.fake(),
     describeFargateProfile: sinon.fake.throws('not implemented'),
+    tagResource: sinon.fake.throws('not implemented'),
+    untagResource: sinon.fake.throws('not implemented'),
   };
 }

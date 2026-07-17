@@ -1,7 +1,11 @@
-import { Construct, IConstruct } from 'constructs';
-import { CfnJobDefinition } from './batch.generated';
-import * as ecs from '../../aws-ecs';
-import { Lazy, Size } from '../../core';
+import type { IConstruct } from 'constructs';
+import { Construct } from 'constructs';
+import type { CfnJobDefinition } from './batch.generated';
+import type * as ecs from '../../aws-ecs';
+import type { Size } from '../../core';
+import type { IArrayBox, IReadableBox } from '../../core/lib/helpers-internal';
+import { Box } from '../../core/lib/helpers-internal';
+import { propertyInjectable } from '../../core/lib/prop-injectable';
 
 const EMPTY_DIR_VOLUME_SYMBOL = Symbol.for('aws-cdk-lib/aws-batch/lib/eks-container-definition.EmptyDirVolume');
 const HOST_PATH_VOLUME_SYMBOL = Symbol.for('aws-cdk-lib/aws-batch/lib/eks-container-definition.HostPathVolume');
@@ -39,7 +43,7 @@ export interface IEksContainerDefinition extends IConstruct {
    * For example, if the reference is to `"$(NAME1)"` and the `NAME1` environment variable doesn't exist,
    * the command string will remain `"$(NAME1)."` `$$` is replaced with `$` and the resulting string isn't expanded.
    * For example, `$$(VAR_NAME)` will be passed as `$(VAR_NAME)` whether or not the `VAR_NAME` environment variable exists.
-
+   *
    * The entrypoint can't be updated.
    *
    * @see https://docs.docker.com/engine/reference/builder/#entrypoint
@@ -315,7 +319,7 @@ export interface EksContainerDefinitionProps {
    * For example, if the reference is to `"$(NAME1)"` and the `NAME1` environment variable doesn't exist,
    * the command string will remain `"$(NAME1)."` `$$` is replaced with `$` and the resulting string isn't expanded.
    * For example, `$$(VAR_NAME)` will be passed as `$(VAR_NAME)` whether or not the `VAR_NAME` environment variable exists.
-
+   *
    * The entrypoint can't be updated.
    *
    * @see https://docs.docker.com/engine/reference/builder/#entrypoint
@@ -530,7 +534,13 @@ export interface EksContainerDefinitionProps {
 /**
  * A container that can be run with EKS orchestration on EC2 resources
  */
+@propertyInjectable
 export class EksContainerDefinition extends Construct implements IEksContainerDefinition {
+  /**
+   * Uniquely identifies this class.
+   */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-batch.EksContainerDefinition';
+
   public readonly image: ecs.ContainerImage;
   public readonly args?: string[];
   public readonly command?: string[];
@@ -548,9 +558,13 @@ export class EksContainerDefinition extends Construct implements IEksContainerDe
   public readonly runAsGroup?: number;
   public readonly runAsRoot?: boolean;
   public readonly runAsUser?: number;
-  public readonly volumes: EksVolume[];
+  private readonly _volumes: IArrayBox<EksVolume>;
 
   private readonly imageConfig: ecs.ContainerImageConfig;
+
+  public get volumes(): EksVolume[] {
+    return this._volumes.getMutable();
+  }
 
   constructor(scope: Construct, id: string, props: EksContainerDefinitionProps) {
     super(scope, id);
@@ -572,12 +586,19 @@ export class EksContainerDefinition extends Construct implements IEksContainerDe
     this.runAsGroup = props.runAsGroup;
     this.runAsRoot = props.runAsRoot;
     this.runAsUser = props.runAsUser;
-    this.volumes = props.volumes ?? [];
+    this._volumes = Box.fromArray(props.volumes ?? []);
     this.imageConfig = props.image.bind(this, this as any);
   }
 
   addVolume(volume: EksVolume) {
-    this.volumes.push(volume);
+    this._volumes.push(volume);
+  }
+
+  /**
+   * @internal
+   */
+  public _mapVolumes<B>(fn: (volume: EksVolume) => B): IReadableBox<Array<B>> {
+    return this._volumes.map(fn);
   }
 
   /**
@@ -616,22 +637,13 @@ export class EksContainerDefinition extends Construct implements IEksContainerDe
         runAsNonRoot: !this.runAsRoot,
         runAsUser: this.runAsUser,
       },
-      volumeMounts: Lazy.any({
-        produce: () => {
-          if (this.volumes.length === 0) {
-            return undefined;
-          }
-          return this.volumes.map((volume) => {
-            return {
-              name: volume.name,
-              mountPath: volume.containerPath,
-              readOnly: volume.readonly,
-            };
-          });
-        },
-      }),
+      volumeMounts: this._volumes.map((volume) => ({
+        name: volume.name,
+        mountPath: volume.containerPath,
+        readOnly: volume.readonly,
+      })),
     };
-  };
+  }
 }
 
 /**

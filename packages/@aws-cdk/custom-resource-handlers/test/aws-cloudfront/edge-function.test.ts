@@ -45,10 +45,10 @@ describe('handler', () => {
     };
 
     // WHEN
-    const response = await handler(event);
+    const response = await handler(event as any);
 
     // THEN
-    expect(mockSSM.getParameter).toBeCalledWith({ Name: 'edge-function-arn' });
+    expect(mockSSM.getParameter).toHaveBeenCalledWith({ Name: 'edge-function-arn' });
     expect(response).toEqual({ Data: { FunctionArn: 'arn:aws:lambda:us-west-2:123456789012:function:edge-function' } });
   });
 
@@ -60,10 +60,10 @@ describe('handler', () => {
     };
 
     // WHEN
-    const response = await handler(event);
+    const response = await handler(event as any);
 
     // THEN
-    expect(mockSSM.getParameter).toBeCalledWith({ Name: 'edge-function-arn' });
+    expect(mockSSM.getParameter).toHaveBeenCalledWith({ Name: 'edge-function-arn' });
     expect(response).toEqual({ Data: { FunctionArn: 'arn:aws:lambda:us-west-2:123456789012:function:edge-function' } });
   });
 
@@ -75,7 +75,7 @@ describe('handler', () => {
     };
 
     // WHEN
-    const response = await handler(event);
+    const response = await handler(event as any);
 
     // THEN
     expect(mockSSM.getParameter).not.toHaveBeenCalled();

@@ -9,7 +9,7 @@
       "Value": "true"
      },
      {
-      "Key": "aws-cdk:cr-owned:39341a13",
+      "Key": "aws-cdk:cr-owned:293255fb",
       "Value": "true"
      }
     ]
@@ -68,7 +68,10 @@
        "Action": "s3:PutObject",
        "Condition": {
         "StringNotLike": {
-         "s3:x-amz-content-sha256": "????????????????????????????????????????????????????????????????"
+         "s3:x-amz-content-sha256": [
+          "[A-Fa-f0-9]{64}",
+          "STREAMING-*"
+         ]
         }
        },
        "Effect": "Deny",
@@ -143,7 +146,7 @@
      "S3Bucket": {
       "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
      },
-     "S3Key": "96ea260348625427bb7f28ab3b379f62da6f428bcd155cb13f9261aa6a404b0d.zip"
+     "S3Key": "44e9c4d7a5d3fd2d677e1a7e416b2b56f6b0104bd5eff9cac5557b4c65a9dc61.zip"
     },
     "Timeout": 900,
     "MemorySize": 128,
@@ -154,7 +157,7 @@
       "Arn"
      ]
     },
-    "Runtime": "nodejs18.x",
+    "Runtime": "nodejs24.x",
     "Description": {
      "Fn::Join": [
       "",
@@ -172,14 +175,14 @@
     "CustomS3AutoDeleteObjectsCustomResourceProviderRole3B1BD092"
    ]
   },
-  "DeploymentAwsCliLayerB82B26A3": {
+  "DeployWithSignedContentAwsCliLayer7B5984D9": {
    "Type": "AWS::Lambda::LayerVersion",
    "Properties": {
     "Content": {
      "S3Bucket": {
       "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
      },
-     "S3Key": "3322b7049fb0ed2b7cbb644a2ada8d1116ff80c32dca89e6ada846b5de26f961.zip"
+     "S3Key": "a72522445441e9b66c2f16956c54d4786af8c61c156b80c48a6e7c32fcc49023.zip"
     },
     "Description": "/opt/awscli/aws"
    },
@@ -187,7 +190,7 @@
     "DestinationPolicy7982387E"
    ]
   },
-  "DeploymentCustomResource47E8B2E6": {
+  "DeployWithSignedContentCustomResourceD837254D": {
    "Type": "Custom::CDKBucketDeployment",
    "Properties": {
     "ServiceToken": {
@@ -207,9 +210,11 @@
     "DestinationBucketName": {
      "Ref": "Destination920A3C57"
     },
+    "WaitForDistributionInvalidation": true,
     "RetainOnDelete": false,
     "Prune": true,
-    "SignContent": true
+    "SignContent": true,
+    "OutputObjectKeys": true
    },
    "DependsOn": [
     "DestinationPolicy7982387E"
@@ -349,7 +354,7 @@
      "S3Bucket": {
       "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
      },
-     "S3Key": "2d56e153cac88d3e0c2f842e8e6f6783b8725bf91f95e0673b4725448a56e96d.zip"
+     "S3Key": "97e9ebf0b174a5c8f7faa505739022b7f509edddffcab9211dcd08b759944c4f.zip"
     },
     "Environment": {
      "Variables": {
@@ -359,7 +364,7 @@
     "Handler": "index.handler",
     "Layers": [
      {
-      "Ref": "DeploymentAwsCliLayerB82B26A3"
+      "Ref": "DeployWithSignedContentAwsCliLayer7B5984D9"
      }
     ],
     "Role": {
@@ -368,7 +373,7 @@
       "Arn"
      ]
     },
-    "Runtime": "python3.9",
+    "Runtime": "python3.13",
     "Timeout": 900
    },
    "DependsOn": [

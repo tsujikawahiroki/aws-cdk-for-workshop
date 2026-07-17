@@ -1,4 +1,4 @@
-import { Resource, TagInformation, TagVariant } from '@aws-cdk/service-spec-types';
+import type { Resource, TagInformation, TagVariant } from '@aws-cdk/service-spec-types';
 
 /**
  * Property names that were not extended with the IResolvable type because they were considered to be tags
@@ -26,12 +26,32 @@ export function resourceTaggabilityStyle(resource: Resource): TaggabilityStyle |
   }
 
   if (resource.tagInformation) {
-    return { style: 'modern', ...resource.tagInformation };
+    // Only treat the resource as modern-taggable if the tag property actually exists as a
+    // writable property. Some resources (e.g. AWS::RDS::ReservedDBInstance) carry
+    // `tagInformation` but expose `Tags` only as a read-only attribute, with no corresponding
+    // property. In that case the property loop never emits a `cdkTagManager`, so implementing
+    // `ITaggableV2` would produce a class that does not satisfy the interface.
+    if (resource.properties[resource.tagInformation.tagPropertyName]) {
+      return { style: 'modern', ...resource.tagInformation };
+    }
+    return undefined;
   }
 
   return undefined;
 }
 
+/**
+ * Mapping of legacy taggable resources to their tag property name and variant
+ *
+ * Before the introduction of iTaggablev2 the CDK defined a `tags` property on constructs
+ * which contained the tagManager, however in cases where the resource itself contained a
+ * property named 'tags', the CDK would create a `tagsRaw` property to represent that CFN tags property.
+ *
+ * Upon the introduction of iTaggablev2, the CDK now uses the `cdkTagManager` property to manage tags.
+ * This mapping of legacy resources is used to preserve the legacy behavior of applying tags so customers
+ * who previously were tagging these constructs using `myConstruct.tags.setTag('key', 'value')` will
+ * continue to be able to do so, without breaking changes.
+ */
 const LEGACY_TAGGABLES: Record<string, [string, TagInformation['variant']]> = {
   'AWS::ACMPCA::CertificateAuthority': ['Tags', 'standard'],
   'AWS::AccessAnalyzer::Analyzer': ['Tags', 'standard'],

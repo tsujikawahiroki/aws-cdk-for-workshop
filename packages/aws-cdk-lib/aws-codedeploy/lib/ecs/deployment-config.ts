@@ -1,5 +1,8 @@
-import { Construct } from 'constructs';
-import { BaseDeploymentConfig, BaseDeploymentConfigOptions, ComputePlatform, IBaseDeploymentConfig } from '../base-deployment-config';
+import type { Construct } from 'constructs';
+import { addConstructMetadata } from '../../../core/lib/metadata-resource';
+import { propertyInjectable } from '../../../core/lib/prop-injectable';
+import type { BaseDeploymentConfigOptions, IBaseDeploymentConfig } from '../base-deployment-config';
+import { BaseDeploymentConfig, ComputePlatform } from '../base-deployment-config';
 import { deploymentConfig } from '../private/utils';
 import { TrafficRouting } from '../traffic-routing-config';
 
@@ -36,7 +39,10 @@ export interface EcsDeploymentConfigProps extends BaseDeploymentConfigOptions {
  *
  * @resource AWS::CodeDeploy::DeploymentConfig
  */
+@propertyInjectable
 export class EcsDeploymentConfig extends BaseDeploymentConfig implements IEcsDeploymentConfig {
+  /** Uniquely identifies this class. */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-codedeploy.EcsDeploymentConfig';
   /** CodeDeploy predefined deployment configuration that shifts all traffic to the updated ECS task set at once. */
   public static readonly ALL_AT_ONCE = EcsDeploymentConfig.deploymentConfig('CodeDeployDefault.ECSAllAtOnce');
   /** CodeDeploy predefined deployment configuration that shifts 10 percent of traffic every minute until all traffic is shifted. */
@@ -70,5 +76,7 @@ export class EcsDeploymentConfig extends BaseDeploymentConfig implements IEcsDep
       computePlatform: ComputePlatform.ECS,
       trafficRouting: props?.trafficRouting ?? TrafficRouting.allAtOnce(),
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
   }
 }

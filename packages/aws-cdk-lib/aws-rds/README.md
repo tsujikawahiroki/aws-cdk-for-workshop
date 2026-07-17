@@ -67,6 +67,21 @@ By default, the master password will be generated and stored in AWS Secrets Mana
 Your cluster will be empty by default. To add a default database upon construction, specify the
 `defaultDatabaseName` attribute.
 
+When you create a DB instance in your cluster, Aurora automatically chooses an appropriate AZ for that instance if you don't specify an AZ.
+You can place each instance in fixed availability zone by specifying `availabilityZone` property.
+For details, see [Regions and Availability Zones](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Concepts.RegionsAndAvailabilityZones.html).
+
+```ts
+declare const vpc: ec2.Vpc;
+const cluster = new rds.DatabaseCluster(this, 'Database', {
+  engine: rds.DatabaseClusterEngine.auroraMysql({ version: rds.AuroraMysqlEngineVersion.VER_3_02_1 }),
+  writer: rds.ClusterInstance.provisioned('writer', {
+    availabilityZone: 'us-east-1a',
+  }),
+  vpc,
+});
+```
+
 To use dual-stack mode, specify `NetworkType.DUAL` on the `networkType` property:
 
 ```ts
@@ -83,6 +98,29 @@ const cluster = new rds.DatabaseCluster(this, 'Database', {
 
 For more information about dual-stack mode, see [Working with a DB cluster in a VPC](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/USER_VPC.WorkingWithRDSInstanceinaVPC.html).
 
+If you want to issue read/write transactions directly on an Aurora Replica, you can use local write forwarding on [Aurora MySQL](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-mysql-write-forwarding.html)
+and [Aurora PostgreSQL](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-postgresql-write-forwarding.html).
+Local write forwarding allows read replicas to accept write transactions and forward them to the writer DB instance to be committed.
+
+To enable local write forwarding, set the `enableLocalWriteForwarding` property to `true`:
+
+```ts
+declare const vpc: ec2.IVpc;
+
+new rds.DatabaseCluster(this, 'DatabaseCluster', {
+  engine: rds.DatabaseClusterEngine.auroraMysql({ version: rds.AuroraMysqlEngineVersion.VER_3_07_0 }),
+  writer: rds.ClusterInstance.serverlessV2('writerInstance'),
+  readers: [
+    rds.ClusterInstance.serverlessV2('readerInstance1'),
+  ],
+  vpc,
+  enableLocalWriteForwarding: true,
+});
+```
+
+**Note**: Local write forwarding is supported only for Aurora MySQL 3.04 or higher, and for Aurora PostgreSQL
+16.4 or higher (for version 16), 15.8 or higher (for version 15), and 14.13 or higher (for version 14).
+
 Use `DatabaseClusterFromSnapshot` to create a cluster from a snapshot:
 
 ```ts
@@ -92,6 +130,20 @@ new rds.DatabaseClusterFromSnapshot(this, 'Database', {
   writer: rds.ClusterInstance.provisioned('writer'),
   vpc,
   snapshotIdentifier: 'mySnapshot',
+});
+```
+
+By default, automatic minor version upgrades for the engine type are enabled in a cluster, but you can also disable this.
+To do so, set `autoMinorVersionUpgrade` to `false`.
+
+```ts
+declare const vpc: ec2.IVpc;
+
+new rds.DatabaseCluster(this, 'DatabaseCluster', {
+  engine: rds.DatabaseClusterEngine.auroraMysql({ version: rds.AuroraMysqlEngineVersion.VER_3_07_0 }),
+  writer: rds.ClusterInstance.serverlessV2('writerInstance'),
+  vpc,
+  autoMinorVersionUpgrade: false,
 });
 ```
 
@@ -151,6 +203,10 @@ v2](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverle
   capacity of all the instances in the cluster.
 - `ACUUtilization`: Value of the `ServerlessDatabaseCapacity`/ max ACU of the
   cluster.
+- `VolumeReadIOPs`: Cluster-level metric that represents the average number of disk read I/O operations per second.
+- `VolumeWriteIOPs`: Cluster-level metric that represents the average number of disk write I/O operations per second.
+- `ReadIOPS`: Instance-level metric that represents the average read I/O operations per second. This metric is supported by DatabaseCluster and DatabaseClusterFromSnapshot both.
+- `WriteIOPS`: Instance-level metric that represents the average write I/O operations per second. This metric is supported by DatabaseCluster and DatabaseClusterFromSnapshot both.
 
 ```ts
 declare const vpc: ec2.Vpc;
@@ -169,11 +225,45 @@ cluster.metricServerlessDatabaseCapacity({
     threshold: 1.5,
     evaluationPeriods: 3,
 });
+
 cluster.metricACUUtilization({
   period: Duration.minutes(10),
 }).createAlarm(this, 'alarm', {
   evaluationPeriods: 3,
   threshold: 90,
+});
+
+cluster.metricVolumeReadIOPs({
+  period: Duration.minutes(10),
+}).createAlarm(this, 'VolumeReadIOPsAlarm', {
+  threshold: 1000,
+  evaluationPeriods: 3,
+});
+
+cluster.metricVolumeWriteIOPs({
+  period: Duration.minutes(10),
+}).createAlarm(this, 'VolumeWriteIOPsAlarm', {
+  threshold: 1000,
+  evaluationPeriods: 3,
+});
+
+const instance = new rds.DatabaseInstance(this, 'Instance', {
+  engine: rds.DatabaseInstanceEngine.postgres({ version: rds.PostgresEngineVersion.VER_17_6 }),
+  vpc
+});
+
+instance.metricReadIOPS({
+  period: Duration.minutes(10),
+}).createAlarm(this, 'ReadIOPSAlarm', {
+  threshold: 1000,
+  evaluationPeriods: 3,
+});
+
+instance.metricWriteIOPS({
+  period: Duration.minutes(10),
+}).createAlarm(this, 'WriteIOPSAlarm', {
+  threshold: 1000,
+  evaluationPeriods: 3,
 });
 ```
 
@@ -213,6 +303,21 @@ things.
 * Network throughput is proportional to capacity
 
 > *Info* More complete details can be found [in the docs](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2.setting-capacity.html#aurora-serverless-v2-examples-setting-capacity-range-for-cluster)
+
+You can also set minimum capacity to zero ACUs and automatically pause,
+if they don't have any connections initiated by user activity within a time period specified by `serverlessV2AutoPauseDuration` (300 seconds by default).
+For more information, see [Scaling to Zero ACUs with automatic pause and resume for Aurora Serverless v2](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2-auto-pause.html).
+
+```ts
+declare const vpc: ec2.Vpc;
+const cluster = new rds.DatabaseCluster(this, 'Database', {
+  engine: rds.DatabaseClusterEngine.auroraMysql({ version: rds.AuroraMysqlEngineVersion.VER_3_08_0 }),
+  writer: rds.ClusterInstance.serverlessV2('writer'),
+  serverlessV2MinCapacity: 0,
+  serverlessV2AutoPauseDuration: Duration.hours(1),
+  vpc,
+});
+```
 
 Another way that you control the capacity/scaling of your serverless v2 reader
 instances is based on the [promotion tier](https://aws.amazon.com/blogs/aws/additional-failover-control-for-amazon-aurora/)
@@ -262,7 +367,7 @@ There are a couple of high level differences:
 With a provisioned writer and serverless v2 readers, some of the serverless
 readers will need to be configured to scale with the writer so they can act as
 failover targets. You will need to determine the correct capacity based on the
-provisioned instance type and it's utilization.
+provisioned instance type and its utilization.
 
 As an example, if the CPU utilization for a db.r6g.4xlarge (128 GB) instance
 stays at 10% most times, then the minimum ACUs may be set at 6.5 ACUs
@@ -302,7 +407,7 @@ DB instance to a status of `incompatible-parameters`. While the DB instance has
 the incompatible-parameters status, some operations are blocked. For example,
 you can't upgrade the engine version.
 
-#### CA certificate
+### CA certificate
 
 Use the `caCertificate` property to specify the [CA certificates](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.SSL-certificate-rotation.html)
 to use for a cluster instances:
@@ -322,6 +427,52 @@ const cluster = new rds.DatabaseCluster(this, 'Database', {
   vpc,
 });
 ```
+
+### Scheduling modifications
+
+To schedule modifications to database instances in the next scheduled maintenance window, specify `applyImmediately` to `false` in the instance props:
+
+```ts
+declare const vpc: ec2.Vpc;
+new rds.DatabaseCluster(this, 'Database', {
+  engine: rds.DatabaseClusterEngine.auroraMysql({ version: rds.AuroraMysqlEngineVersion.VER_3_01_0 }),
+  writer: rds.ClusterInstance.provisioned('writer', {
+    applyImmediately: false,
+  }),
+  readers: [
+    rds.ClusterInstance.serverlessV2('reader', {
+      applyImmediately: false,
+    }),
+  ],
+  vpc,
+});
+```
+
+Until RDS applies the changes, the DB instance remains in a drift state.
+As a result, the configuration doesn't fully reflect the requested modifications and temporarily diverges from the intended state.
+
+Currently, CloudFormation does not support to schedule modifications of the cluster configurations.
+To apply changes of the cluster, such as engine version, in the next scheduled maintenance window, you should use `modify-db-cluster` CLI command or management console.
+
+For details, see [Modifying an Amazon Aurora DB cluster](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Aurora.Modifying.html).
+
+### Retaining Automated Backups
+
+By default, when a database cluster is deleted, automated backups are removed immediately unless an AWS Backup policy specifies a point-in-time restore rule. You can control this behavior using the `deleteAutomatedBackups` property:
+
+```ts
+declare const vpc: ec2.IVpc;
+// Retain automated backups after cluster deletion
+new rds.DatabaseCluster(this, 'Database', {
+  engine: rds.DatabaseClusterEngine.auroraMysql({ version: rds.AuroraMysqlEngineVersion.VER_3_01_0 }),
+  writer: rds.ClusterInstance.provisioned('writer'),
+  vpc,
+  deleteAutomatedBackups: false,
+});
+```
+
+When set to `false`, automated backups are retained according to the configured retention period after the cluster is deleted. When set to `true` or not specified (default), automated backups are deleted immediately when the cluster is deleted.
+Detail about this feature can be found in the [AWS documentation](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Aurora.Managing.Backups.Retaining.html).
 
 ### Migrating from instanceProps
 
@@ -381,6 +532,24 @@ const cluster = new rds.DatabaseCluster(this, 'Database', {
 });
 ```
 
+### Creating a read replica cluster
+Use `replicationSourceIdentifier` to create a read replica cluster:
+```ts
+declare const vpc: ec2.Vpc;
+declare const primaryCluster: rds.DatabaseCluster;
+
+new rds.DatabaseCluster(this, 'DatabaseCluster', {
+  engine: rds.DatabaseClusterEngine.auroraMysql({
+    version: rds.AuroraMysqlEngineVersion.VER_3_03_0,
+  }),
+  writer: rds.ClusterInstance.serverlessV2('Writer'),
+  vpc,
+  replicationSourceIdentifier: primaryCluster.clusterArn,
+});
+```
+
+**Note**: Cannot create a read replica cluster with `credentials` as the value is inherited from the source DB cluster.
+
 ## Starting an instance database
 
 To set up an instance database, define a `DatabaseInstance`. You must
@@ -426,6 +595,18 @@ const instance = new rds.DatabaseInstance(this, 'Instance', {
 });
 ```
 
+When you create a DB instance, you can choose an Availability Zone or have Amazon RDS choose one for you randomly.
+For details, see [Regions, Availability Zones, and Local Zones](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Concepts.RegionsAndAvailabilityZones.html).
+
+```ts
+declare const vpc: ec2.Vpc;
+const instance = new rds.DatabaseInstance(this, 'Instance', {
+  engine: rds.DatabaseInstanceEngine.postgres({ version: rds.PostgresEngineVersion.VER_16_3 }),
+  vpc,
+  availabilityZone: 'us-east-1a',
+});
+```
+
 To use dual-stack mode, specify `NetworkType.DUAL` on the `networkType` property:
 
 ```ts
@@ -461,13 +642,23 @@ new rds.DatabaseInstanceReadReplica(this, 'ReadReplica', {
 });
 ```
 
+Or you can [restore a DB instance from a Multi-AZ DB cluster snapshot](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_RestoreFromMultiAZDBClusterSnapshot.html)
+
+```ts
+declare const vpc: ec2.Vpc;
+
+new rds.DatabaseInstanceFromSnapshot(this, 'Instance', {
+  clusterSnapshotIdentifier: 'my-cluster-snapshot',
+  engine: rds.DatabaseInstanceEngine.postgres({ version: rds.PostgresEngineVersion.VER_16_3 }),
+  vpc,
+});
+```
+
 Automatic backups of read replica instances are only supported for MySQL and MariaDB. By default,
 automatic backups are disabled for read replicas and can only be enabled (using `backupRetention`)
 if also enabled on the source instance.
 
-Creating a "production" Oracle database instance with option and parameter groups:
-
-[example of setting up a production oracle instance](test/integ.instance.lit.ts)
+For more information on configuring Oracle database instances, see [option groups](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_WorkingWithOptionGroups.html) and [parameter groups](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/parameter-groups-overview.html).
 
 Use the `storageType` property to specify the [type of storage](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/CHAP_Storage.html)
 to use for the instance:
@@ -476,14 +667,14 @@ to use for the instance:
 declare const vpc: ec2.Vpc;
 
 const iopsInstance = new rds.DatabaseInstance(this, 'IopsInstance', {
-  engine: rds.DatabaseInstanceEngine.mysql({ version: rds.MysqlEngineVersion.VER_8_0_30 }),
+  engine: rds.DatabaseInstanceEngine.mysql({ version: rds.MysqlEngineVersion.VER_8_0_39 }),
   vpc,
   storageType: rds.StorageType.IO1,
   iops: 5000,
 });
 
 const gp3Instance = new rds.DatabaseInstance(this, 'Gp3Instance', {
-  engine: rds.DatabaseInstanceEngine.mysql({ version: rds.MysqlEngineVersion.VER_8_0_30 }),
+  engine: rds.DatabaseInstanceEngine.mysql({ version: rds.MysqlEngineVersion.VER_8_0_39 }),
   vpc,
   allocatedStorage: 500,
   storageType: rds.StorageType.GP3,
@@ -499,7 +690,7 @@ declare const vpc: ec2.Vpc;
 
 // Setting allocatedStorage for DatabaseInstance
 const iopsInstance = new rds.DatabaseInstance(this, 'IopsInstance', {
-  engine: rds.DatabaseInstanceEngine.mysql({ version: rds.MysqlEngineVersion.VER_8_0_30 }),
+  engine: rds.DatabaseInstanceEngine.mysql({ version: rds.MysqlEngineVersion.VER_8_0_39 }),
   vpc,
   storageType: rds.StorageType.IO1,
   iops: 5000,
@@ -525,7 +716,7 @@ to use for the instance:
 declare const vpc: ec2.Vpc;
 
 new rds.DatabaseInstance(this, 'Instance', {
-  engine: rds.DatabaseInstanceEngine.mysql({ version: rds.MysqlEngineVersion.VER_8_0_30 }),
+  engine: rds.DatabaseInstanceEngine.mysql({ version: rds.MysqlEngineVersion.VER_8_0_39 }),
   vpc,
   caCertificate: rds.CaCertificate.RDS_CA_RSA2048_G1,
 });
@@ -537,11 +728,29 @@ You can specify a custom CA certificate with:
 declare const vpc: ec2.Vpc;
 
 new rds.DatabaseInstance(this, 'Instance', {
-  engine: rds.DatabaseInstanceEngine.mysql({ version: rds.MysqlEngineVersion.VER_8_0_30 }),
+  engine: rds.DatabaseInstanceEngine.mysql({ version: rds.MysqlEngineVersion.VER_8_0_39 }),
   vpc,
   caCertificate: rds.CaCertificate.of('future-rds-ca'),
 });
 ```
+
+### Scheduling modifications
+
+To schedule modifications in the next scheduled maintenance window, specify `applyImmediately` to `false`:
+
+```ts
+declare const vpc: ec2.Vpc;
+new rds.DatabaseInstance(this, 'Instance', {
+  engine: rds.DatabaseInstanceEngine.mysql({ version: rds.MysqlEngineVersion.VER_8_0_39 }),
+  vpc,
+  applyImmediately: false,
+});
+```
+
+Until RDS applies the changes, the DB instance remains in a drift state.
+As a result, the configuration doesn't fully reflect the requested modifications and temporarily diverges from the intended state.
+
+For details, see [Using the schedule modifications setting](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_ModifyInstance.ApplyImmediately.html).
 
 ## Setting Public Accessibility
 
@@ -642,6 +851,36 @@ new rds.DatabaseInstance(this, 'InstanceWithCustomizedSecret', {
 });
 ```
 
+### RDS-managed master password
+
+You can enable RDS to manage the master password in AWS Secrets Manager by setting `manageMasterUserPassword` to `true`. When enabled, RDS creates and manages the secret automatically, and you can only specify the `username` and optionally an `encryptionKey` in the credentials:
+
+```ts
+declare const vpc: ec2.Vpc;
+declare const kmsKey: kms.Key;
+
+// Database cluster with RDS-managed password
+new rds.DatabaseCluster(this, 'Cluster', {
+  engine: rds.DatabaseClusterEngine.auroraMysql({ version: rds.AuroraMysqlEngineVersion.VER_3_01_0 }),
+  writer: rds.ClusterInstance.serverlessV2('writer'),
+  vpc,
+  manageMasterUserPassword: true,
+  credentials: rds.Credentials.fromUsername('admin', {
+    encryptionKey: kmsKey, // Optional - uses default KMS key if not specified
+  }),
+});
+
+// Database instance with RDS-managed password
+new rds.DatabaseInstance(this, 'Instance', {
+  engine: rds.DatabaseInstanceEngine.postgres({ version: rds.PostgresEngineVersion.VER_16_3 }),
+  vpc,
+  manageMasterUserPassword: true,
+  credentials: rds.Credentials.fromUsername('postgres'),
+});
+```
+
+**Note**: When `manageMasterUserPassword` is enabled, you cannot use other credential properties like `password`, `secret`, `secretName`, `excludeCharacters`, `replicaRegions`, or `usernameAsString`. Only `username` and `encryptionKey` are allowed. The `secret` property exposes a read-only reference to the secret that RDS created, not a CDK-owned secret — `addToResourcePolicy()` is a no-op, so use `secret.grantRead(grantee)` to grant access.
+
 ### Snapshot credentials
 
 As noted above, Databases created with `DatabaseInstanceFromSnapshot` or `ServerlessClusterFromSnapshot` will not create user and auto-generated password by default because it's not possible to change the master username for a snapshot. Instead, they will use the existing username and password from the snapshot. You can still generate a new password - to generate a secret similarly to the other constructs, pass in credentials with `fromGeneratedSecret()` or `fromGeneratedPassword()`.
@@ -703,7 +942,7 @@ instance.addRotationSingleUser({
 });
 ```
 
-[example of setting up master password rotation for a cluster](test/integ.cluster-rotation.lit.ts)
+For more information on setting up master password rotation for a cluster, see [Set up automatic rotation for Amazon RDS secrets](https://docs.aws.amazon.com/secretsmanager/latest/userguide/rotate-secrets_turn-on-for-db.html).
 
 The multi user rotation scheme is also available:
 
@@ -816,7 +1055,7 @@ proxy.grantConnect(role, 'admin'); // Grant the role connection access to the DB
 See <https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.IAMDBAuth.DBAccounts.html> for setup instructions.
 
 To specify the details of authentication used by a proxy to log in as a specific database
-user use the `clientPasswordAuthType` property:
+user use the `clientPasswordAuthType` property:
 
 ```ts
 declare const vpc: ec2.Vpc;
@@ -834,6 +1073,33 @@ const proxy = new rds.DatabaseProxy(this, 'Proxy', {
   vpc,
   clientPasswordAuthType: rds.ClientPasswordAuthType.MYSQL_NATIVE_PASSWORD,
 });
+```
+
+### Default Authentication Scheme
+
+RDS Proxy supports different authentication schemes to connect to your database. You can configure the default authentication scheme using the `defaultAuthScheme` property.
+
+When using `DefaultAuthScheme.IAM_AUTH`, the proxy uses end-to-end IAM authentication to connect to the database, eliminating the need for secrets stored in AWS Secrets Manager:
+
+```ts
+declare const vpc: ec2.Vpc;
+const instance = new rds.DatabaseInstance(this, 'Database', {
+  engine: rds.DatabaseInstanceEngine.postgres({
+    version: rds.PostgresEngineVersion.VER_17_7,
+  }),
+  vpc,
+  iamAuthentication: true,
+});
+
+const proxy = new rds.DatabaseProxy(this, 'Proxy', {
+  proxyTarget: rds.ProxyTarget.fromInstance(instance),
+  vpc,
+  defaultAuthScheme: rds.DefaultAuthScheme.IAM_AUTH, // No secrets required
+});
+
+// Grant IAM permissions for database connection
+const role = new iam.Role(this, 'DBRole', { assumedBy: new iam.AccountPrincipal(this.account) });
+proxy.grantConnect(role, 'database-user'); // Database user must be specified when using IAM auth
 ```
 
 ### Cluster
@@ -938,6 +1204,7 @@ Data in S3 buckets can be imported to and exported from certain database engines
 functionality, set the `s3ImportBuckets` and `s3ExportBuckets` properties for import and export respectively. When
 configured, the CDK automatically creates and configures IAM roles as required.
 Additionally, the `s3ImportRole` and `s3ExportRole` properties can be used to set this role directly.
+Note: To use `s3ImportRole` and `s3ExportRole` with Aurora PostgreSQL, you must also enable the S3 import and export features when you create the DatabaseClusterEngine.
 
 You can read more about loading data to (or from) S3 here:
 
@@ -992,6 +1259,26 @@ const proxy = dbInstance.addProxy('proxy', {
 });
 ```
 
+### Proxy Endpoint
+The following example add additional endpoint to RDS Proxy.
+
+```ts
+declare const vpc: ec2.Vpc;
+declare const secrets: secretsmanager.Secret[];
+declare const dbInstance: rds.DatabaseInstance;
+
+const proxy = dbInstance.addProxy('Proxy', {
+  secrets,
+  vpc,
+});
+
+// Add a reader endpoint
+proxy.addEndpoint('ProxyEndpoint', {
+  vpc,
+  targetRole: rds.ProxyEndpointTargetRole.READ_ONLY,
+});
+```
+
 ## Exporting Logs
 
 You can publish database logs to Amazon CloudWatch Logs. With CloudWatch Logs, you can perform real-time analysis of the log data,
@@ -1010,7 +1297,7 @@ const cluster = new rds.DatabaseCluster(this, 'Database', {
   }),
   writer: rds.ClusterInstance.provisioned('writer'),
   vpc,
-  cloudwatchLogsExports: ['error', 'general', 'slowquery', 'audit'], // Export all available MySQL-based logs
+  cloudwatchLogsExports: ['error', 'general', 'slowquery', 'audit', 'instance', 'iam-db-auth-error'], // Export all available MySQL-based logs
   cloudwatchLogsRetention: logs.RetentionDays.THREE_MONTHS, // Optional - default is to never expire logs
   cloudwatchLogsRetentionRole: myLogsPublishingRole, // Optional - a role will be created if not provided
   // ...
@@ -1059,6 +1346,7 @@ new rds.OptionGroup(this, 'Options', {
       securityGroups: [securityGroup], // Optional - a default group will be created if not provided.
     },
   ],
+  optionGroupName: 'MyOptionGroup'
 });
 ```
 
@@ -1107,6 +1395,44 @@ new rds.DatabaseInstance(this, 'Database', {
 ```
 
 You cannot specify a parameter map and a parameter group at the same time.
+
+### Creating Standalone Parameter Groups
+
+In some scenarios, you may want to create a parameter group that exists independently
+of a database instance or cluster.
+
+By default, `ParameterGroup` uses a lazy creation pattern and only generates the
+CloudFormation resource when bound to an instance or cluster. To create a standalone 
+parameter group, use the static factory methods `forInstance()` or `forCluster()`:
+
+**For instance parameter group (AWS::RDS::DBParameterGroup):**
+
+```ts
+const parameterGroup = rds.ParameterGroup.forInstance(this, 'InstanceParameterGroup', {
+  engine: rds.DatabaseInstanceEngine.mysql({
+    version: rds.MysqlEngineVersion.VER_8_0_35,
+  }),
+  description: 'Parameter group for MySQL',
+  parameters: {
+    max_connections: '150',
+    slow_query_log: '1',
+  },
+});
+```
+
+**For cluster parameter group (AWS::RDS::DBClusterParameterGroup):**
+
+```ts
+const clusterParameterGroup = rds.ParameterGroup.forCluster(this, 'ClusterParameterGroup', {
+  engine: rds.DatabaseClusterEngine.auroraMysql({
+    version: rds.AuroraMysqlEngineVersion.VER_3_04_0,
+  }),
+  description: 'Parameter group for Aurora MySQL',
+  parameters: {
+    aurora_parallel_query: '1',
+  },
+});
+```
 
 ## Serverless v1
 
@@ -1173,11 +1499,12 @@ new rds.ServerlessClusterFromSnapshot(this, 'Cluster', {
 
 You can access your Aurora DB cluster using the built-in Data API. The Data API doesn't require a persistent connection to the DB cluster. Instead, it provides a secure HTTP endpoint and integration with AWS SDKs.
 
-The following example shows granting Data API access to a Lamba function.
+The following example shows granting Data API access to a Lambda function.
 
 ```ts
 declare const vpc: ec2.Vpc;
 declare const fn: lambda.Function;
+declare const secret: secretsmanager.Secret;
 
 // Create a serverless V1 cluster
 const serverlessV1Cluster = new rds.ServerlessCluster(this, 'AnotherCluster', {
@@ -1194,6 +1521,14 @@ const cluster = new rds.DatabaseCluster(this, 'Cluster', {
   enableDataApi: true, // Optional - will be automatically set if you call grantDataApiAccess()
 });
 cluster.grantDataApiAccess(fn);
+
+// Import an Aurora cluster
+const importedCluster = rds.DatabaseCluster.fromDatabaseClusterAttributes(this, 'ImportedCluster', {
+  clusterIdentifier: 'clusterIdentifier',
+  secret,
+  dataApiEnabled: true,
+});
+importedCluster.grantDataApiAccess(fn);
 ```
 
 **Note**: To invoke the Data API, the resource will need to read the secret associated with the cluster.
@@ -1239,5 +1574,263 @@ new rds.DatabaseCluster(this, 'DatabaseCluster', {
     preferredMaintenanceWindow: 'Sat:22:15-Sat:22:45',
   }),
   preferredMaintenanceWindow: 'Sat:22:15-Sat:22:45',
+});
+```
+
+## Performance Insights
+
+You can enable Performance Insights for a clustered database or an instance database.
+
+### Clustered Database
+
+You can enable Performance Insights at cluster level or instance level.
+
+To enable Performance Insights at the cluster level, set the `enablePerformanceInsights` property for the `DatabaseCluster` to `true`.
+If you want to specify the detailed settings, you can use the `performanceInsightRetention` and `performanceInsightEncryptionKey` properties.
+
+The settings are then applied to all instances in the cluster.
+
+```ts
+declare const vpc: ec2.Vpc;
+declare const kmsKey: kms.Key;
+new rds.DatabaseCluster(this, 'Database', {
+  engine: rds.DatabaseClusterEngine.AURORA,
+  vpc: vpc,
+  enablePerformanceInsights: true,
+  performanceInsightRetention: rds.PerformanceInsightRetention.LONG_TERM,
+  performanceInsightEncryptionKey: kmsKey,
+  writer: rds.ClusterInstance.provisioned('Writer', {
+    instanceType: ec2.InstanceType.of(ec2.InstanceClass.R7G, ec2.InstanceSize.LARGE),
+  }),
+});
+```
+
+To enable Performance Insights at the instance level, set the same properties for each instance of the `writer` and the `readers`.
+
+In this way, different settings can be applied to different instances in a cluster.
+
+**Note:** If Performance Insights is enabled at the cluster level, it is also automatically enabled for each instance. If specified, Performance Insights
+for each instance require the same retention period and encryption key as the cluster level.
+
+```ts
+declare const vpc: ec2.Vpc;
+declare const kmsKey: kms.Key;
+new rds.DatabaseCluster(this, 'Database', {
+  engine: rds.DatabaseClusterEngine.AURORA,
+  vpc: vpc,
+  writer: rds.ClusterInstance.provisioned('Writer', {
+    instanceType: ec2.InstanceType.of(ec2.InstanceClass.R7G, ec2.InstanceSize.LARGE),
+    enablePerformanceInsights: true,
+    performanceInsightRetention: rds.PerformanceInsightRetention.LONG_TERM,
+    performanceInsightEncryptionKey: kmsKey,
+  }),
+  readers: [
+    rds.ClusterInstance.provisioned('Reader', {
+      instanceType: ec2.InstanceType.of(ec2.InstanceClass.R7G, ec2.InstanceSize.LARGE),
+      enablePerformanceInsights: false,
+    }),
+  ],
+});
+```
+
+### Instance Database
+
+To enable Performance Insights for an instance database, set the `enablePerformanceInsights` property for the `DatabaseInstance` to `true`.
+If you want to specify the detailed settings, you can use the `performanceInsightRetention` and `performanceInsightEncryptionKey` properties.
+
+```ts
+declare const vpc: ec2.Vpc;
+declare const kmsKey: kms.Key;
+const instance = new rds.DatabaseInstance(this, 'Instance', {
+  engine: rds.DatabaseInstanceEngine.mysql({ version: rds.MysqlEngineVersion.VER_8_0_39 }),
+  instanceType: ec2.InstanceType.of(ec2.InstanceClass.R7G, ec2.InstanceSize.LARGE),
+  vpc,
+  enablePerformanceInsights: true,
+  performanceInsightRetention: rds.PerformanceInsightRetention.LONG_TERM,
+  performanceInsightEncryptionKey: kmsKey,
+});
+```
+
+### Supported Engines
+
+Performance Insights supports a limited number of engines.
+
+To see Amazon RDS DB engines that support Performance Insights, see [Amazon RDS DB engine, Region, and instance class support for Performance Insights](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_PerfInsights.Overview.Engines.html).
+
+To see Amazon Aurora DB engines that support Performance Insights, see [Amazon Aurora DB engine, Region, and instance class support for Performance Insights](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/USER_PerfInsights.Overview.Engines.html).
+
+For more information about Performance Insights, see [Monitoring DB load with Performance Insights on Amazon RDS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_PerfInsights.html).
+
+## Database Insights
+
+The standard mode of Database Insights is enabled by default for Aurora databases.
+
+You can enhance the monitoring of your Aurora databases by enabling the advanced mode of Database Insights.
+
+To control Database Insights mode, use the `databaseInsightsMode` property:
+
+```ts
+declare const vpc: ec2.Vpc;
+new rds.DatabaseCluster(this, 'Database', {
+  engine: rds.DatabaseClusterEngine.AURORA,
+  vpc: vpc,
+  // If you enable the advanced mode of Database Insights,
+  // Performance Insights is enabled and you must set the `performanceInsightRetention` to 465(15 months).
+  databaseInsightsMode: rds.DatabaseInsightsMode.ADVANCED,
+  performanceInsightRetention: rds.PerformanceInsightRetention.MONTHS_15,
+  writer: rds.ClusterInstance.provisioned('Writer', {
+    instanceType: ec2.InstanceType.of(ec2.InstanceClass.R7G, ec2.InstanceSize.LARGE),
+  }),
+});
+```
+
+Database Insights is also supported for RDS instances:
+
+```ts
+declare const vpc: ec2.Vpc;
+new rds.DatabaseInstance(this, 'PostgresInstance', {
+  engine: rds.DatabaseInstanceEngine.postgres({ version: rds.PostgresEngineVersion.VER_17_5 }),
+  instanceType: ec2.InstanceType.of(ec2.InstanceClass.R5, ec2.InstanceSize.LARGE),
+  vpc,
+  // If you enable the advanced mode of Database Insights,
+  // Performance Insights is enabled and you must set the `performanceInsightRetention` to 465(15 months).
+  databaseInsightsMode: rds.DatabaseInsightsMode.ADVANCED,
+  performanceInsightRetention: rds.PerformanceInsightRetention.MONTHS_15,
+});
+```
+
+> Visit [CloudWatch Database Insights](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/Database-Insights.html) for more details.
+
+## Enhanced Monitoring
+
+With [Enhanced Monitoring](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_Monitoring.OS.html#USER_Monitoring.OS.Enabling), you can monitor the operating system of your DB instance in real time.
+
+To enable Enhanced Monitoring for a clustered database, set the `monitoringInterval` property.
+This value is applied at instance level to all instances in the cluster by default.
+
+If you want to enable enhanced monitoring at the cluster level, you can set the `enableClusterLevelEnhancedMonitoring` property to `true`. Note that you must set `monitoringInterval` when using `enableClusterLevelEnhancedMonitoring`
+
+```ts
+declare const vpc: ec2.Vpc;
+// Enable Enhanced Monitoring at instance level to all instances in the cluster
+new rds.DatabaseCluster(this, 'Cluster', {
+  engine: rds.DatabaseClusterEngine.auroraPostgres({ version: rds.AuroraPostgresEngineVersion.VER_16_1 }),
+  writer: rds.ClusterInstance.serverlessV2('writerInstance'),
+  vpc,
+  monitoringInterval: Duration.seconds(5),
+});
+
+// Enable Enhanced Monitoring at the cluster level
+new rds.DatabaseCluster(this, 'Cluster', {
+  engine: rds.DatabaseClusterEngine.auroraPostgres({ version: rds.AuroraPostgresEngineVersion.VER_16_1 }),
+  writer: rds.ClusterInstance.serverlessV2('writerInstance'),
+  vpc,
+  monitoringInterval: Duration.seconds(5),
+  enableClusterLevelEnhancedMonitoring: true,
+});
+```
+
+AWS CDK automatically generate the IAM role for Enhanced Monitoring.
+If you want to create the IAM role manually, you can use the `monitoringRole` property.
+
+```ts
+declare const vpc: ec2.Vpc;
+declare const monitoringRole: iam.Role;
+
+new rds.DatabaseCluster(this, 'Cluster', {
+  engine: rds.DatabaseClusterEngine.auroraPostgres({ version: rds.AuroraPostgresEngineVersion.VER_16_1 }),
+  writer: rds.ClusterInstance.serverlessV2('writerInstance'),
+  vpc,
+  monitoringInterval: Duration.seconds(5),
+  monitoringRole,
+});
+```
+
+## Extended Support
+
+With Amazon RDS Extended Support, you can continue running your database on a major engine version past the RDS end of
+standard support date for an additional cost. To configure the life cycle type, use the `engineLifecycleSupport` property:
+
+```ts
+declare const vpc: ec2.IVpc;
+
+new rds.DatabaseCluster(this, 'DatabaseCluster', {
+  engine: rds.DatabaseClusterEngine.auroraMysql({ version: rds.AuroraMysqlEngineVersion.VER_3_07_0 }),
+  writer: rds.ClusterInstance.serverlessV2('writerInstance'),
+  vpc,
+  engineLifecycleSupport: rds.EngineLifecycleSupport.OPEN_SOURCE_RDS_EXTENDED_SUPPORT,
+});
+
+new rds.DatabaseInstance(this, 'DatabaseInstance', {
+  engine: rds.DatabaseInstanceEngine.mysql({ version: rds.MysqlEngineVersion.VER_8_0_39 }),
+  instanceType: ec2.InstanceType.of(ec2.InstanceClass.R7G, ec2.InstanceSize.LARGE),
+  vpc,
+  engineLifecycleSupport: rds.EngineLifecycleSupport.OPEN_SOURCE_RDS_EXTENDED_SUPPORT_DISABLED,
+});
+```
+
+## Importing existing DatabaseInstance
+
+### Lookup DatabaseInstance by instanceIdentifier
+
+You can lookup an existing DatabaseInstance by its instanceIdentifier using `DatabaseInstance.fromLookup()`.  This method returns an `IDatabaseInstance`.
+
+Here's how `DatabaseInstance.fromLookup()` can be used:
+
+```ts
+declare const myUserRole: iam.Role;
+
+const dbFromLookup = rds.DatabaseInstance.fromLookup(this, 'dbFromLookup', {
+  instanceIdentifier: 'instanceId',
+});
+
+// Grant a connection
+dbFromLookup.grantConnect(myUserRole, 'my-user-id');
+```
+
+## Importing existing DatabaseCluster
+
+### Lookup DatabaseCluster by clusterIdentifier
+
+You can lookup an existing DatabaseCluster by its clusterIdentifier using `DatabaseCluster.fromLookup()`. This method returns an `IDatabaseCluster`.
+
+Here's how `DatabaseCluster.fromLookup()` can be used:
+
+```ts
+declare const myUserRole: iam.Role;
+
+const clusterFromLookup = rds.DatabaseCluster.fromLookup(this, 'ClusterFromLookup', {
+  clusterIdentifier: 'my-cluster-id',
+});
+
+// Grant a connection
+clusterFromLookup.grantConnect(myUserRole, 'my-user-id');
+```
+
+## Limitless Database Cluster
+
+Amazon Aurora [PostgreSQL Limitless Database](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/limitless.html) provides automated horizontal scaling to process millions of write transactions per second and manages petabytes of data while maintaining the simplicity of operating inside a single database.
+
+The following example shows creating an Aurora PostgreSQL Limitless Database cluster:
+
+```ts
+declare const vpc: ec2.IVpc;
+
+new rds.DatabaseCluster(this, 'LimitlessDatabaseCluster', {
+  engine: rds.DatabaseClusterEngine.auroraPostgres({
+    version: rds.AuroraPostgresEngineVersion.VER_16_4_LIMITLESS,
+  }),
+  vpc,
+  clusterScalabilityType: rds.ClusterScalabilityType.LIMITLESS,
+  // Requires enabling Performance Insights
+  enablePerformanceInsights: true,
+  performanceInsightRetention: rds.PerformanceInsightRetention.MONTHS_1,
+  // Requires enabling Enhanced Monitoring at the cluster level
+  monitoringInterval: Duration.minutes(1),
+  enableClusterLevelEnhancedMonitoring: true,
+  // Requires I/O optimized storage type
+  storageType: rds.DBClusterStorageType.AURORA_IOPT1,
+  // Requires exporting the PostgreSQL log to Amazon CloudWatch Logs.
+  cloudwatchLogsExports: ['postgresql'],
 });
 ```

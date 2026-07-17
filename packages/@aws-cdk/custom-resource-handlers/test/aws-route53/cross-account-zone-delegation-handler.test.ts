@@ -1,3 +1,4 @@
+import type { CrossAccountZoneDelegationEvent } from '../../lib/aws-route53/cross-account-zone-delegation-handler/index';
 import { handler } from '../../lib/aws-route53/cross-account-zone-delegation-handler/index';
 
 const mockAssumeRole = jest.fn();
@@ -104,13 +105,18 @@ test('calls create resource record set with DELETE for Delete event', async () =
   });
 });
 
-test('calls listHostedZonesByName to get zoneId if ParentZoneId is not provided', async () => {
+test('calls listHostedZonesByName to get public zoneId if ParentZoneId is not provided', async () => {
   // GIVEN
   const parentZoneName = 'some.zone';
   const parentZoneId = 'zone-id';
 
   mockStsClient.assumeRole.mockResolvedValueOnce({ Credentials: { AccessKeyId: 'K', SecretAccessKey: 'S', SessionToken: 'T' } });
-  mockRoute53Client.listHostedZonesByName.mockResolvedValueOnce({ HostedZones: [{ Name: `${parentZoneName}.`, Id: parentZoneId }] });
+  mockRoute53Client.listHostedZonesByName.mockResolvedValueOnce({
+    HostedZones: [
+      { Name: `${parentZoneName}.`, Id: parentZoneId },
+      { Name: `${parentZoneName}.`, Id: parentZoneId, Config: { PrivateZone: true } },
+    ],
+  });
   mockRoute53Client.changeResourceRecordSets.mockResolvedValueOnce({});
 
   // WHEN
@@ -141,7 +147,7 @@ test('calls listHostedZonesByName to get zoneId if ParentZoneId is not provided'
   });
 });
 
-test('throws if more than one HostedZones are returnd for the provided ParentHostedZone', async () => {
+test('throws if more than one HostedZones are returned for the provided ParentHostedZone', async () => {
   // GIVEN
   const parentZoneName = 'some.zone';
   const parentZoneId = 'zone-id';
@@ -188,5 +194,5 @@ function getCfnEvent(
 // helper function to get around TypeScript expecting a complete event object,
 // even though our tests only need some of the fields
 async function invokeHandler(event: Partial<AWSLambda.CloudFormationCustomResourceEvent>) {
-  return handler(event as AWSLambda.CloudFormationCustomResourceEvent);
+  return handler(event as CrossAccountZoneDelegationEvent);
 }

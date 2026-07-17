@@ -1,4 +1,5 @@
-import { App, RemovalPolicy, Stack, StackProps } from '../../core';
+import type { StackProps } from '../../core';
+import { App, RemovalPolicy, Stack } from '../../core';
 import { FilterPattern, LogGroup, MetricFilter } from '../lib';
 
 class MetricFilterIntegStack extends Stack {
@@ -14,7 +15,10 @@ class MetricFilterIntegStack extends Stack {
       logGroup,
       metricNamespace: 'MyApp',
       metricName: 'Latency',
-      filterPattern: FilterPattern.exists('$.latency'),
+      filterPattern: FilterPattern.all(
+        FilterPattern.exists('$.latency'),
+        FilterPattern.regexValue('$.message', '=', 'bind: address already in use'),
+      ),
       metricValue: '$.latency',
     });
     /// !hide

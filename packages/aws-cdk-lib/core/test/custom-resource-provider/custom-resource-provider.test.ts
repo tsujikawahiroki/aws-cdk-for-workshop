@@ -1,18 +1,46 @@
+
 import * as fs from 'fs';
 import * as path from 'path';
+import type { Construct } from 'constructs';
+import { Template } from '../../../assertions';
 import * as cxapi from '../../../cx-api';
-import { App, AssetStaging, CustomResourceProvider, CustomResourceProviderRuntime, DockerImageAssetLocation, DockerImageAssetSource, Duration, FileAssetLocation, FileAssetSource, ISynthesisSession, Size, Stack, CfnResource } from '../../lib';
+import type {
+  AssetStaging,
+  DockerImageAssetLocation,
+  DockerImageAssetSource,
+  FileAssetLocation,
+  FileAssetSource,
+  ISynthesisSession,
+  CustomResourceProviderOptions,
+} from '../../lib';
+import {
+  Validations,
+  App,
+  CustomResourceProvider,
+  Duration,
+  Size,
+  Stack,
+  CfnResource,
+  determineLatestNodeRuntimeName,
+  CustomResourceProviderBase,
+  CustomResourceProviderRuntime,
+} from '../../lib';
 import { CUSTOMIZE_ROLES_CONTEXT_KEY } from '../../lib/helpers-internal';
 import { toCloudFormation } from '../util';
 
 const TEST_HANDLER = `${__dirname}/mock-provider`;
-const STANDARD_PROVIDER = CustomResourceProviderRuntime.NODEJS_18_X;
+// current node runtime available in ALL AWS regions
+const DEFAULT_PROVIDER_RUNTIME = CustomResourceProviderRuntime.NODEJS_20_X;
 
 describe('custom resource provider', () => {
   describe('customize roles', () => {
     test('role is not created if preventSynthesis!=false', () => {
       // GIVEN
       const app = new App();
+      Validations.of(app).acknowledge({
+        id: 'CloudFormation-Validate::W2531',
+        reason: 'The specific Node.js version used as the runtime for the custom resource does not matter for this test',
+      });
       const stack = new Stack(app, 'MyStack');
       stack.node.setContext(CUSTOMIZE_ROLES_CONTEXT_KEY, {
         usePrecreatedRoles: {
@@ -27,7 +55,7 @@ describe('custom resource provider', () => {
       // WHEN
       const cr = CustomResourceProvider.getOrCreateProvider(stack, 'Custom:MyResourceType', {
         codeDirectory: TEST_HANDLER,
-        runtime: STANDARD_PROVIDER,
+        runtime: DEFAULT_PROVIDER_RUNTIME,
       });
       cr.addToRolePolicy({
         Action: 's3:GetBucket',
@@ -92,6 +120,10 @@ describe('custom resource provider', () => {
     test('role is created if preventSynthesis=false', () => {
       // GIVEN
       const app = new App();
+      Validations.of(app).acknowledge({
+        id: 'CloudFormation-Validate::W2531',
+        reason: 'The specific Node.js version used as the runtime for the custom resource does not matter for this test',
+      });
       const stack = new Stack(app, 'MyStack');
       stack.node.setContext(CUSTOMIZE_ROLES_CONTEXT_KEY, {
         preventSynthesis: false,
@@ -104,7 +136,7 @@ describe('custom resource provider', () => {
       // WHEN
       const cr = CustomResourceProvider.getOrCreateProvider(stack, 'Custom:MyResourceType', {
         codeDirectory: TEST_HANDLER,
-        runtime: STANDARD_PROVIDER,
+        runtime: DEFAULT_PROVIDER_RUNTIME,
       });
       cr.addToRolePolicy({
         Action: 's3:GetBucket',
@@ -165,7 +197,7 @@ describe('custom resource provider', () => {
     // WHEN
     CustomResourceProvider.getOrCreate(stack, 'Custom:MyResourceType', {
       codeDirectory: TEST_HANDLER,
-      runtime: STANDARD_PROVIDER,
+      runtime: DEFAULT_PROVIDER_RUNTIME,
     });
 
     // THEN
@@ -175,13 +207,10 @@ describe('custom resource provider', () => {
     // it up from the output.
     const staging = stack.node.tryFindChild('Custom:MyResourceTypeCustomResourceProvider')?.node.tryFindChild('Staging') as AssetStaging;
     const assetHash = staging.assetHash;
-    const sourcePath = staging.sourcePath;
     const paramNames = Object.keys(cfn.Parameters);
     const bucketParam = paramNames[0];
     const keyParam = paramNames[1];
     const hashParam = paramNames[2];
-
-    expect(fs.existsSync(path.join(sourcePath, '__entrypoint__.js'))).toEqual(true);
 
     expect(cfn).toEqual({
       Resources: {
@@ -251,7 +280,7 @@ describe('custom resource provider', () => {
                 'Arn',
               ],
             },
-            Runtime: STANDARD_PROVIDER,
+            Runtime: DEFAULT_PROVIDER_RUNTIME,
           },
           DependsOn: [
             'CustomMyResourceTypeCustomResourceProviderRoleBD5E655F',
@@ -273,7 +302,6 @@ describe('custom resource provider', () => {
         },
       },
     });
-
   });
 
   test('asset metadata added to custom resource that contains code definition', () => {
@@ -285,7 +313,7 @@ describe('custom resource provider', () => {
     // WHEN
     CustomResourceProvider.getOrCreate(stack, 'Custom:MyResourceType', {
       codeDirectory: TEST_HANDLER,
-      runtime: STANDARD_PROVIDER,
+      runtime: DEFAULT_PROVIDER_RUNTIME,
     });
 
     // Then
@@ -298,7 +326,6 @@ describe('custom resource provider', () => {
       // The asset path should be a temporary folder prefixed with 'cdk-custom-resource'
       'aws:asset:path': expect.stringMatching(/^.*\/cdk-custom-resource\w{6}\/?$/),
     });
-
   });
 
   test('custom resource provided creates asset in new-style synthesis with relative path', () => {
@@ -327,14 +354,13 @@ describe('custom resource provider', () => {
     // WHEN
     CustomResourceProvider.getOrCreate(stack, 'Custom:MyResourceType', {
       codeDirectory: TEST_HANDLER,
-      runtime: STANDARD_PROVIDER,
+      runtime: DEFAULT_PROVIDER_RUNTIME,
     });
 
     // THEN -- no exception
     if (!assetFilename || assetFilename.startsWith(path.sep)) {
       throw new Error(`Asset filename must be a relative path, got: ${assetFilename}`);
     }
-
   });
 
   test('policyStatements can be used to add statements to the inline policy', () => {
@@ -344,7 +370,7 @@ describe('custom resource provider', () => {
     // WHEN
     CustomResourceProvider.getOrCreate(stack, 'Custom:MyResourceType', {
       codeDirectory: TEST_HANDLER,
-      runtime: STANDARD_PROVIDER,
+      runtime: DEFAULT_PROVIDER_RUNTIME,
       policyStatements: [
         { statement1: 123 },
         { statement2: { foo: 111 } },
@@ -361,7 +387,6 @@ describe('custom resource provider', () => {
         Statement: [{ statement1: 123 }, { statement2: { foo: 111 } }],
       },
     }]);
-
   });
 
   test('addToRolePolicy() can be used to add statements to the inline policy', () => {
@@ -371,7 +396,7 @@ describe('custom resource provider', () => {
     // WHEN
     const provider = CustomResourceProvider.getOrCreateProvider(stack, 'Custom:MyResourceType', {
       codeDirectory: TEST_HANDLER,
-      runtime: STANDARD_PROVIDER,
+      runtime: DEFAULT_PROVIDER_RUNTIME,
       policyStatements: [
         { statement1: 123 },
         { statement2: { foo: 111 } },
@@ -398,7 +423,7 @@ describe('custom resource provider', () => {
     // WHEN
     CustomResourceProvider.getOrCreate(stack, 'Custom:MyResourceType', {
       codeDirectory: TEST_HANDLER,
-      runtime: STANDARD_PROVIDER,
+      runtime: DEFAULT_PROVIDER_RUNTIME,
       memorySize: Size.gibibytes(2),
       timeout: Duration.minutes(5),
       description: 'veni vidi vici',
@@ -410,7 +435,6 @@ describe('custom resource provider', () => {
     expect(lambda.Properties.MemorySize).toEqual(2048);
     expect(lambda.Properties.Timeout).toEqual(300);
     expect(lambda.Properties.Description).toEqual('veni vidi vici');
-
   });
 
   test('environment variables', () => {
@@ -420,7 +444,7 @@ describe('custom resource provider', () => {
     // WHEN
     CustomResourceProvider.getOrCreate(stack, 'Custom:MyResourceType', {
       codeDirectory: TEST_HANDLER,
-      runtime: STANDARD_PROVIDER,
+      runtime: DEFAULT_PROVIDER_RUNTIME,
       environment: {
         B: 'b',
         A: 'a',
@@ -436,7 +460,6 @@ describe('custom resource provider', () => {
         B: 'b',
       }),
     });
-
   });
 
   test('roleArn', () => {
@@ -446,7 +469,7 @@ describe('custom resource provider', () => {
     // WHEN
     const cr = CustomResourceProvider.getOrCreateProvider(stack, 'Custom:MyResourceType', {
       codeDirectory: TEST_HANDLER,
-      runtime: STANDARD_PROVIDER,
+      runtime: DEFAULT_PROVIDER_RUNTIME,
     });
 
     // THEN
@@ -456,6 +479,121 @@ describe('custom resource provider', () => {
         'Arn',
       ],
     });
-
   });
 });
+
+describe('latest Lambda node runtime', () => {
+  test('with region agnostic stack', () => {
+    // GIVEN
+    const stack = new Stack();
+
+    // WHEN
+    TestCustomResourceProvider.getOrCreateProvider(stack, 'TestCrProvider');
+
+    // THEN
+    // Since all regions now have the same latest Node.js runtime (nodejs24.x),
+    // the CDK optimizes by using the literal value instead of creating a mapping
+    Template.fromStack(stack).hasResource('AWS::Lambda::Function', {
+      Properties: {
+        Runtime: 'nodejs24.x',
+      },
+    });
+  });
+
+  test('with stack in commercial region', () => {
+    // GIVEN
+    const stack = new Stack(undefined, 'Stack', { env: { region: 'us-east-1' } });
+
+    // WHEN
+    TestCustomResourceProvider.getOrCreateProvider(stack, 'TestCrProvider');
+
+    // THEN
+    Template.fromStack(stack).hasResource('AWS::Lambda::Function', {
+      Properties: {
+        Runtime: 'nodejs24.x',
+      },
+    });
+  });
+
+  test('with stack in china region', () => {
+    // GIVEN
+    const stack = new Stack(undefined, 'Stack', { env: { region: 'cn-north-1' } });
+
+    // WHEN
+    TestCustomResourceProvider.getOrCreateProvider(stack, 'TestCrProvider');
+
+    // THEN
+    Template.fromStack(stack).hasResource('AWS::Lambda::Function', {
+      Properties: {
+        Runtime: 'nodejs24.x',
+      },
+    });
+  });
+
+  test('with stack in govcloud region', () => {
+    // GIVEN
+    const stack = new Stack(undefined, 'Stack', { env: { region: 'us-gov-east-1' } });
+
+    // WHEN
+    TestCustomResourceProvider.getOrCreateProvider(stack, 'TestCrProvider');
+
+    // THEN
+    Template.fromStack(stack).hasResource('AWS::Lambda::Function', {
+      Properties: {
+        Runtime: 'nodejs24.x',
+      },
+    });
+  });
+
+  test('with stack in adc region', () => {
+    // GIVEN
+    const stack = new Stack(undefined, 'Stack', { env: { region: 'us-iso-east-1' } });
+
+    // WHEN
+    TestCustomResourceProvider.getOrCreateProvider(stack, 'TestCrProvider');
+
+    // THEN
+    // ADC regions now also use nodejs24.x as the latest runtime
+    Template.fromStack(stack).hasResource('AWS::Lambda::Function', {
+      Properties: {
+        Runtime: 'nodejs24.x',
+      },
+    });
+  });
+
+  test('with stack in unsupported region', () => {
+    // GIVEN
+    const stack = new Stack(undefined, 'Stack', { env: { region: 'us-fake-1' } });
+
+    // WHEN
+    TestCustomResourceProvider.getOrCreateProvider(stack, 'TestCrProvider');
+
+    // THEN
+    Template.fromStack(stack).hasResource('AWS::Lambda::Function', {
+      Properties: {
+        Runtime: 'nodejs24.x',
+      },
+    });
+  });
+});
+
+/**
+ * A class used to simulate and test a code generated custom resource provider.
+ */
+class TestCustomResourceProvider extends CustomResourceProviderBase {
+  public static getOrCreateProvider(scope: Construct, uniqueid: string, props?: CustomResourceProviderOptions) {
+    const id = `${uniqueid}CustomResourceProvider`;
+    const stack = Stack.of(scope);
+    const provider = stack.node.tryFindChild(id) as TestCustomResourceProvider
+      ?? new TestCustomResourceProvider(stack, id, props);
+    return provider;
+  }
+
+  private constructor(scope: Construct, id: string, props?: CustomResourceProviderOptions) {
+    super(scope, id, {
+      ...props,
+      runtimeName: determineLatestNodeRuntimeName(scope),
+      codeDirectory: TEST_HANDLER,
+    });
+  }
+}

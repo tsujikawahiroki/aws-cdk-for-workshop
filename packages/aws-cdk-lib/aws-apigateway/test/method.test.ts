@@ -4,6 +4,7 @@ import * as iam from '../../aws-iam';
 import * as lambda from '../../aws-lambda';
 import * as cdk from '../../core';
 import * as apigw from '../lib';
+import { AuthorizationType } from '../lib';
 
 const DUMMY_AUTHORIZER: apigw.IAuthorizer = {
   authorizerId: 'dummyauthorizer',
@@ -30,7 +31,6 @@ describe('method', () => {
         Type: 'MOCK',
       },
     });
-
   });
 
   test('method options can be specified', () => {
@@ -53,7 +53,6 @@ describe('method', () => {
       ApiKeyRequired: true,
       OperationName: 'MyOperation',
     });
-
   });
 
   test('integration can be set via a property', () => {
@@ -84,7 +83,6 @@ describe('method', () => {
         },
       },
     });
-
   });
 
   test('integration can be set for a service in the provided region', () => {
@@ -134,7 +132,6 @@ describe('method', () => {
         IntegrationHttpMethod: 'GET',
       },
     });
-
   });
 
   test('use default integration from api', () => {
@@ -164,7 +161,6 @@ describe('method', () => {
         Uri: 'https://amazon.com',
       },
     });
-
   });
 
   test('"methodArn" returns the ARN execute-api ARN for this method in the current stage', () => {
@@ -197,7 +193,6 @@ describe('method', () => {
         ],
       ],
     });
-
   });
 
   test('"testMethodArn" returns the ARN of the "test-invoke-stage" stage (console UI)', () => {
@@ -228,7 +223,6 @@ describe('method', () => {
         ],
       ],
     });
-
   });
 
   test('"methodArn" returns an arn with "*" as its stage when deploymentStage is not set', () => {
@@ -256,7 +250,6 @@ describe('method', () => {
         ],
       ],
     });
-
   });
 
   test('"methodArn" and "testMethodArn" replace path parameters with asterisks', () => {
@@ -301,7 +294,6 @@ describe('method', () => {
         ],
       ],
     });
-
   });
 
   test('integration "credentialsRole" can be used to assume a role when calling backend', () => {
@@ -325,7 +317,6 @@ describe('method', () => {
         Credentials: { 'Fn::GetAtt': ['MyRoleF48FFE04', 'Arn'] },
       },
     });
-
   });
 
   test('integration "credentialsPassthrough" can be used to passthrough user credentials to backend', () => {
@@ -348,7 +339,6 @@ describe('method', () => {
         Credentials: { 'Fn::Join': ['', ['arn:', { Ref: 'AWS::Partition' }, ':iam::*:user/*']] },
       },
     });
-
   });
 
   test('methodResponse set one or more method responses via options', () => {
@@ -402,7 +392,6 @@ describe('method', () => {
         },
       }],
     });
-
   });
 
   test('multiple integration responses can be used', () => { // @see https://github.com/aws/aws-cdk/issues/1608
@@ -448,7 +437,6 @@ describe('method', () => {
         Uri: { 'Fn::Join': ['', ['arn:', { Ref: 'AWS::Partition' }, ':apigateway:', { Ref: 'AWS::Region' }, ':foo-service:action/BarAction']] },
       },
     });
-
   });
 
   test('method is always set as uppercase', () => {
@@ -465,7 +453,6 @@ describe('method', () => {
     Template.fromStack(stack).hasResourceProperties('AWS::ApiGateway::Method', { HttpMethod: 'POST' });
     Template.fromStack(stack).hasResourceProperties('AWS::ApiGateway::Method', { HttpMethod: 'GET' });
     Template.fromStack(stack).hasResourceProperties('AWS::ApiGateway::Method', { HttpMethod: 'PUT' });
-
   });
 
   test('requestModel can be set', () => {
@@ -500,7 +487,6 @@ describe('method', () => {
         'application/json': { Ref: stack.getLogicalId(model.node.findChild('Resource') as cdk.CfnElement) },
       },
     });
-
   });
 
   test('methodResponse has a mix of response modes', () => {
@@ -564,7 +550,6 @@ describe('method', () => {
         },
       }],
     });
-
   });
 
   test('method has a request validator', () => {
@@ -594,7 +579,6 @@ describe('method', () => {
       ValidateRequestBody: true,
       ValidateRequestParameters: false,
     });
-
   });
 
   test('use default requestParameters', () => {
@@ -624,7 +608,6 @@ describe('method', () => {
         'method.request.path.proxy': true,
       },
     });
-
   });
 
   test('authorizer is bound correctly', () => {
@@ -640,7 +623,6 @@ describe('method', () => {
       AuthorizationType: 'CUSTOM',
       AuthorizerId: DUMMY_AUTHORIZER.authorizerId,
     });
-
   });
 
   test('authorizer via default method options', () => {
@@ -669,7 +651,6 @@ describe('method', () => {
       Type: 'TOKEN',
       RestApiId: stack.resolve(restApi.restApiId),
     });
-
   });
 
   test('fails when authorization type does not match the authorizer', () => {
@@ -683,7 +664,6 @@ describe('method', () => {
         authorizer: DUMMY_AUTHORIZER,
       });
     }).toThrow(/Authorization type is set to AWS_IAM which is different from what is required by the authorizer/);
-
   });
 
   test('fails when authorization type does not match the authorizer in default method options', () => {
@@ -697,10 +677,9 @@ describe('method', () => {
 
     expect(() => {
       restApi.root.addMethod('ANY', undefined, {
-        authorizationType: apigw.AuthorizationType.NONE,
+        authorizationType: apigw.AuthorizationType.IAM,
       });
-    }).toThrow(/Authorization type is set to NONE which is different from what is required by the authorizer/);
-
+    }).toThrow(/Authorization type is set to AWS_IAM which is different from what is required by the authorizer/);
   });
 
   test('method has Auth Scopes', () => {
@@ -724,7 +703,6 @@ describe('method', () => {
       ApiKeyRequired: true,
       AuthorizationScopes: ['AuthScope1', 'AuthScope2'],
     });
-
   });
 
   test('use default Auth Scopes', () => {
@@ -753,7 +731,138 @@ describe('method', () => {
       OperationName: 'defaultAuthScopes',
       AuthorizationScopes: ['DefaultAuth'],
     });
+  });
 
+  test('Override Authorization Type config in the default method config to None', () => {
+    // GIVEN
+    const stack = new cdk.Stack();
+    const api = new apigw.RestApi(stack, 'test-api', {
+      cloudWatchRole: false,
+      deploy: false,
+      defaultMethodOptions: {
+        authorizationType: apigw.AuthorizationType.COGNITO,
+        authorizer: DUMMY_AUTHORIZER,
+        authorizationScopes: ['DefaultAuth'],
+      },
+    });
+
+    // WHEN
+    new apigw.Method(stack, 'OverrideDefaultAuthScopes', {
+      httpMethod: 'POST',
+      resource: api.root,
+      options: {
+        operationName: 'overrideDefaultAuthScopes',
+        authorizationType: AuthorizationType.NONE,
+      },
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::ApiGateway::Method', {
+      OperationName: 'overrideDefaultAuthScopes',
+      AuthorizationType: AuthorizationType.NONE,
+    });
+
+    expect(Template.fromStack(stack).findResources('AWS::ApiGateway::Method', {
+      OperationName: 'overrideDefaultAuthScopes',
+      authorizer: DUMMY_AUTHORIZER,
+    })).toEqual({});
+  });
+
+  test('Add Method that override the default method config authorization type to None do not fail', () => {
+    // GIVEN
+    const stack = new cdk.Stack();
+    const api = new apigw.RestApi(stack, 'test-api', {
+      cloudWatchRole: false,
+      deploy: false,
+      defaultMethodOptions: {
+        authorizationType: apigw.AuthorizationType.COGNITO,
+        authorizer: DUMMY_AUTHORIZER,
+        authorizationScopes: ['DefaultAuth'],
+      },
+    });
+    expect(() => {
+      api.root.addMethod('ANY', undefined, {
+        authorizationType: apigw.AuthorizationType.NONE,
+      });
+    }).not.toThrow(/Authorization type is set to AWS_IAM which is different from what is required by the authorizer/);
+  });
+
+  test('No options authorization type set but expect auth scope set', () => {
+    const stack = new cdk.Stack();
+    const api = new apigw.RestApi(stack, 'test-api', {
+      cloudWatchRole: false,
+      deploy: false,
+      defaultMethodOptions: {
+        authorizationType: apigw.AuthorizationType.COGNITO,
+      },
+    });
+
+    api.root.resourceForPath('/user/profile').addMethod('GET', undefined, {
+      authorizationScopes: ['profile'],
+    });
+
+    Template.fromStack(stack).hasResourceProperties('AWS::ApiGateway::Method', {
+      AuthorizationScopes: ['profile'],
+    });
+  });
+
+  test('Set auth scope in the rest api and expect scope is in method', () => {
+    const stack = new cdk.Stack();
+    const api = new apigw.RestApi(stack, 'test-api', {
+      cloudWatchRole: false,
+      deploy: false,
+      defaultMethodOptions: {
+        authorizationType: apigw.AuthorizationType.COGNITO,
+        authorizationScopes: ['profile'],
+      },
+    });
+
+    api.root.resourceForPath('/user/profile').addMethod('GET', undefined);
+
+    Template.fromStack(stack).hasResourceProperties('AWS::ApiGateway::Method', {
+      AuthorizationScopes: ['profile'],
+    });
+  });
+
+  test('Override auth scope in the method over rest api', () => {
+    const stack = new cdk.Stack();
+    const api = new apigw.RestApi(stack, 'test-api', {
+      cloudWatchRole: false,
+      deploy: false,
+      defaultMethodOptions: {
+        authorizationType: apigw.AuthorizationType.COGNITO,
+        authorizationScopes: ['profile'],
+      },
+    });
+
+    api.root.resourceForPath('/user/profile').addMethod('GET', undefined, {
+      authorizationScopes: ['hello'],
+    });
+
+    Template.fromStack(stack).hasResourceProperties('AWS::ApiGateway::Method', {
+      AuthorizationScopes: ['hello'],
+    });
+  });
+
+  test('Expect auth scope to be none when auth type is not Cognito', () => {
+    const stack = new cdk.Stack();
+    const api = new apigw.RestApi(stack, 'test-api', {
+      cloudWatchRole: false,
+      deploy: false,
+      defaultMethodOptions: {
+        authorizationType: apigw.AuthorizationType.COGNITO,
+        authorizationScopes: ['profile'],
+      },
+    });
+
+    api.root.resourceForPath('/user/profile').addMethod('GET', undefined, {
+      authorizationScopes: ['hello'],
+      authorizationType: apigw.AuthorizationType.IAM,
+    });
+
+    Template.fromStack(stack).hasResourceProperties('AWS::ApiGateway::Method', {
+      AuthorizationScopes: Match.absent(),
+    });
   });
 
   test.each([
@@ -809,7 +918,6 @@ describe('method', () => {
       OperationName: 'authScopesAbsent',
       AuthorizationScopes: Match.absent(),
     });
-
   });
 
   test('method has a request validator with provided properties', () => {
@@ -837,7 +945,6 @@ describe('method', () => {
       ValidateRequestParameters: false,
       Name: 'test-validator',
     });
-
   });
 
   test('method does not have a request validator', () => {
@@ -855,7 +962,6 @@ describe('method', () => {
     Template.fromStack(stack).hasResourceProperties('AWS::ApiGateway::Method', {
       RequestValidatorId: Match.absent(),
     });
-
   });
 
   test('method does not support both request validator and request validator options', () => {
@@ -884,7 +990,6 @@ describe('method', () => {
     // THEN
     expect(() => new apigw.Method(stack, 'method', methodProps))
       .toThrow(/Only one of 'requestValidator' or 'requestValidatorOptions' must be specified./);
-
   });
 
   testDeprecated('"restApi" and "api" properties return the RestApi correctly', () => {
@@ -899,7 +1004,6 @@ describe('method', () => {
     expect(method.restApi).toBeDefined();
     expect(method.api).toBeDefined();
     expect(stack.resolve(method.api.restApiId)).toEqual(stack.resolve(method.restApi.restApiId));
-
   });
 
   testDeprecated('"restApi" throws an error on imported while "api" returns correctly', () => {
@@ -916,7 +1020,6 @@ describe('method', () => {
     // THEN
     expect(() => method.restApi).toThrow(/not available on Resource not connected to an instance of RestApi/);
     expect(method.api).toBeDefined();
-
   });
 
   test('methodResponse should be passed from defaultMethodOptions', () => {
@@ -948,7 +1051,6 @@ describe('method', () => {
         StatusCode: '200',
       }],
     });
-
   });
 
   describe('Metrics', () => {

@@ -1,13 +1,15 @@
-import { IDependable } from 'constructs';
-import { IOpenIdConnectProvider } from './oidc-provider';
-import { PolicyDocument } from './policy-document';
-import { Condition, Conditions, PolicyStatement } from './policy-statement';
+import type { IDependable } from 'constructs';
+import type { IOIDCProviderRef, ISAMLProviderRef } from './iam.generated';
+import type { PolicyDocument } from './policy-document';
+import type { Condition, Conditions } from './policy-statement';
+import { PolicyStatement } from './policy-statement';
 import { defaultAddPrincipalToAssumeRole } from './private/assume-role-policy';
 import { LITERAL_STRING_KEY, mergePrincipal } from './private/util';
-import { ISamlProvider } from './saml-provider';
+import type { ISamlProvider } from './saml-provider';
 import * as cdk from '../../core';
-import * as cxapi from '../../cx-api';
-import { Default, FactName, RegionInfo } from '../../region-info';
+import { UnscopedValidationError } from '../../core';
+import { lit } from '../../core/lib/private/literal-string';
+import { RegionInfo } from '../../region-info';
 
 /**
  * Any object that has an associated principal that a permission can be granted to
@@ -33,7 +35,7 @@ export interface IGrantable {
  * Notifications Service).
  *
  * A single logical Principal may also map to a set of physical principals.
- * For example, `new OrganizationPrincipal('o-1234')` represents all
+ * For example, `new OrganizationPrincipal('o-12345abcde')` represents all
  * identities that are part of the given AWS Organization.
  */
 export interface IPrincipal extends IGrantable {
@@ -54,7 +56,7 @@ export interface IPrincipal extends IGrantable {
    * Can be a Token - in that case,
    * it's assumed to be AWS::AccountId.
    */
-  readonly principalAccount?: string;
+  readonly principalAccount?: string | undefined;
 
   /**
    * Add to the policy of this principal.
@@ -93,14 +95,14 @@ export class ComparablePrincipal {
   /**
    * Whether or not the given principal is a comparable principal
    */
-  public static isComparablePrincipal(x: IPrincipal): x is IComparablePrincipal {
+  public static isComparablePrincipal(this: void, x: IPrincipal): x is IComparablePrincipal {
     return 'dedupeString' in x;
   }
 
   /**
    * Return the dedupeString of the given principal, if available
    */
-  public static dedupeStringFor(x: IPrincipal): string | undefined {
+  public static dedupeStringFor(this: void, x: IPrincipal): string | undefined {
     return ComparablePrincipal.isComparablePrincipal(x) ? x.dedupeString() : undefined;
   }
 }
@@ -225,11 +227,14 @@ export abstract class PrincipalBase implements IAssumeRolePrincipal, IComparable
  * Base class for Principals that wrap other principals
  */
 abstract class PrincipalAdapter extends PrincipalBase {
-  public readonly assumeRoleAction = this.wrapped.assumeRoleAction;
-  public readonly principalAccount = this.wrapped.principalAccount;
+  public readonly assumeRoleAction: IPrincipal['assumeRoleAction'];
+  public readonly principalAccount: IPrincipal['principalAccount'];
 
   constructor(protected readonly wrapped: IPrincipal) {
     super();
+
+    this.assumeRoleAction = this.wrapped.assumeRoleAction;
+    this.principalAccount = this.wrapped.principalAccount;
   }
 
   public get policyFragment(): PrincipalPolicyFragment { return this.wrapped.policyFragment; }
@@ -267,7 +272,7 @@ export class PrincipalWithConditions extends PrincipalAdapter {
   public addToAssumeRolePolicy(doc: PolicyDocument) {
     // Lazy import to avoid circular import dependencies during startup
 
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    // eslint-disable-next-line @typescript-eslint/no-require-imports,@typescript-eslint/consistent-type-imports
     const adapter: typeof import('./private/policydoc-adapter') = require('./private/policydoc-adapter');
 
     defaultAddPrincipalToAssumeRole(this.wrapped, new adapter.MutatingPolicyDocumentAdapter(doc, (statement) => {
@@ -355,7 +360,7 @@ export class PrincipalWithConditions extends PrincipalAdapter {
       // if either the existing condition or the new one contain unresolved
       // tokens, fail the merge. this is as far as we go at this point.
       if (cdk.Token.isUnresolved(condition) || cdk.Token.isUnresolved(existing)) {
-        throw new Error(`multiple "${operator}" conditions cannot be merged if one of them contains an unresolved token`);
+        throw new UnscopedValidationError(lit`MultipleConditionsCannotMerged`, `multiple "${operator}" conditions cannot be merged if one of them contains an unresolved token`);
       }
 
       validateConditionObject(existing);
@@ -381,7 +386,7 @@ export class SessionTagsPrincipal extends PrincipalAdapter {
   public addToAssumeRolePolicy(doc: PolicyDocument) {
     // Lazy import to avoid circular import dependencies during startup
 
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    // eslint-disable-next-line @typescript-eslint/no-require-imports,@typescript-eslint/consistent-type-imports
     const adapter: typeof import('./private/policydoc-adapter') = require('./private/policydoc-adapter');
 
     defaultAddPrincipalToAssumeRole(this.wrapped, new adapter.MutatingPolicyDocumentAdapter(doc, (statement) => {
@@ -480,7 +485,7 @@ export class AccountPrincipal extends ArnPrincipal {
   constructor(public readonly accountId: any) {
     super(new StackDependentToken(stack => `arn:${stack.partition}:iam::${accountId}:root`).toString());
     if (!cdk.Token.isUnresolved(accountId) && typeof accountId !== 'string') {
-      throw new Error('accountId should be of type string');
+      throw new UnscopedValidationError(lit`ShouldBeAccountidShouldType`, 'accountId should be of type string');
     }
     this.principalAccount = accountId;
   }
@@ -541,17 +546,41 @@ export class ServicePrincipal extends PrincipalBase {
    * These days all service principal names are standardized, and they are all
    * of the form `<servicename>.amazonaws.com`.
    *
-   * If the feature flag `@aws-cdk/aws-iam:standardizedServicePrincipals` is set, this
-   * method will always return its input. If this feature flag is not set, this
-   * method will perform the legacy behavior, which appends the region-specific
-   * domain suffix for some select services (for example, it would append `.cn`
-   * to some service principal names).
+   * To avoid breaking changes, handling is provided for services added with the formats below,
+   * however, no additional handling will be added for new regions or partitions.
+   *   - s3
+   *   - s3.amazonaws.com
+   *   - s3.amazonaws.com.cn
+   *   - s3.c2s.ic.gov
+   *   - s3.sc2s.sgov.gov
    *
    * @example
    * const principalName = iam.ServicePrincipal.servicePrincipalName('ec2.amazonaws.com');
    */
   public static servicePrincipalName(service: string): string {
     return new ServicePrincipalToken(service, {}).toString();
+  }
+
+  /**
+   * Return the service principal using the service principal name as it is passed to the function without
+   * any change regardless of the region used in the stack if it is Opted in or not.
+   *
+   * @example
+   * const principalName = iam.ServicePrincipal.fromStaticServicePrincipleName('elasticmapreduce.amazonaws.com.cn');
+   */
+  public static fromStaticServicePrincipleName(servicePrincipalName: string): ServicePrincipal {
+    class StaticServicePrincipal extends ServicePrincipal {
+      constructor(public readonly service: string) {
+        super(service);
+      }
+
+      public get policyFragment(): PrincipalPolicyFragment {
+        return new PrincipalPolicyFragment({
+          Service: [this.service],
+        }, this.opts.conditions);
+      }
+    }
+    return new StaticServicePrincipal(servicePrincipalName);
   }
 
   /**
@@ -585,9 +614,18 @@ export class OrganizationPrincipal extends PrincipalBase {
   /**
    *
    * @param organizationId The unique identifier (ID) of an organization (i.e. o-12345abcde)
+   * It must match regex pattern ^o-[a-z0-9]{10,32}$
+   * @see https://docs.aws.amazon.com/organizations/latest/APIReference/API_Organization.html
    */
   constructor(public readonly organizationId: string) {
     super();
+
+    // We can only validate if it's a literal string (not a token)
+    if (!cdk.Token.isUnresolved(organizationId)) {
+      if (!organizationId.match(/^o-[a-z0-9]{10,32}$/)) {
+        throw new UnscopedValidationError(lit`ExpectedOrganizationMatchRegex`, `Expected Organization ID must match regex pattern ^o-[a-z0-9]{10,32}$, received ${organizationId}`);
+      }
+    }
   }
 
   public get policyFragment(): PrincipalPolicyFragment {
@@ -693,7 +731,6 @@ export class FederatedPrincipal extends PrincipalBase {
  * Facebook, Google, etc.
  */
 export class WebIdentityPrincipal extends FederatedPrincipal {
-
   /**
    *
    * @param identityProvider identity provider (i.e. 'cognito-identity.amazonaws.com' for users authenticated through Cognito)
@@ -718,15 +755,14 @@ export class WebIdentityPrincipal extends FederatedPrincipal {
  * A principal that represents a federated identity provider as from a OpenID Connect provider.
  */
 export class OpenIdConnectPrincipal extends WebIdentityPrincipal {
-
   /**
    *
    * @param openIdConnectProvider OpenID Connect provider
    * @param conditions The conditions under which the policy is in effect.
    *   See [the IAM documentation](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_condition.html).
    */
-  constructor(openIdConnectProvider: IOpenIdConnectProvider, conditions: Conditions = {}) {
-    super(openIdConnectProvider.openIdConnectProviderArn, conditions ?? {});
+  constructor(openIdConnectProvider: IOIDCProviderRef, conditions: Conditions = {}) {
+    super(openIdConnectProvider.oidcProviderRef.oidcProviderArn, conditions ?? {});
   }
 
   public get policyFragment(): PrincipalPolicyFragment {
@@ -742,8 +778,8 @@ export class OpenIdConnectPrincipal extends WebIdentityPrincipal {
  * Principal entity that represents a SAML federated identity provider
  */
 export class SamlPrincipal extends FederatedPrincipal {
-  constructor(samlProvider: ISamlProvider, conditions: Conditions) {
-    super(samlProvider.samlProviderArn, conditions, 'sts:AssumeRoleWithSAML');
+  constructor(samlProvider: ISAMLProviderRef, conditions: Conditions) {
+    super(samlProvider.samlProviderRef.samlProviderArn, conditions, 'sts:AssumeRoleWithSAML');
   }
 
   public toString() {
@@ -760,7 +796,7 @@ export class SamlConsolePrincipal extends SamlPrincipal {
     super(samlProvider, {
       ...conditions,
       StringEquals: {
-        'SAML:aud': RegionInfo.get(samlProvider.stack.region).samlSignOnUrl ?? 'https://signin.aws.amazon.com/saml',
+        'SAML:aud': RegionInfo.get(cdk.Stack.of(samlProvider).region).samlSignOnUrl ?? 'https://signin.aws.amazon.com/saml',
       },
     });
   }
@@ -844,7 +880,7 @@ export class CompositePrincipal extends PrincipalBase {
   constructor(...principals: IPrincipal[]) {
     super();
     if (principals.length === 0) {
-      throw new Error('CompositePrincipals must be constructed with at least 1 Principal but none were passed.');
+      throw new UnscopedValidationError(lit`CompositePrincipalsConstructedLeastPrincipal`, 'CompositePrincipals must be constructed with at least 1 Principal but none were passed.');
     }
     this.assumeRoleAction = principals[0].assumeRoleAction;
     this.addPrincipals(...principals);
@@ -873,8 +909,8 @@ export class CompositePrincipal extends PrincipalBase {
     for (const p of this._principals) {
       const fragment = p.policyFragment;
       if (fragment.conditions && Object.keys(fragment.conditions).length > 0) {
-        throw new Error(
-          'Components of a CompositePrincipal must not have conditions. ' +
+        throw new UnscopedValidationError(
+          lit`CompositePrincipalComponentsCannotHaveConditions`, 'Components of a CompositePrincipal must not have conditions. ' +
           `Tried to add the following fragment: ${JSON.stringify(fragment)}`);
       }
     }
@@ -910,9 +946,9 @@ export class CompositePrincipal extends PrincipalBase {
  * A lazy token that requires an instance of Stack to evaluate
  */
 class StackDependentToken implements cdk.IResolvable {
-  public readonly creationStack: string[];
+  public readonly creationStack: string[] = ['Token stack traces are no longer captured'];
+
   constructor(private readonly fn: (stack: cdk.Stack) => any) {
-    this.creationStack = cdk.captureStackTrace();
   }
 
   public resolve(context: cdk.IResolveContext) {
@@ -934,19 +970,15 @@ class StackDependentToken implements cdk.IResolvable {
 }
 
 class ServicePrincipalToken implements cdk.IResolvable {
-  public readonly creationStack: string[];
+  public readonly creationStack: string[] = ['Token stack traces are no longer captured'];
+
   constructor(
     private readonly service: string,
     private readonly opts: ServicePrincipalOpts) {
-    this.creationStack = cdk.captureStackTrace();
   }
 
   public resolve(ctx: cdk.IResolveContext) {
-    return cdk.FeatureFlags.of(ctx.scope).isEnabled(cxapi.IAM_STANDARDIZED_SERVICE_PRINCIPALS)
-      ? this.newStandardizedBehavior(ctx)
-      : this.legacyBehavior(ctx);
-
-    // The correct behavior is to always use the global service principal
+    return this.newStandardizedBehavior(ctx);
   }
 
   /**
@@ -954,32 +986,20 @@ class ServicePrincipalToken implements cdk.IResolvable {
    */
   private newStandardizedBehavior(ctx: cdk.IResolveContext) {
     const stack = cdk.Stack.of(ctx.scope);
+
+    // If the user had previously set the feature flag to `false` we would allow them to provide only the service name instead of the
+    // entire service principal. We can't break them so now everyone gets to do it!
+    const match = this.service.match(/^([^.]+)(?:(?:\.amazonaws\.com(?:\.cn)?)|(?:\.c2s\.ic\.gov)|(?:\.sc2s\.sgov\.gov))?$/);
+    const service = match ? `${match[1]}.amazonaws.com` : this.service;
     if (
       this.opts.region &&
       !cdk.Token.isUnresolved(this.opts.region) &&
       stack.region !== this.opts.region &&
       RegionInfo.get(this.opts.region).isOptInRegion
     ) {
-      return this.service.replace(/\.amazonaws\.com$/, `.${this.opts.region}.amazonaws.com`);
+      return service.replace(/\.amazonaws\.com$/, `.${this.opts.region}.amazonaws.com`);
     }
-    return this.service;
-  }
-
-  /**
-   * Do a single lookup
-   */
-  private legacyBehavior(ctx: cdk.IResolveContext) {
-    if (this.opts.region) {
-      // Special case, handle it separately to not break legacy behavior.
-      return RegionInfo.get(this.opts.region).servicePrincipal(this.service) ??
-        Default.servicePrincipal(this.service, this.opts.region, cdk.Aws.URL_SUFFIX);
-    }
-
-    const stack = cdk.Stack.of(ctx.scope);
-    return stack.regionalFact(
-      FactName.servicePrincipal(this.service),
-      Default.servicePrincipal(this.service, stack.region, cdk.Aws.URL_SUFFIX),
-    );
+    return service;
   }
 
   public toString() {
@@ -1008,6 +1028,6 @@ class ServicePrincipalToken implements cdk.IResolvable {
  */
 export function validateConditionObject(x: unknown): asserts x is Record<string, unknown> {
   if (!x || typeof x !== 'object' || Array.isArray(x)) {
-    throw new Error('A Condition should be represented as a map of operator to value');
+    throw new UnscopedValidationError(lit`ShouldBeConditionShouldRepresented`, 'A Condition should be represented as a map of operator to value');
   }
 }

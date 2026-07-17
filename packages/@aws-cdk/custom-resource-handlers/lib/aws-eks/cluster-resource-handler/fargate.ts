@@ -1,5 +1,5 @@
-// eslint-disable-next-line import/no-extraneous-dependencies
-import * as EKS from '@aws-sdk/client-eks';
+
+import type * as EKS from '@aws-sdk/client-eks';
 import { ResourceHandler } from './common';
 
 const MAX_NAME_LEN = 63;
@@ -96,7 +96,6 @@ export class FargateProfileResourceHandler extends ResourceHandler {
     };
 
     try {
-
       this.log({ describeFargateProfile });
       const describeFargateProfileResponse = await this.eks.describeFargateProfile(describeFargateProfile);
       this.log({ describeFargateProfileResponse });

@@ -1,7 +1,11 @@
-import { Construct } from 'constructs';
-import * as events from '../../../aws-events';
+
+import type { Construct } from 'constructs';
+import type * as events from '../../../aws-events';
 import * as iam from '../../../aws-iam';
 import * as sfn from '../../../aws-stepfunctions';
+import { isValidJsonataExpression } from '../../../aws-stepfunctions/lib/private/jsonata';
+import { FeatureFlags } from '../../../core';
+import * as cxapi from '../../../cx-api';
 import { integrationResourceArn } from '../private/task-utils';
 
 /**
@@ -54,10 +58,7 @@ interface TaskParameters {
   };
 }
 
-/**
- * Properties for calling an external HTTP endpoint with HttpInvoke.
- */
-export interface HttpInvokeProps extends sfn.TaskStateBaseProps {
+interface HttpInvokeOptions {
   /**
    * Permissions are granted to call all resources under this path.
    *
@@ -118,9 +119,41 @@ export interface HttpInvokeProps extends sfn.TaskStateBaseProps {
 }
 
 /**
+ * Properties for calling an external HTTP endpoint with HttpInvoke using JSONPath.
+ */
+export interface HttpInvokeJsonPathProps extends sfn.TaskStateJsonPathBaseProps, HttpInvokeOptions { }
+
+/**
+ * Properties for calling an external HTTP endpoint with HttpInvoke using JSONata.
+ */
+export interface HttpInvokeJsonataProps extends sfn.TaskStateJsonataBaseProps, HttpInvokeOptions { }
+
+/**
+ * Properties for calling an external HTTP endpoint with HttpInvoke.
+ */
+export interface HttpInvokeProps extends sfn.TaskStateBaseProps, HttpInvokeOptions { }
+
+/**
  * A Step Functions Task to call a public third-party API.
  */
 export class HttpInvoke extends sfn.TaskStateBase {
+  /**
+   * A Step Functions Task to call a public third-party API using JSONPath.
+   */
+  public static jsonPath(scope: Construct, id: string, props: HttpInvokeJsonPathProps) {
+    return new HttpInvoke(scope, id, props);
+  }
+
+  /**
+   * A Step Functions Task to call a public third-party API using JSONata.
+   */
+  public static jsonata(scope: Construct, id: string, props: HttpInvokeJsonataProps) {
+    return new HttpInvoke(scope, id, {
+      ...props,
+      queryLanguage: sfn.QueryLanguage.JSONATA,
+    });
+  }
+
   protected readonly taskMetrics?: sfn.TaskMetricsConfig;
   protected readonly taskPolicies?: iam.PolicyStatement[];
 
@@ -135,10 +168,11 @@ export class HttpInvoke extends sfn.TaskStateBase {
    *
    * @internal
    */
-  protected _renderTask(): any {
+  protected _renderTask(topLevelQueryLanguage?: sfn.QueryLanguage): any {
+    const queryLanguage = sfn._getActualQueryLanguage(topLevelQueryLanguage, this.props.queryLanguage);
     return {
       Resource: integrationResourceArn('http', 'invoke'),
-      Parameters: sfn.FieldUtils.renderObject(this.buildTaskParameters()),
+      ...this._renderParametersOrArguments(this.buildTaskParameters(), queryLanguage),
     };
   }
 
@@ -157,7 +191,7 @@ export class HttpInvoke extends sfn.TaskStateBase {
         resources: ['*'],
         conditions: {
           StringLike: {
-            'states:HTTPEndpoint': `${this.props.apiRoot}*`,
+            'states:HTTPEndpoint': `${isValidJsonataExpression(this.props.apiRoot) ? '' : this.props.apiRoot}*`,
           },
         },
       }),
@@ -165,8 +199,17 @@ export class HttpInvoke extends sfn.TaskStateBase {
   }
 
   private buildTaskParameters() {
+    const unJsonata = (v: string) => v.replace(/^{%/, '').replace(/%}$/, '').trim();
+    const useJsonata = this.queryLanguage === sfn.QueryLanguage.JSONATA;
+    const getStringValue = (v: string) => useJsonata && !isValidJsonataExpression(v) ? `'${v}'` : unJsonata(v);
+    const apiEndpoint = useJsonata ?
+      `{% ${getStringValue(this.props.apiRoot)} & '/' & ${getStringValue(this.props.apiEndpoint.value)} %}`
+      : FeatureFlags.of(this).isEnabled(cxapi.STEPFUNCTIONS_TASKS_HTTPINVOKE_DYNAMIC_JSONPATH_ENDPOINT) ?
+        sfn.JsonPath.format('{}/{}', this.props.apiRoot, this.props.apiEndpoint.value)
+        : `${this.props.apiRoot}/${this.props.apiEndpoint.value}`;
+
     const parameters: TaskParameters = {
-      ApiEndpoint: `${this.props.apiRoot}/${this.props.apiEndpoint.value}`,
+      ApiEndpoint: apiEndpoint,
       Authentication: {
         ConnectionArn: this.props.connection.connectionArn,
       },

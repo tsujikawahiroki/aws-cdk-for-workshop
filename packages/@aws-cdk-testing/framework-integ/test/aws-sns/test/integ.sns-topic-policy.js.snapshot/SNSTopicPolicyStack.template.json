@@ -3,7 +3,6 @@
   "TopicBFC7AF6E": {
    "Type": "AWS::SNS::Topic",
    "Properties": {
-    "DisplayName": "fooDisplay",
     "TopicName": "fooTopic"
    }
   },
@@ -50,7 +49,6 @@
   "TopicAddPolicy7DB03706": {
    "Type": "AWS::SNS::Topic",
    "Properties": {
-    "DisplayName": "topicDisplayNameAddPolicy",
     "TopicName": "topicAddPolicy"
    }
   },
@@ -59,17 +57,6 @@
    "Properties": {
     "PolicyDocument": {
      "Statement": [
-      {
-       "Action": "sns:Publish",
-       "Effect": "Allow",
-       "Principal": {
-        "Service": "s3.amazonaws.com"
-       },
-       "Resource": {
-        "Ref": "TopicAddPolicy7DB03706"
-       },
-       "Sid": "0"
-      },
       {
        "Action": "sns:Publish",
        "Condition": {
@@ -83,6 +70,17 @@
         "Ref": "TopicAddPolicy7DB03706"
        },
        "Sid": "AllowPublishThroughSSLOnly"
+      },
+      {
+       "Action": "sns:Publish",
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "s3.amazonaws.com"
+       },
+       "Resource": {
+        "Ref": "TopicAddPolicy7DB03706"
+       },
+       "Sid": "1"
       }
      ],
      "Version": "2012-10-17"
@@ -90,6 +88,38 @@
     "Topics": [
      {
       "Ref": "TopicAddPolicy7DB03706"
+     }
+    ]
+   }
+  },
+  "TopicWithSSLC879A4EA": {
+   "Type": "AWS::SNS::Topic"
+  },
+  "TopicWithSSLPolicy3E7ECD75": {
+   "Type": "AWS::SNS::TopicPolicy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sns:Publish",
+       "Condition": {
+        "Bool": {
+         "aws:SecureTransport": "false"
+        }
+       },
+       "Effect": "Deny",
+       "Principal": "*",
+       "Resource": {
+        "Ref": "TopicWithSSLC879A4EA"
+       },
+       "Sid": "AllowPublishThroughSSLOnly"
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "Topics": [
+     {
+      "Ref": "TopicWithSSLC879A4EA"
      }
     ]
    }

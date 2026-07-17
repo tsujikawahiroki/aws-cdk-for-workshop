@@ -1,6 +1,6 @@
 import * as path from 'path';
-import * as assets from 'aws-cdk-lib/aws-s3-assets';
 import * as core from 'aws-cdk-lib';
+import * as assets from 'aws-cdk-lib/aws-s3-assets';
 import * as flink from '../lib';
 
 const app = new core.App();
@@ -12,11 +12,11 @@ const asset = new assets.Asset(stack, 'CodeAsset', {
 const bucket = asset.bucket;
 const fileKey = asset.s3ObjectKey;
 
-///! show
+/// !show
 new flink.Application(stack, 'App', {
   code: flink.ApplicationCode.fromBucket(bucket, fileKey),
-  runtime: flink.Runtime.FLINK_1_18,
+  runtime: flink.Runtime.FLINK_1_19,
 });
-///! hide
+/// !hide
 
 app.synth();

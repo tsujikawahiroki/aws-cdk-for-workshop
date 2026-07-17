@@ -21,10 +21,15 @@ class EksClusterStack extends Stack {
     const cluster = new eks.Cluster(this, 'Cluster', {
       vpc,
       mastersRole,
-      defaultCapacity: 2,
+      defaultCapacity: 0,
       ...getClusterVersionConfig(this),
       endpointAccess: eks.EndpointAccess.PRIVATE,
       prune: false,
+    });
+
+    cluster.addNodegroupCapacity('DefaultCapacity', {
+      minSize: 2,
+      amiType: eks.NodegroupAmiType.AL2023_X86_64_STANDARD,
     });
 
     // this is the valdiation. it won't work if the private access is not setup properly.
@@ -38,11 +43,15 @@ class EksClusterStack extends Stack {
         name: 'config-map',
       },
     });
-
   }
 }
 
-const app = new App();
+const app = new App({
+  postCliContext: {
+    '@aws-cdk/aws-lambda:useCdkManagedLogGroup': false,
+    '@aws-cdk/aws-lambda:createNewPoliciesWithAddToRolePolicy': false,
+  },
+});
 
 const stack = new EksClusterStack(app, 'aws-cdk-eks-cluster-private-endpoint-test');
 new integ.IntegTest(app, 'aws-cdk-eks-cluster-private-endpoint', {

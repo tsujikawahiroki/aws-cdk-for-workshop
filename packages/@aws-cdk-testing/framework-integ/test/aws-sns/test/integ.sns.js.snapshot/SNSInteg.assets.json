@@ -1,15 +1,30 @@
 {
-  "version": "36.0.0",
+  "version": "54.0.0",
   "files": {
-    "f73578a6268bf972ab72b4905cc09579fd59ece18de3cd0622ff9606ebdcf661": {
+    "801b9d403e9ac842f362e817998346ed7c0bfe96c7b4d405a20de49a2abeef90": {
+      "displayName": "PublishEncryptedTopic/Code",
+      "source": {
+        "path": "asset.801b9d403e9ac842f362e817998346ed7c0bfe96c7b4d405a20de49a2abeef90",
+        "packaging": "zip"
+      },
+      "destinations": {
+        "current_account-current_region-89448c3e": {
+          "bucketName": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}",
+          "objectKey": "801b9d403e9ac842f362e817998346ed7c0bfe96c7b4d405a20de49a2abeef90.zip",
+          "assumeRoleArn": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cdk-hnb659fds-file-publishing-role-${AWS::AccountId}-${AWS::Region}"
+        }
+      }
+    },
+    "1d090e8a6c3423ceb35f050d4be02317462acc035492236652b7201ba61d4df0": {
+      "displayName": "SNSInteg Template",
       "source": {
         "path": "SNSInteg.template.json",
         "packaging": "file"
       },
       "destinations": {
-        "current_account-current_region": {
+        "current_account-current_region-5b22890e": {
           "bucketName": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}",
-          "objectKey": "f73578a6268bf972ab72b4905cc09579fd59ece18de3cd0622ff9606ebdcf661.json",
+          "objectKey": "1d090e8a6c3423ceb35f050d4be02317462acc035492236652b7201ba61d4df0.json",
           "assumeRoleArn": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cdk-hnb659fds-file-publishing-role-${AWS::AccountId}-${AWS::Region}"
         }
       }

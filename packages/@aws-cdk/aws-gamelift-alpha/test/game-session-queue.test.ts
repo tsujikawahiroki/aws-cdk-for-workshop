@@ -1,14 +1,13 @@
 
 import * as path from 'path';
+import * as cdk from 'aws-cdk-lib';
 import { Template } from 'aws-cdk-lib/assertions';
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as sns from 'aws-cdk-lib/aws-sns';
-import * as cdk from 'aws-cdk-lib';
 import * as gamelift from '../lib';
 
 describe('gameSessionQueue', () => {
-
   describe('new', () => {
     let stack: cdk.Stack;
     let fleet: gamelift.FleetBase;
@@ -484,7 +483,6 @@ describe('gameSessionQueue', () => {
         },
       });
     });
-
   });
 
   describe('test import methods', () => {

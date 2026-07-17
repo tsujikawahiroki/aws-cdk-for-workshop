@@ -1,8 +1,9 @@
 import * as path from 'path';
 import { promisify } from 'util';
 import * as fs from 'fs-extra';
-import * as _glob from 'glob';
-import * as yargs from 'yargs';
+import _glob from 'glob';
+import pLimit from 'p-limit';
+import yargs from 'yargs';
 
 const glob = promisify(_glob);
 
@@ -85,8 +86,10 @@ async function copyAndRewrite(sourceDirectory: string, targetDirectory: string, 
   });
 
   // Copy all files to new destination and rewrite imports if needed
+  const limit = pLimit(20);
+  // eslint-disable-next-line @cdklabs/promiseall-no-unbounded-parallelism
   await Promise.all(
-    files.map(async (filePath: string) => {
+    files.map((filePath: string) => limit(async () => {
       const stat = await fs.stat(filePath);
       const relativePath = filePath.replace(sourceDirectory, '');
       const newPath = path.join(targetDirectory, relativePath);
@@ -102,7 +105,7 @@ async function copyAndRewrite(sourceDirectory: string, targetDirectory: string, 
           await rewriteFileTo(filePath, newPath, relativeDepth);
         }
       }
-    }),
+    })),
   );
 }
 
@@ -192,7 +195,6 @@ function autoIgnore(source: string): string[] {
 main()
   .then(() => process.exit(0))
   .catch((err) => {
-    // eslint-disable-next-line no-console
     console.error(err);
     process.exit(1);
   });

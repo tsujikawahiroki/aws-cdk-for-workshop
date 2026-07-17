@@ -1,5 +1,5 @@
 import { Construct } from 'constructs';
-import * as iam from '../../aws-iam';
+import type * as iam from '../../aws-iam';
 import * as cdk from '../../core';
 import * as stepfunctions from '../lib';
 
@@ -110,7 +110,6 @@ describe('States Language', () => {
         'State Three': { Type: 'Wait', End: true, Seconds: 10 },
       },
     });
-
   }),
 
   test('A state machine definition can be instantiated and chained', () => {
@@ -337,7 +336,6 @@ describe('States Language', () => {
         Finally: { Type: 'Pass', End: true },
       },
     });
-
   }),
 
   test('State machines can have unconstrainted gotos', () => {
@@ -621,7 +619,6 @@ describe('States Language', () => {
   }),
 
   describe('findReachableStates', () => {
-
     test('Can retrieve possible states from initial state', () => {
       // GIVEN
       const stack = new cdk.Stack();

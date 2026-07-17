@@ -28,6 +28,28 @@ By default, the master password will be generated and stored in AWS Secrets Mana
 
 Your cluster will be empty by default.
 
+## Serverless Clusters
+
+DocumentDB supports serverless clusters that automatically scale capacity based on your application's needs.
+To create a serverless cluster, specify the `serverlessV2ScalingConfiguration` instead of `instanceType`:
+
+```ts
+declare const vpc: ec2.Vpc;
+const cluster = new docdb.DatabaseCluster(this, 'Database', {
+  masterUser: {
+    username: 'myuser',
+  },
+  vpc,
+  serverlessV2ScalingConfiguration: {
+    minCapacity: 0.5,
+    maxCapacity: 2,
+  },
+  engineVersion: '5.0.0', // Serverless requires engine version 5.0.0 or higher
+});
+```
+
+**Note**: DocumentDB serverless requires engine version 5.0.0 or higher and is not compatible with all features. See the [AWS documentation](https://docs.aws.amazon.com/documentdb/latest/developerguide/docdb-serverless-limitations.html) for limitations.
+
 ## Connecting
 
 To control who can access the cluster, use the `.connections` attribute. DocumentDB databases have a default port, so
@@ -259,3 +281,24 @@ const cluster = new docdb.DatabaseCluster(this, 'Database', {
   caCertificate: docdb.CaCertificate.RDS_CA_RSA4096_G1, // CA certificate for all instances under this cluster
 });
 ```
+
+## Storage Type
+
+You can specify [storage type](https://docs.aws.amazon.com/documentdb/latest/developerguide/db-cluster-storage-configs.html) for the cluster.
+
+```ts
+declare const vpc: ec2.Vpc;
+
+const cluster = new docdb.DatabaseCluster(this, 'Database', {
+  masterUser: {
+    username: 'myuser',
+  },
+  instanceType: ec2.InstanceType.of(ec2.InstanceClass.MEMORY5, ec2.InstanceSize.LARGE),
+  vpc,
+  storageType: docdb.StorageType.IOPT1, // Default is StorageType.STANDARD
+});
+```
+
+**Note**: `StorageType.IOPT1` is supported starting with engine version 5.0.0.
+
+**Note**: For serverless clusters, storage type is managed automatically and cannot be specified.

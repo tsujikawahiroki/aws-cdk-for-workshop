@@ -1,7 +1,9 @@
+/* eslint-disable import/no-extraneous-dependencies */
 /* eslint-disable no-console */
 import * as https from 'https';
 import * as url from 'url';
-import { SFN, StartExecutionInput } from '@aws-sdk/client-sfn';
+import type { StartExecutionInput } from '@aws-sdk/client-sfn';
+import { SFN } from '@aws-sdk/client-sfn';
 
 interface HandlerResponse {
   readonly status: 'SUCCESS' | 'FAILED';
@@ -9,7 +11,6 @@ interface HandlerResponse {
   readonly data?: any;
 }
 
-// eslint-disable-next-line @typescript-eslint/ban-types
 export abstract class CustomResourceHandler<Request extends object, Response extends object> {
   public readonly physicalResourceId: string;
   private readonly timeout: NodeJS.Timeout;

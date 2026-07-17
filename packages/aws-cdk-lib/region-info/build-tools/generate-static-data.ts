@@ -1,3 +1,4 @@
+
 import * as path from 'path';
 import * as fs from 'fs-extra';
 import {
@@ -13,16 +14,15 @@ import {
   PARAMS_AND_SECRETS_LAMBDA_LAYER_ARNS,
   APPCONFIG_LAMBDA_LAYER_ARNS,
   PARTITION_SAML_SIGN_ON_URL,
+  LATEST_NODE_RUNTIME_MAP,
 } from './fact-tables';
 import { AWS_CDK_METADATA } from './metadata';
 import {
   AWS_REGIONS,
-  AWS_SERVICES,
-  before,
   RULE_S3_WEBSITE_REGIONAL_SUBDOMAIN,
   RULE_CLASSIC_PARTITION_BECOMES_OPT_IN,
+  AWS_REGIONS_AND_RULES,
 } from '../lib/aws-entities';
-import { Default } from '../lib/default';
 
 export async function main(): Promise<void> {
   checkRegions(APPMESH_ECR_ACCOUNTS);
@@ -36,7 +36,7 @@ export async function main(): Promise<void> {
   const lines = [
     "import { Fact, FactName } from './fact';",
     '',
-    '/* eslint-disable quote-props */',
+    '/* eslint-disable @stylistic/quote-props */',
     '/* eslint-disable max-len */',
     '',
     '/**',
@@ -85,7 +85,9 @@ export async function main(): Promise<void> {
 
     registerFact(region, 'APPMESH_ECR_ACCOUNT', APPMESH_ECR_ACCOUNTS[region]);
 
-    registerFact(region, 'SAML_SIGN_ON_URL', PARTITION_SAML_SIGN_ON_URL[partition]);
+    registerFact(region, 'SAML_SIGN_ON_URL', PARTITION_SAML_SIGN_ON_URL[partition] || '');
+
+    registerFact(region, 'LATEST_NODE_RUNTIME', LATEST_NODE_RUNTIME_MAP[partition]);
 
     const firehoseCidrBlock = FIREHOSE_CIDR_BLOCKS[region];
     if (firehoseCidrBlock) {
@@ -95,14 +97,9 @@ export async function main(): Promise<void> {
     const vpcEndpointServiceNamePrefix = `${domainSuffix.split('.').reverse().join('.')}.vpce`;
     registerFact(region, 'VPC_ENDPOINT_SERVICE_NAME_PREFIX', vpcEndpointServiceNamePrefix);
 
-    for (const service of AWS_SERVICES) {
-      registerFact(region, ['servicePrincipal', service], Default.servicePrincipal(service, region, domainSuffix));
-    }
-
     for (const version in CLOUDWATCH_LAMBDA_INSIGHTS_ARNS) {
       for (const arch in CLOUDWATCH_LAMBDA_INSIGHTS_ARNS[version]) {
         registerFact(region, ['cloudwatchLambdaInsightsVersion', version, arch], CLOUDWATCH_LAMBDA_INSIGHTS_ARNS[version][arch][region]);
-
       }
     }
 
@@ -169,17 +166,29 @@ function checkRegionsSubMap(map: Record<string, Record<string, Record<string, un
           throw new Error(`Un-registered region fact found: ${region}. Add to AWS_REGIONS list!`);
         }
       }
-
     }
   }
 }
 
-export function after(region: string, ruleOrRegion: string | symbol) {
+function after(region: string, ruleOrRegion: string | symbol) {
   return region !== ruleOrRegion && !before(region, ruleOrRegion);
 }
 
+/**
+ * Whether or not a region predates a given rule (or region).
+ *
+ * Unknown region => we have to assume no.
+ */
+function before(region: string, ruleOrRegion: string | symbol) {
+  const ruleIx = AWS_REGIONS_AND_RULES.indexOf(ruleOrRegion);
+  if (ruleIx === -1) {
+    throw new Error(`Unknown rule: ${String(ruleOrRegion)}`);
+  }
+  const regionIx = AWS_REGIONS_AND_RULES.indexOf(region);
+  return regionIx === -1 ? false : regionIx < ruleIx;
+}
+
 main().catch(e => {
-  // eslint-disable-next-line no-console
   console.error(e);
   process.exit(-1);
 });

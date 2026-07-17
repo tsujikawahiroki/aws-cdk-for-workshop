@@ -1,4 +1,5 @@
-import { App, Stack, StackProps } from 'aws-cdk-lib';
+import type { StackProps } from 'aws-cdk-lib';
+import { App, Stack } from 'aws-cdk-lib';
 import { IntegTest } from '@aws-cdk/integ-tests-alpha';
 import { Dashboard, SingleValueWidget, Metric, GraphWidget, GaugeWidget } from 'aws-cdk-lib/aws-cloudwatch';
 
@@ -11,6 +12,8 @@ class TestStack extends Stack {
     const testMetric = new Metric({
       namespace: 'CDK/Test',
       metricName: 'Metric',
+      account: '1234',
+      region: 'us-north-5',
     });
 
     const singleValueWidget = new SingleValueWidget({

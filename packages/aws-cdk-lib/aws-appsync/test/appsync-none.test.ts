@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { Template } from '../../assertions';
+import { Match, Template } from '../../assertions';
 import * as cdk from '../../core';
 import * as appsync from '../lib';
 
@@ -15,7 +15,6 @@ beforeEach(() => {
 });
 
 describe('None Data Source configuration', () => {
-
   test('default configuration produces name `NoneCDKDataSource`', () => {
     // WHEN
     api.addNoneDataSource('ds');
@@ -83,6 +82,23 @@ describe('None Data Source configuration', () => {
     });
   });
 
+  test.each([
+    [appsync.DataSourceMetricsConfig.ENABLED, 'ENABLED'],
+    [appsync.DataSourceMetricsConfig.DISABLED, 'DISABLED'],
+    [undefined, Match.absent()],
+  ])('appsync configures metrics config correctly to set %s', (metricsConfig, expected) => {
+    // WHEN
+    api.addNoneDataSource('ds', {
+      metricsConfig: metricsConfig,
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::AppSync::DataSource', {
+      Type: 'NONE',
+      MetricsConfig: expected,
+    });
+  });
+
   test('appsync errors when creating multiple none data sources with no configuration', () => {
     // THEN
     expect(() => {
@@ -96,7 +112,7 @@ describe('None Data Source configuration', () => {
     expect(() => {
       api.addNoneDataSource('ds1', { name: 'custom' });
       api.addNoneDataSource('ds2', { name: 'custom' });
-    }).not.toThrowError();
+    }).not.toThrow();
   });
 });
 

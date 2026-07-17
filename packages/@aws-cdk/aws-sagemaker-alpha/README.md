@@ -78,6 +78,31 @@ const model = new sagemaker.Model(this, 'InferencePipelineModel', {
 });
 ```
 
+### Model Properties
+
+#### Network Isolation
+
+If you enable [network isolation](https://docs.aws.amazon.com/sagemaker/latest/dg/mkt-algo-model-internet-free.html), the containers can't make any outbound network calls, even to other AWS services such as Amazon S3. Additionally, no AWS credentials are made available to the container runtime environment.
+
+To enable network isolation, set the `networkIsolation` property to `true`:
+
+```typescript
+import * as sagemaker from '@aws-cdk/aws-sagemaker-alpha';
+
+declare const image: sagemaker.ContainerImage;
+declare const modelData: sagemaker.ModelData;
+
+const model = new sagemaker.Model(this, 'ContainerModel', {
+  containers: [
+    {
+      image,
+      modelData,
+    }
+  ],
+  networkIsolation: true,
+});
+```
+
 ### Container Images
 
 Inference code can be stored in the Amazon EC2 Container Registry (Amazon ECR), which is specified
@@ -188,6 +213,63 @@ const endpointConfig = new sagemaker.EndpointConfig(this, 'EndpointConfig', {
   ]
 });
 ```
+
+#### Container Startup Health Check Timeout
+
+You can specify a timeout value for your inference container to pass health check by configuring
+the `containerStartupHealthCheckTimeout` property. This is useful when your model takes longer
+to initialize and you want to avoid premature health check failures:
+
+```typescript
+import * as sagemaker from '@aws-cdk/aws-sagemaker-alpha';
+
+declare const model: sagemaker.Model;
+
+const endpointConfig = new sagemaker.EndpointConfig(this, 'EndpointConfig', {
+  instanceProductionVariants: [
+    {
+      model: model,
+      variantName: 'my-variant',
+      containerStartupHealthCheckTimeout: cdk.Duration.minutes(5), // 5 minutes timeout
+    },
+  ]
+});
+```
+
+The timeout value must be between 60 seconds and 1 hour (3600 seconds). If not specified, 
+Amazon SageMaker uses the default timeout behavior.
+
+### Serverless Inference
+
+Amazon SageMaker Serverless Inference is a purpose-built inference option that makes it easy for you to deploy and scale ML models. Serverless endpoints automatically launch compute resources and scale them in and out depending on traffic, eliminating the need to choose instance types or manage scaling policies. For more information, see [SageMaker Serverless Inference](https://docs.aws.amazon.com/sagemaker/latest/dg/serverless-endpoints.html).
+
+To create a serverless endpoint configuration, use the `serverlessProductionVariant` property:
+
+```typescript
+import * as sagemaker from '@aws-cdk/aws-sagemaker-alpha';
+
+declare const model: sagemaker.Model;
+
+const endpointConfig = new sagemaker.EndpointConfig(this, 'ServerlessEndpointConfig', {
+  serverlessProductionVariant: {
+    model: model,
+    variantName: 'serverlessVariant',
+    maxConcurrency: 10,
+    memorySizeInMB: 2048,
+    provisionedConcurrency: 5, // optional
+  },
+});
+```
+
+Serverless inference is ideal for workloads with intermittent or unpredictable traffic patterns. You can configure:
+
+- `maxConcurrency`: Maximum concurrent invocations (1-200)
+- `memorySizeInMB`: Memory allocation in 1GB increments (1024, 2048, 3072, 4096, 5120, or 6144 MB)
+- `provisionedConcurrency`: Optional pre-warmed capacity to reduce cold starts
+
+**Note**: Provisioned concurrency incurs charges even when the endpoint is not processing requests. Use it only when you need to minimize cold start latency.
+
+You cannot mix serverless and instance-based variants in the same endpoint configuration.
 
 ### Endpoint
 

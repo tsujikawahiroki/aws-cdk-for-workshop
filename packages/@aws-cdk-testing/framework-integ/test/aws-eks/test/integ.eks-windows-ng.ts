@@ -9,7 +9,6 @@ import { NodegroupAmiType, TaintEffect } from 'aws-cdk-lib/aws-eks';
 import { EC2_RESTRICT_DEFAULT_SECURITY_GROUP } from 'aws-cdk-lib/cx-api';
 
 class EksClusterStack extends Stack {
-
   private cluster: eks.Cluster;
   private vpc: ec2.IVpc;
 
@@ -34,7 +33,7 @@ class EksClusterStack extends Stack {
     });
 
     this.cluster.addNodegroupCapacity('LinuxNodegroup', {
-      amiType: NodegroupAmiType.AL2_X86_64,
+      amiType: NodegroupAmiType.AL2023_X86_64_STANDARD,
     });
     this.cluster.addNodegroupCapacity('WindowsNodegroup', {
       amiType: NodegroupAmiType.WINDOWS_FULL_2022_X86_64,
@@ -49,7 +48,12 @@ class EksClusterStack extends Stack {
   }
 }
 
-const app = new App();
+const app = new App({
+  postCliContext: {
+    '@aws-cdk/aws-lambda:useCdkManagedLogGroup': false,
+    '@aws-cdk/aws-lambda:createNewPoliciesWithAddToRolePolicy': false,
+  },
+});
 
 const stack = new EksClusterStack(app, 'aws-cdk-eks-cluster-windows-ng-test');
 new integ.IntegTest(app, 'aws-cdk-eks-cluster-windows-ng', {

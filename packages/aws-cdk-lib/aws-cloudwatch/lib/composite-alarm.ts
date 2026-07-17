@@ -1,7 +1,13 @@
-import { Construct } from 'constructs';
-import { AlarmBase, IAlarm, IAlarmRule } from './alarm-base';
+import type { Construct } from 'constructs';
+import type { IAlarm, IAlarmRule } from './alarm-base';
+import { AlarmBase } from './alarm-base';
 import { CfnCompositeAlarm } from './cloudwatch.generated';
-import { ArnFormat, Lazy, Names, Stack, Duration } from '../../core';
+import { ArnFormat, Names, Stack, Duration, ValidationError, Token, Lazy } from '../../core';
+import { memoizedGetter } from '../../core/lib/helpers-internal';
+import { addConstructMetadata } from '../../core/lib/metadata-resource';
+import { lit } from '../../core/lib/private/literal-string';
+import { propertyInjectable } from '../../core/lib/prop-injectable';
+import type { IAlarmRef } from '../../interfaces/generated/aws-cloudwatch-interfaces.generated';
 
 /**
  * Properties for creating a Composite Alarm
@@ -39,7 +45,7 @@ export interface CompositeAlarmProps {
    *
    * @default - alarm will not be suppressed.
    */
-  readonly actionsSuppressor?: IAlarm;
+  readonly actionsSuppressor?: IAlarmRef;
 
   /**
    * The maximum duration that the composite alarm waits after suppressor alarm goes out of the ALARM state.
@@ -61,7 +67,10 @@ export interface CompositeAlarmProps {
 /**
  * A Composite Alarm based on Alarm Rule.
  */
+@propertyInjectable
 export class CompositeAlarm extends AlarmBase {
+  /** Uniquely identifies this class. */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-cloudwatch.CompositeAlarm';
 
   /**
    * Import an existing CloudWatch composite alarm provided an Name.
@@ -101,31 +110,45 @@ export class CompositeAlarm extends AlarmBase {
    *
    * @attribute
    */
-  public readonly alarmArn: string;
+  @memoizedGetter
+  get alarmArn(): string {
+    return this.getResourceArnAttribute(this.resource.attrArn, {
+      service: 'cloudwatch',
+      resource: 'alarm',
+      resourceName: this.physicalName,
+      arnFormat: ArnFormat.COLON_RESOURCE_NAME,
+    });
+  }
 
   /**
    * Name of this alarm.
    *
    * @attribute
    */
-  public readonly alarmName: string;
+  @memoizedGetter
+  get alarmName(): string {
+    return this.getResourceNameAttribute(this.resource.ref);
+  }
 
   private readonly alarmRule: string;
+  private readonly resource: CfnCompositeAlarm;
 
   constructor(scope: Construct, id: string, props: CompositeAlarmProps) {
     super(scope, id, {
       physicalName: props.compositeAlarmName ?? Lazy.string({ produce: () => this.generateUniqueId() }),
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     if (props.alarmRule.renderAlarmRule().length > 10240) {
-      throw new Error('Alarm Rule expression cannot be greater than 10240 characters, please reduce the conditions in the Alarm Rule');
+      throw new ValidationError(lit`AlarmRuleExpressionCannotGreater`, 'Alarm Rule expression cannot be greater than 10240 characters, please reduce the conditions in the Alarm Rule', this);
     }
 
     let extensionPeriod = props.actionsSuppressorExtensionPeriod;
     let waitPeriod = props.actionsSuppressorWaitPeriod;
     if (props.actionsSuppressor === undefined) {
       if (extensionPeriod !== undefined || waitPeriod !== undefined) {
-        throw new Error('ActionsSuppressor Extension/Wait Periods require an ActionsSuppressor to be set.');
+        throw new ValidationError(lit`ActionsSuppressorExtensionWaitPeriods`, 'ActionsSuppressor Extension/Wait Periods require an ActionsSuppressor to be set.', this);
       }
     } else {
       extensionPeriod = extensionPeriod ?? Duration.minutes(1);
@@ -139,22 +162,15 @@ export class CompositeAlarm extends AlarmBase {
       alarmRule: this.alarmRule,
       alarmDescription: props.alarmDescription,
       actionsEnabled: props.actionsEnabled,
-      alarmActions: Lazy.list({ produce: () => this.alarmActionArns }),
-      insufficientDataActions: Lazy.list({ produce: (() => this.insufficientDataActionArns) }),
-      okActions: Lazy.list({ produce: () => this.okActionArns }),
-      actionsSuppressor: props.actionsSuppressor?.alarmArn,
+      alarmActions: Token.asList(this._alarmActionArns),
+      insufficientDataActions: Token.asList(this._insufficientDataActionArns),
+      okActions: Token.asList(this._okActionArns),
+      actionsSuppressor: props.actionsSuppressor?.alarmRef.alarmArn,
       actionsSuppressorExtensionPeriod: extensionPeriod?.toSeconds(),
       actionsSuppressorWaitPeriod: waitPeriod?.toSeconds(),
     });
 
-    this.alarmName = this.getResourceNameAttribute(alarm.ref);
-    this.alarmArn = this.getResourceArnAttribute(alarm.attrArn, {
-      service: 'cloudwatch',
-      resource: 'alarm',
-      resourceName: this.physicalName,
-      arnFormat: ArnFormat.COLON_RESOURCE_NAME,
-    });
-
+    this.resource = alarm;
   }
 
   private generateUniqueId(): string {
@@ -164,5 +180,4 @@ export class CompositeAlarm extends AlarmBase {
     }
     return name;
   }
-
 }

@@ -1,6 +1,7 @@
 import { Template, Match } from '../../assertions';
 import { Bucket } from '../../aws-s3';
-import { Aws, Stack, CfnResource } from '../../core';
+import type { CfnResource } from '../../core';
+import { Aws, Stack } from '../../core';
 import * as ec2 from '../lib';
 
 describe('user data', () => {
@@ -14,7 +15,6 @@ describe('user data', () => {
     // THEN
     const rendered = userData.render();
     expect(rendered).toEqual('<powershell>command1\ncommand2</powershell>');
-
   });
   test('can create Windows user data with commands on exit', () => {
     // GIVEN
@@ -35,7 +35,6 @@ describe('user data', () => {
         'command1\n' +
         'command2\n' +
         'throw "Success"</powershell>');
-
   });
   test('can create Windows with Signal Command', () => {
     // GIVEN
@@ -60,7 +59,6 @@ describe('user data', () => {
         'command1\n' +
         'throw "Success"</powershell>',
     );
-
   });
   test('can create Windows with Signal Command and userDataCausesReplacement', () => {
     // GIVEN
@@ -125,7 +123,6 @@ describe('user data', () => {
       'mkdir (Split-Path -Path \'c:\\test\\location\\otherScript.bat\' ) -ea 0\n' +
       'Read-S3Object -BucketName \'test2\' -key \'filename2.bat\' -file \'c:\\test\\location\\otherScript.bat\' -ErrorAction Stop</powershell>',
     );
-
   });
   test('can windows userdata download S3 files with given region', () => {
     // GIVEN
@@ -154,7 +151,6 @@ describe('user data', () => {
       'mkdir (Split-Path -Path \'c:\\test\\location\\otherScript.bat\' ) -ea 0\n' +
       'Read-S3Object -BucketName \'test2\' -key \'filename2.bat\' -file \'c:\\test\\location\\otherScript.bat\' -ErrorAction Stop -Region us-east-1</powershell>',
     );
-
   });
   test('can windows userdata execute files', () => {
     // GIVEN
@@ -176,7 +172,6 @@ describe('user data', () => {
       '&\'C:\\test\\filename2.bat\' arg1 arg2 -arg $variable\n' +
       'if (!$?) { Write-Error \'Failed to execute the file "C:\\test\\filename2.bat"\' -ErrorAction Stop }</powershell>',
     );
-
   });
   test('can persist windows userdata', () => {
     // WHEN
@@ -196,7 +191,6 @@ describe('user data', () => {
     // THEN
     const rendered = userData.render();
     expect(rendered).toEqual('#!/bin/bash\ncommand1\ncommand2');
-
   });
   test('can create Linux user data with commands on exit', () => {
     // GIVEN
@@ -217,7 +211,6 @@ describe('user data', () => {
         'trap exitTrap EXIT\n' +
         'command1\n' +
         'command2');
-
   });
   test('can create Linux with Signal Command', () => {
     // GIVEN
@@ -240,7 +233,6 @@ describe('user data', () => {
         '}\n' +
         'trap exitTrap EXIT\n' +
         'command1');
-
   });
   test('can create Linux with Signal Command and userDataCausesReplacement', () => {
     // GIVEN
@@ -305,7 +297,6 @@ describe('user data', () => {
       'mkdir -p $(dirname \'c:\\test\\location\\otherScript.sh\')\n' +
       'aws s3 cp \'s3://test2/filename2.sh\' \'c:\\test\\location\\otherScript.sh\'',
     );
-
   });
   test('can linux userdata download S3 files from specific region', () => {
     // GIVEN
@@ -335,7 +326,6 @@ describe('user data', () => {
       'mkdir -p $(dirname \'c:\\test\\location\\otherScript.sh\')\n' +
       'aws s3 cp \'s3://test2/filename2.sh\' \'c:\\test\\location\\otherScript.sh\' --region us-east-1',
     );
-
   });
   test('can linux userdata execute files', () => {
     // GIVEN
@@ -360,7 +350,6 @@ describe('user data', () => {
       'chmod +x \'/test/filename2.sh\'\n' +
       '\'/test/filename2.sh\' arg1 arg2 -arg $variable',
     );
-
   });
   test('can create Custom user data', () => {
     // GIVEN
@@ -371,7 +360,6 @@ describe('user data', () => {
     // THEN
     const rendered = userData.render();
     expect(rendered).toEqual('Some\nmultiline\ncontent');
-
   });
   test('Custom user data throws when adding on exit commands', () => {
     // GIVEN
@@ -380,7 +368,6 @@ describe('user data', () => {
 
     // THEN
     expect(() => userData.addOnExitCommands( 'a command goes here' )).toThrow();
-
   });
   test('Custom user data throws when adding signal command', () => {
     // GIVEN
@@ -392,7 +379,6 @@ describe('user data', () => {
 
     // THEN
     expect(() => userData.addSignalOnExitCommand( resource )).toThrow();
-
   });
   test('Custom user data throws when downloading file', () => {
     // GIVEN
@@ -405,7 +391,6 @@ describe('user data', () => {
       bucket,
       bucketKey: 'filename.sh',
     })).toThrow();
-
   });
   test('Custom user data throws when executing file', () => {
     // GIVEN
@@ -416,7 +401,6 @@ describe('user data', () => {
       userData.addExecuteFileCommand({
         filePath: '/tmp/filename.sh',
       })).toThrow();
-
   });
 
   test('Linux user rendering multipart headers', () => {
@@ -442,7 +426,6 @@ describe('user data', () => {
       '',
       { 'Fn::Base64': '#!/bin/bash\necho \"Hello world\"' },
     ]);
-
   });
 
   test('Default parts separator used, if not specified', () => {
@@ -467,7 +450,6 @@ describe('user data', () => {
       '--+AWS+CDK+User+Data+Separator==--',
       '',
     ].join('\n'));
-
   });
 
   test('Non-default parts separator used, if not specified', () => {
@@ -494,7 +476,6 @@ describe('user data', () => {
       '--//--',
       '',
     ].join('\n'));
-
   });
 
   test('Multipart separator validation', () => {
@@ -509,7 +490,6 @@ describe('user data', () => {
         partsSeparator: s,
       });
     }).toThrow(/Invalid characters in separator/));
-
   });
 
   test('Multipart user data throws when adding on exit commands', () => {
@@ -519,7 +499,6 @@ describe('user data', () => {
 
     // THEN
     expect(() => userData.addOnExitCommands( 'a command goes here' )).toThrow();
-
   });
   test('Multipart user data throws when adding signal command', () => {
     // GIVEN
@@ -531,7 +510,6 @@ describe('user data', () => {
 
     // THEN
     expect(() => userData.addSignalOnExitCommand( resource )).toThrow();
-
   });
   test('Multipart user data throws when downloading file', () => {
     // GIVEN
@@ -544,7 +522,6 @@ describe('user data', () => {
       bucket,
       bucketKey: 'filename.sh',
     } )).toThrow();
-
   });
   test('Multipart user data throws when executing file', () => {
     // GIVEN
@@ -556,7 +533,6 @@ describe('user data', () => {
       userData.addExecuteFileCommand({
         filePath: '/tmp/filename.sh',
       } )).toThrow();
-
   });
 
   test('can add commands to Multipart user data', () => {
@@ -595,7 +571,6 @@ describe('user data', () => {
         ],
       ],
     });
-
   });
   test('can add commands on exit to Multipart user data', () => {
     // GIVEN
@@ -642,7 +617,6 @@ describe('user data', () => {
         ],
       ],
     });
-
   });
   test('can add Signal Command to Multipart user data', () => {
     // GIVEN
@@ -688,7 +662,6 @@ describe('user data', () => {
         ],
       ],
     });
-
   });
   test('can add download S3 files to Multipart user data', () => {
     // GIVEN
@@ -740,7 +713,6 @@ describe('user data', () => {
         ],
       ],
     });
-
   });
   test('can add execute files to Multipart user data', () => {
     // GIVEN
@@ -790,6 +762,5 @@ describe('user data', () => {
         ],
       ],
     });
-
   });
 });

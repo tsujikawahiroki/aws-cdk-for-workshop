@@ -1,10 +1,12 @@
 import * as path from 'path';
 import { Annotations, Match, Template } from '../../assertions';
+import { InstanceProfile, Role, ServicePrincipal } from '../../aws-iam';
 import { Key } from '../../aws-kms';
 import { Asset } from '../../aws-s3-assets';
 import { StringParameter } from '../../aws-ssm';
-import { App, Stack } from '../../core';
+import { App, Stack, Duration, Validations } from '../../core';
 import * as cxapi from '../../cx-api';
+import type { LaunchTemplate } from '../lib';
 import {
   AmazonLinuxImage,
   BlockDeviceVolume,
@@ -16,7 +18,7 @@ import {
   InstanceClass,
   InstanceSize,
   InstanceType,
-  LaunchTemplate,
+  HttpTokens,
   UserData,
   Vpc,
   SubnetType,
@@ -52,7 +54,6 @@ describe('instance', () => {
       InstanceType: 't3.large',
       SourceDestCheck: false,
     });
-
   });
   test('instance is grantable', () => {
     // GIVEN
@@ -106,7 +107,6 @@ describe('instance', () => {
         Version: '2012-10-17',
       },
     });
-
   });
   test('instance architecture is correctly discerned for arm instances', () => {
     // GIVEN
@@ -122,11 +122,10 @@ describe('instance', () => {
       // THEN
       expect(instanceType.architecture).toBe(InstanceArchitecture.ARM_64);
     }
-
   });
   test('instance architecture is correctly discerned for x86-64 instance', () => {
     // GIVEN
-    const sampleInstanceClasses = ['c5', 'm5ad', 'r5n', 'm6', 't3a', 'r6i', 'r6a', 'p4de', 'p5', 'm7i-flex']; // A sample of x86-64 instance classes
+    const sampleInstanceClasses = ['c5', 'm5ad', 'r5n', 'm6', 't3a', 'r6i', 'r6a', 'g6', 'p4de', 'p5', 'm7i-flex']; // A sample of x86-64 instance classes
 
     for (const instanceClass of sampleInstanceClasses) {
       // WHEN
@@ -135,24 +134,23 @@ describe('instance', () => {
       // THEN
       expect(instanceType.architecture).toBe(InstanceArchitecture.X86_64);
     }
-
   });
 
   test('sameInstanceClassAs compares InstanceTypes contains dashes', () => {
     // GIVEN
     const comparitor = InstanceType.of(InstanceClass.M7I_FLEX, InstanceSize.LARGE);
-    //WHEN
+    // WHEN
     const largerInstanceType = InstanceType.of(InstanceClass.M7I_FLEX, InstanceSize.XLARGE);
-    //THEN
+    // THEN
     expect(largerInstanceType.sameInstanceClassAs(comparitor)).toBeTruthy();
   });
 
   test('sameInstanceClassAs compares InstanceSize contains dashes', () => {
     // GIVEN
     const comparitor = new InstanceType('c7a.metal-48xl');
-    //WHEN
+    // WHEN
     const largerInstanceType = new InstanceType('c7a.xlarge');
-    //THEN
+    // THEN
     expect(largerInstanceType.sameInstanceClassAs(comparitor)).toBeTruthy();
   });
 
@@ -196,7 +194,6 @@ describe('instance', () => {
       // THEN
       expect(() => instanceType.architecture).toThrow('Malformed instance type identifier');
     }
-
   });
   test('can propagate EBS volume tags', () => {
     // WHEN
@@ -349,7 +346,26 @@ describe('instance', () => {
           },
         ],
       });
+    });
 
+    test('warns if throughput is specified for an EBS volume', () => {
+      // WHEN
+      new Instance(stack, 'Instance', {
+        vpc,
+        machineImage: new AmazonLinuxImage(),
+        instanceType: InstanceType.of(InstanceClass.T3, InstanceSize.LARGE),
+        blockDevices: [{
+          deviceName: 'ebs',
+          volume: BlockDeviceVolume.ebs(15, {
+            deleteOnTermination: true,
+            encrypted: true,
+            volumeType: EbsDeviceVolumeType.GP3,
+            throughput: 125,
+          }),
+        }],
+      });
+      // THEN
+      Annotations.fromStack(stack).hasWarning('/Default/Instance', Match.stringLikeRegexp('The throughput property is not supported on EC2 instances. Use a Launch Template instead'));
     });
 
     test('throws if ephemeral volumeIndex < 0', () => {
@@ -365,7 +381,6 @@ describe('instance', () => {
           }],
         });
       }).toThrow(/volumeIndex must be a number starting from 0/);
-
     });
 
     test('throws if volumeType === IO1 without iops', () => {
@@ -426,6 +441,10 @@ describe('instance', () => {
     });
 
     test('warning if iops and invalid volumeType', () => {
+      Validations.of(stack).acknowledge({
+        id: 'CloudFormation-Validate::W3671',
+        reason: 'We already have a warning here',
+      });
       new Instance(stack, 'Instance', {
         vpc,
         machineImage: new AmazonLinuxImage(),
@@ -446,6 +465,45 @@ describe('instance', () => {
     });
   });
 
+  describe('instanceProfile', () => {
+    let instanceProfile: InstanceProfile;
+    let role: Role;
+
+    beforeEach(() => {
+      role = new Role(stack, 'MyRole', {
+        assumedBy: new ServicePrincipal('ec2.amazonaws.com'),
+      });
+      instanceProfile = new InstanceProfile(stack, 'MyInstanceProfile', {
+        role,
+      });
+    });
+
+    test('can specify instanceProfile', () => {
+      new Instance(stack, 'Instance', {
+        vpc,
+        machineImage: new AmazonLinuxImage(),
+        instanceType: InstanceType.of(InstanceClass.T3, InstanceSize.LARGE),
+        instanceProfile,
+      });
+
+      Template.fromStack(stack).hasResourceProperties('AWS::IAM::InstanceProfile', {
+        Roles: [{ Ref: 'MyRoleF48FFE04' }],
+      });
+    });
+
+    test('throws if used with role', () => {
+      expect(() => {
+        new Instance(stack, 'Instance', {
+          vpc,
+          machineImage: new AmazonLinuxImage(),
+          instanceType: InstanceType.of(InstanceClass.T3, InstanceSize.LARGE),
+          instanceProfile,
+          role,
+        });
+      }).toThrow(/You cannot provide both instanceProfile and role/);
+    });
+  });
+
   test('instance can be created with Private IP Address', () => {
     // WHEN
     new Instance(stack, 'Instance', {
@@ -460,7 +518,6 @@ describe('instance', () => {
       InstanceType: 't3.large',
       PrivateIpAddress: '10.0.0.2',
     });
-
   });
 
   test('instance can be created with Private IP Address AND Associate Public IP Address', () => {
@@ -511,7 +568,6 @@ describe('instance', () => {
         'VPCPublicSubnet2RouteTableAssociation5A808732',
       ],
     });
-
   });
 
   test('instance requires IMDSv2', () => {
@@ -824,27 +880,27 @@ test('ssm permissions adds right managed policy', () => {
 test('sameInstanceClassAs compares identical InstanceTypes correctly', () => {
   // GIVEN
   const comparitor = InstanceType.of(InstanceClass.T3, InstanceSize.LARGE);
-  //WHEN
+  // WHEN
   const sameInstanceType = InstanceType.of(InstanceClass.T3, InstanceSize.LARGE);
-  //THEN
+  // THEN
   expect(sameInstanceType.sameInstanceClassAs(comparitor)).toBeTruthy();
 });
 
 test('sameInstanceClassAs compares InstanceTypes correctly regardless of size', () => {
   // GIVEN
   const comparitor = InstanceType.of(InstanceClass.T3, InstanceSize.LARGE);
-  //WHEN
+  // WHEN
   const largerInstanceType = InstanceType.of(InstanceClass.T3, InstanceSize.XLARGE);
-  //THEN
+  // THEN
   expect(largerInstanceType.sameInstanceClassAs(comparitor)).toBeTruthy();
 });
 
 test('sameInstanceClassAs compares different InstanceTypes correctly', () => {
   // GIVEN
   const comparitor = InstanceType.of(InstanceClass.C4, InstanceSize.LARGE);
-  //WHEN
+  // WHEN
   const instanceType = new InstanceType('t3.large');
-  //THEN
+  // THEN
   expect(instanceType.sameInstanceClassAs(comparitor)).toBeFalsy();
 });
 
@@ -953,5 +1009,561 @@ test('specify ebs optimized instance', () => {
   Template.fromStack(stack).hasResourceProperties('AWS::EC2::Instance', {
     InstanceType: 't3.large',
     EbsOptimized: true,
+  });
+});
+
+test('specify disable api termination', () => {
+  // WHEN
+  new Instance(stack, 'Instance', {
+    vpc,
+    machineImage: new AmazonLinuxImage(),
+    instanceType: new InstanceType('t3.large'),
+    disableApiTermination: true,
+  });
+
+  // THEN
+  Template.fromStack(stack).hasResourceProperties('AWS::EC2::Instance', {
+    InstanceType: 't3.large',
+    DisableApiTermination: true,
+  });
+});
+
+test.each([
+  [true, true],
+  [false, false],
+])('given enclaveEnabled %p', (given: boolean, expected: boolean) => {
+  // WHEN
+  new Instance(stack, 'Instance', {
+    vpc,
+    machineImage: new AmazonLinuxImage(),
+    instanceType: InstanceType.of(InstanceClass.M5, InstanceSize.XLARGE),
+    enclaveEnabled: given,
+  });
+
+  // THEN
+  Template.fromStack(stack).hasResourceProperties('AWS::EC2::Instance', {
+    EnclaveOptions: {
+      Enabled: expected,
+    },
+  });
+});
+
+test.each([
+  [true, true],
+  [false, false],
+])('given hibernationEnabled %p', (given: boolean, expected: boolean) => {
+  // WHEN
+  new Instance(stack, 'Instance', {
+    vpc,
+    machineImage: new AmazonLinuxImage(),
+    instanceType: InstanceType.of(InstanceClass.M5, InstanceSize.XLARGE),
+    hibernationEnabled: given,
+    blockDevices: [{
+      deviceName: '/dev/xvda',
+      volume: BlockDeviceVolume.ebs(30, {
+        volumeType: EbsDeviceVolumeType.GP3,
+        encrypted: true,
+        deleteOnTermination: true,
+      }),
+    }],
+  });
+
+  // THEN
+  Template.fromStack(stack).hasResourceProperties('AWS::EC2::Instance', {
+    HibernationOptions: {
+      Configured: expected,
+    },
+  });
+});
+
+test('throw if both enclaveEnabled and hibernationEnabled are set to true', () => {
+  // WHEN/THEN
+  expect(() => {
+    new Instance(stack, 'Instance', {
+      vpc,
+      machineImage: new AmazonLinuxImage(),
+      instanceType: InstanceType.of(InstanceClass.M5, InstanceSize.LARGE),
+      enclaveEnabled: true,
+      hibernationEnabled: true,
+      blockDevices: [{
+        deviceName: '/dev/xvda',
+        volume: BlockDeviceVolume.ebs(30, {
+          volumeType: EbsDeviceVolumeType.GP3,
+          encrypted: true,
+          deleteOnTermination: true,
+        }),
+      }],
+    });
+  }).toThrow('You can\'t set both `enclaveEnabled` and `hibernationEnabled` to true on the same instance');
+});
+
+test('instance with ipv6 address count', () => {
+  // WHEN
+  new Instance(stack, 'Instance', {
+    vpc,
+    machineImage: new AmazonLinuxImage(),
+    instanceType: new InstanceType('t2.micro'),
+    ipv6AddressCount: 2,
+  });
+
+  // THEN
+  Template.fromStack(stack).hasResourceProperties('AWS::EC2::Instance', {
+    InstanceType: 't2.micro',
+    Ipv6AddressCount: 2,
+  });
+});
+
+test.each([-1, 0.1, 1.1])('throws if ipv6AddressCount is not a positive integer', (ipv6AddressCount: number) => {
+  // THEN
+  expect(() => {
+    new Instance(stack, 'Instance', {
+      vpc,
+      machineImage: new AmazonLinuxImage(),
+      instanceType: new InstanceType('t2.micro'),
+      ipv6AddressCount: ipv6AddressCount,
+    });
+  }).toThrow(`\'ipv6AddressCount\' must be a non-negative integer, got: ${ipv6AddressCount}`);
+});
+
+test.each([true, false])('throw error for specifying ipv6AddressCount with associatePublicIpAddress', (associatePublicIpAddress) => {
+  // THEN
+  expect(() => {
+    new Instance(stack, 'Instance', {
+      vpc,
+      machineImage: new AmazonLinuxImage(),
+      instanceType: new InstanceType('t2.micro'),
+      ipv6AddressCount: 2,
+      associatePublicIpAddress,
+    });
+  }).toThrow('You can\'t set both \'ipv6AddressCount\' and \'associatePublicIpAddress\'');
+});
+
+test('resourceSignalTimeout overwrites initOptions.timeout when feature flag turned off', () => {
+  // GIVEN
+  const app = new App({
+    context: {
+      [cxapi.EC2_SUM_TIMEOUT_ENABLED]: false,
+    },
+  });
+  stack = new Stack(app);
+  vpc = new Vpc(stack, 'Vpc)');
+  new Instance(stack, 'Instance', {
+    vpc,
+    machineImage: new AmazonLinuxImage(),
+    instanceType: InstanceType.of(InstanceClass.T3, InstanceSize.LARGE),
+    init: CloudFormationInit.fromElements(
+      InitCommand.shellCommand('echo hello'),
+    ),
+    initOptions: {
+      timeout: Duration.minutes(30),
+    },
+    resourceSignalTimeout: Duration.minutes(10),
+  });
+
+  // THEN
+  Template.fromStack(stack).hasResource('AWS::EC2::Instance', {
+    CreationPolicy: {
+      ResourceSignal: {
+        Count: 1,
+        Timeout: 'PT10M',
+      },
+    },
+  });
+});
+
+test('initOptions.timeout and resourceSignalTimeout are both not set. Timeout is set to default of 5 min', () => {
+  // GIVEN
+  const app = new App({
+    context: {
+      [cxapi.EC2_SUM_TIMEOUT_ENABLED]: true,
+    },
+  });
+  stack = new Stack(app);
+  vpc = new Vpc(stack, 'Vpc)');
+  new Instance(stack, 'Instance', {
+    vpc,
+    machineImage: new AmazonLinuxImage(),
+    instanceType: InstanceType.of(InstanceClass.T3, InstanceSize.LARGE),
+    init: CloudFormationInit.fromElements(
+      InitCommand.shellCommand('echo hello'),
+    ),
+  });
+
+  // THEN
+  Template.fromStack(stack).hasResource('AWS::EC2::Instance', {
+    CreationPolicy: {
+      ResourceSignal: {
+        Timeout: 'PT5M',
+      },
+    },
+  });
+});
+
+test('initOptions.timeout is set and not resourceSignalTimeout. Timeout is set to initOptions.timeout value', () => {
+  // GIVEN
+  const app = new App({
+    context: {
+      [cxapi.EC2_SUM_TIMEOUT_ENABLED]: true,
+    },
+  });
+  stack = new Stack(app);
+  vpc = new Vpc(stack, 'Vpc)');
+  new Instance(stack, 'Instance', {
+    vpc,
+    machineImage: new AmazonLinuxImage(),
+    instanceType: InstanceType.of(InstanceClass.T3, InstanceSize.LARGE),
+    init: CloudFormationInit.fromElements(
+      InitCommand.shellCommand('echo hello'),
+    ),
+    initOptions: {
+      timeout: Duration.minutes(10),
+    },
+  });
+
+  // THEN
+  Template.fromStack(stack).hasResource('AWS::EC2::Instance', {
+    CreationPolicy: {
+      ResourceSignal: {
+        Count: 1,
+        Timeout: 'PT10M',
+      },
+    },
+  });
+});
+
+test('resourceSignalTimeout is set and not initOptions.timeout. Timeout is set to resourceSignalTimeout value', () => {
+  // GIVEN
+  const app = new App({
+    context: {
+      [cxapi.EC2_SUM_TIMEOUT_ENABLED]: true,
+    },
+  });
+  stack = new Stack(app);
+  vpc = new Vpc(stack, 'Vpc)');
+  new Instance(stack, 'Instance', {
+    vpc,
+    machineImage: new AmazonLinuxImage(),
+    instanceType: InstanceType.of(InstanceClass.T3, InstanceSize.LARGE),
+    init: CloudFormationInit.fromElements(
+      InitCommand.shellCommand('echo hello'),
+    ),
+    resourceSignalTimeout: Duration.minutes(10),
+  });
+
+  // THEN
+  Template.fromStack(stack).hasResource('AWS::EC2::Instance', {
+    CreationPolicy: {
+      ResourceSignal: {
+        Timeout: 'PT15M',
+      },
+    },
+  });
+});
+
+test('resourceSignalTimeout and initOptions.timeout are both set, sum timeout and log warning', () => {
+  // GIVEN
+  const app = new App({
+    context: {
+      [cxapi.EC2_SUM_TIMEOUT_ENABLED]: true,
+    },
+  });
+  stack = new Stack(app);
+  vpc = new Vpc(stack, 'Vpc)');
+  new Instance(stack, 'Instance', {
+    vpc,
+    machineImage: new AmazonLinuxImage(),
+    instanceType: InstanceType.of(InstanceClass.T3, InstanceSize.LARGE),
+    init: CloudFormationInit.fromElements(
+      InitCommand.shellCommand('echo hello'),
+    ),
+    initOptions: {
+      timeout: Duration.minutes(10),
+    },
+    resourceSignalTimeout: Duration.minutes(10),
+  });
+
+  // THEN
+  Template.fromStack(stack).hasResource('AWS::EC2::Instance', {
+    CreationPolicy: {
+      ResourceSignal: {
+        Count: 1,
+        Timeout: 'PT20M',
+      },
+    },
+  });
+});
+
+describe('metadataOptions', () => {
+  test('can set all metadata options', () => {
+    // WHEN
+    new Instance(stack, 'Instance', {
+      vpc,
+      machineImage: new AmazonLinuxImage(),
+      instanceType: InstanceType.of(InstanceClass.T3, InstanceSize.LARGE),
+      httpEndpoint: true,
+      httpProtocolIpv6: false,
+      httpPutResponseHopLimit: 2,
+      httpTokens: HttpTokens.REQUIRED,
+      instanceMetadataTags: true,
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::EC2::Instance', {
+      MetadataOptions: {
+        HttpEndpoint: 'enabled',
+        HttpProtocolIpv6: 'disabled',
+        HttpPutResponseHopLimit: 2,
+        HttpTokens: 'required',
+        InstanceMetadataTags: 'enabled',
+      },
+    });
+  });
+
+  test.each([
+    [true, 'enabled'],
+    [false, 'disabled'],
+  ])('httpEndpoint %s maps to %s', (input, expected) => {
+    // WHEN
+    new Instance(stack, `Instance${input}`, {
+      vpc,
+      machineImage: new AmazonLinuxImage(),
+      instanceType: InstanceType.of(InstanceClass.T3, InstanceSize.LARGE),
+      httpEndpoint: input,
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::EC2::Instance', {
+      MetadataOptions: {
+        HttpEndpoint: expected,
+      },
+    });
+  });
+
+  test.each([
+    [true, 'enabled'],
+    [false, 'disabled'],
+  ])('httpProtocolIpv6 %s maps to %s', (input, expected) => {
+    // WHEN
+    new Instance(stack, `Instance${input}`, {
+      vpc,
+      machineImage: new AmazonLinuxImage(),
+      instanceType: InstanceType.of(InstanceClass.T3, InstanceSize.LARGE),
+      httpProtocolIpv6: input,
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::EC2::Instance', {
+      MetadataOptions: {
+        HttpProtocolIpv6: expected,
+      },
+    });
+  });
+
+  test.each([
+    [true, 'enabled'],
+    [false, 'disabled'],
+  ])('instanceMetadataTags %s maps to %s', (input, expected) => {
+    // WHEN
+    new Instance(stack, `Instance${input}`, {
+      vpc,
+      machineImage: new AmazonLinuxImage(),
+      instanceType: InstanceType.of(InstanceClass.T3, InstanceSize.LARGE),
+      instanceMetadataTags: input,
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::EC2::Instance', {
+      MetadataOptions: {
+        InstanceMetadataTags: expected,
+      },
+    });
+  });
+
+  test.each([
+    [HttpTokens.OPTIONAL, 'optional'],
+    [HttpTokens.REQUIRED, 'required'],
+  ])('httpTokens %s maps to %s', (input, expected) => {
+    // WHEN
+    new Instance(stack, `Instance${expected}`, {
+      vpc,
+      machineImage: new AmazonLinuxImage(),
+      instanceType: InstanceType.of(InstanceClass.T3, InstanceSize.LARGE),
+      httpTokens: input,
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::EC2::Instance', {
+      MetadataOptions: {
+        HttpTokens: expected,
+      },
+    });
+  });
+
+  test.each([1, 32, 64])('httpPutResponseHopLimit %d is valid', (hopLimit) => {
+    // WHEN
+    new Instance(stack, `Instance${hopLimit}`, {
+      vpc,
+      machineImage: new AmazonLinuxImage(),
+      instanceType: InstanceType.of(InstanceClass.T3, InstanceSize.LARGE),
+      httpPutResponseHopLimit: hopLimit,
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::EC2::Instance', {
+      MetadataOptions: {
+        HttpPutResponseHopLimit: hopLimit,
+      },
+    });
+  });
+
+  test.each([0, 65, -1, 100])('httpPutResponseHopLimit %d throws validation error', (hopLimit) => {
+    // WHEN/THEN
+    expect(() => {
+      new Instance(stack, `Instance${hopLimit}`, {
+        vpc,
+        machineImage: new AmazonLinuxImage(),
+        instanceType: InstanceType.of(InstanceClass.T3, InstanceSize.LARGE),
+        httpPutResponseHopLimit: hopLimit,
+      });
+    }).toThrow('httpPutResponseHopLimit must be between 1 and 64');
+  });
+
+  test('no metadata options renders undefined', () => {
+    // WHEN
+    new Instance(stack, 'Instance', {
+      vpc,
+      machineImage: new AmazonLinuxImage(),
+      instanceType: InstanceType.of(InstanceClass.T3, InstanceSize.LARGE),
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::EC2::Instance', {
+      InstanceType: 't3.large',
+    });
+
+    // Ensure MetadataOptions is not present
+    const template = Template.fromStack(stack);
+    const instances = template.findResources('AWS::EC2::Instance');
+    const instanceProps = Object.values(instances)[0].Properties;
+    expect(instanceProps.MetadataOptions).toBeUndefined();
+  });
+
+  test('partial metadata options only render specified properties', () => {
+    // WHEN
+    new Instance(stack, 'Instance', {
+      vpc,
+      machineImage: new AmazonLinuxImage(),
+      instanceType: InstanceType.of(InstanceClass.T3, InstanceSize.LARGE),
+      httpTokens: HttpTokens.REQUIRED,
+      httpPutResponseHopLimit: 10,
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::EC2::Instance', {
+      MetadataOptions: {
+        HttpTokens: 'required',
+        HttpPutResponseHopLimit: 10,
+      },
+    });
+
+    // Ensure other properties are not present
+    const template = Template.fromStack(stack);
+    const instances = template.findResources('AWS::EC2::Instance');
+    const metadataOptions = Object.values(instances)[0].Properties.MetadataOptions;
+    expect(metadataOptions.HttpEndpoint).toBeUndefined();
+    expect(metadataOptions.HttpProtocolIpv6).toBeUndefined();
+    expect(metadataOptions.InstanceMetadataTags).toBeUndefined();
+  });
+
+  test('metadata options conflict with requireImdsv2', () => {
+    // WHEN/THEN - Should throw validation error when both are used together
+    expect(() => {
+      new Instance(stack, 'Instance', {
+        vpc,
+        machineImage: new AmazonLinuxImage(),
+        instanceType: InstanceType.of(InstanceClass.T3, InstanceSize.LARGE),
+        requireImdsv2: true,
+        httpEndpoint: true,
+        instanceMetadataTags: true,
+      });
+    }).toThrow('Cannot use both requireImdsv2 and metadata options');
+  });
+
+  test('requireImdsv2 works without metadata options', () => {
+    // WHEN
+    new Instance(stack, 'Instance', {
+      vpc,
+      machineImage: new AmazonLinuxImage(),
+      instanceType: InstanceType.of(InstanceClass.T3, InstanceSize.LARGE),
+      requireImdsv2: true,
+    });
+
+    // Force stack synth so the InstanceRequireImdsv2Aspect is applied
+    Template.fromStack(stack);
+
+    // THEN - Should create LaunchTemplate with IMDSv2 required
+    Template.fromStack(stack).hasResourceProperties('AWS::EC2::LaunchTemplate', {
+      LaunchTemplateData: {
+        MetadataOptions: {
+          HttpTokens: 'required',
+        },
+      },
+    });
+
+    // Instance should not have direct MetadataOptions
+    const template = Template.fromStack(stack);
+    const instances = template.findResources('AWS::EC2::Instance');
+    const instanceProps = Object.values(instances)[0].Properties;
+    expect(instanceProps.MetadataOptions).toBeUndefined();
+  });
+
+  test('metadata options with only undefined values does not render MetadataOptions', () => {
+    // WHEN
+    new Instance(stack, 'Instance', {
+      vpc,
+      machineImage: new AmazonLinuxImage(),
+      instanceType: InstanceType.of(InstanceClass.T3, InstanceSize.LARGE),
+      httpEndpoint: undefined,
+      httpProtocolIpv6: undefined,
+      httpPutResponseHopLimit: undefined,
+      httpTokens: undefined,
+      instanceMetadataTags: undefined,
+    });
+
+    // THEN - Should not render MetadataOptions property (matches LaunchTemplate behavior)
+    const template = Template.fromStack(stack);
+    const instances = template.findResources('AWS::EC2::Instance');
+    const instanceProps = Object.values(instances)[0].Properties;
+
+    // MetadataOptions should not be present when all properties are undefined
+    expect(instanceProps.MetadataOptions).toBeUndefined();
+  });
+
+  test('metadata options with partial configuration leaves unspecified properties undefined', () => {
+    // WHEN
+    new Instance(stack, 'Instance', {
+      vpc,
+      machineImage: new AmazonLinuxImage(),
+      instanceType: InstanceType.of(InstanceClass.T3, InstanceSize.LARGE),
+      httpEndpoint: false,
+      httpTokens: HttpTokens.REQUIRED,
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::EC2::Instance', {
+      MetadataOptions: {
+        HttpEndpoint: 'disabled',
+        HttpTokens: 'required',
+        // Other properties should be undefined (CloudFormation will use its defaults)
+      },
+    });
+
+    // Verify unspecified properties are undefined (CloudFormation handles defaults)
+    const template = Template.fromStack(stack);
+    const instances = template.findResources('AWS::EC2::Instance');
+    const metadataOptions = Object.values(instances)[0].Properties.MetadataOptions;
+    expect(metadataOptions.HttpProtocolIpv6).toBeUndefined();
+    expect(metadataOptions.HttpPutResponseHopLimit).toBeUndefined();
+    expect(metadataOptions.InstanceMetadataTags).toBeUndefined();
   });
 });

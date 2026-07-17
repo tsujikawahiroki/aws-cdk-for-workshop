@@ -2,12 +2,14 @@ import { Template } from '../../../assertions';
 import * as iam from '../../../aws-iam';
 import * as cdk from '../../../core';
 import * as ecs from '../../lib';
+import { acknowledgeTestValidationRules } from '../util';
 
 describe('fargate task definition', () => {
   describe('When creating a Fargate TaskDefinition', () => {
     test('with only required properties set, it correctly sets default properties', () => {
       // GIVEN
       const stack = new cdk.Stack();
+      acknowledgeTestValidationRules(stack);
       new ecs.FargateTaskDefinition(stack, 'FargateTaskDef');
 
       // THEN
@@ -18,31 +20,31 @@ describe('fargate task definition', () => {
         Cpu: '256',
         Memory: '512',
       });
-
     });
 
     test('support lazy cpu and memory values', () => {
       // GIVEN
       const stack = new cdk.Stack();
+      acknowledgeTestValidationRules(stack);
 
       new ecs.FargateTaskDefinition(stack, 'FargateTaskDef', {
-        cpu: cdk.Lazy.number({ produce: () => 128 }),
+        cpu: cdk.Lazy.number({ produce: () => 256 }),
         memoryLimitMiB: cdk.Lazy.number({ produce: () => 1024 }),
       });
 
       // THEN
       Template.fromStack(stack).hasResourceProperties('AWS::ECS::TaskDefinition', {
-        Cpu: '128',
+        Cpu: '256',
         Memory: '1024',
       });
-
     });
 
     test('with all properties set', () => {
       // GIVEN
       const stack = new cdk.Stack();
+      acknowledgeTestValidationRules(stack);
       const taskDefinition = new ecs.FargateTaskDefinition(stack, 'FargateTaskDef', {
-        cpu: 128,
+        cpu: 256,
         executionRole: new iam.Role(stack, 'ExecutionRole', {
           path: '/',
           assumedBy: new iam.CompositePrincipal(
@@ -72,7 +74,7 @@ describe('fargate task definition', () => {
 
       // THEN
       Template.fromStack(stack).hasResourceProperties('AWS::ECS::TaskDefinition', {
-        Cpu: '128',
+        Cpu: '256',
         ExecutionRoleArn: {
           'Fn::GetAtt': [
             'ExecutionRole605A040B',
@@ -108,24 +110,24 @@ describe('fargate task definition', () => {
           },
         ],
       });
-
     });
 
     test('throws when adding placement constraint', () => {
       // GIVEN
       const stack = new cdk.Stack();
+      acknowledgeTestValidationRules(stack);
       const taskDefinition = new ecs.FargateTaskDefinition(stack, 'FargateTaskDef');
 
       // THEN
       expect(() => {
         taskDefinition.addPlacementConstraint(ecs.PlacementConstraint.memberOf('attribute:ecs.instance-type =~ t2.*'));
       }).toThrow(/Cannot set placement constraints on tasks that run on Fargate/);
-
     });
 
     test('throws when adding inference accelerators', () => {
       // GIVEN
       const stack = new cdk.Stack();
+      acknowledgeTestValidationRules(stack);
       const taskDefinition = new ecs.FargateTaskDefinition(stack, 'FargateTaskDef');
 
       const inferenceAccelerator = {
@@ -137,12 +139,12 @@ describe('fargate task definition', () => {
       expect(() => {
         taskDefinition.addInferenceAccelerator(inferenceAccelerator);
       }).toThrow(/Cannot use inference accelerators on tasks that run on Fargate/);
-
     });
 
     test('throws when ephemeral storage request is too high', () => {
       // GIVEN
       const stack = new cdk.Stack();
+      acknowledgeTestValidationRules(stack);
       expect(() => {
         new ecs.FargateTaskDefinition(stack, 'FargateTaskDef', {
           ephemeralStorageGiB: 201,
@@ -155,6 +157,7 @@ describe('fargate task definition', () => {
     test('throws when ephemeral storage request is too low', () => {
       // GIVEN
       const stack = new cdk.Stack();
+      acknowledgeTestValidationRules(stack);
       expect(() => {
         new ecs.FargateTaskDefinition(stack, 'FargateTaskDef', {
           ephemeralStorageGiB: 20,
@@ -167,6 +170,7 @@ describe('fargate task definition', () => {
     test('throws when pidMode is specified without an operating system family', () => {
       // GIVEN
       const stack = new cdk.Stack();
+      acknowledgeTestValidationRules(stack);
 
       // WHEN
       // THEN
@@ -185,6 +189,7 @@ describe('fargate task definition', () => {
     test('throws when pidMode is specified on Windows', () => {
       // GIVEN
       const stack = new cdk.Stack();
+      acknowledgeTestValidationRules(stack);
 
       // WHEN
       // THEN
@@ -204,6 +209,7 @@ describe('fargate task definition', () => {
     test('throws when pidMode is not task', () => {
       // GIVEN
       const stack = new cdk.Stack();
+      acknowledgeTestValidationRules(stack);
 
       // WHEN
       // THEN
@@ -221,6 +227,7 @@ describe('fargate task definition', () => {
     test('do not throw when configuredAtLaunch is false', () => {
       // GIVEN
       const stack = new cdk.Stack();
+      acknowledgeTestValidationRules(stack);
 
       // THEN
       expect(() => {
@@ -242,6 +249,7 @@ describe('fargate task definition', () => {
     test('throws when other volume configuration set with configuredAtLaunch', () => {
       // GIVEN
       const stack = new cdk.Stack();
+      acknowledgeTestValidationRules(stack);
 
       // THEN
       expect(() => {
@@ -261,6 +269,7 @@ describe('fargate task definition', () => {
     test('can succeed using TaskDefinition Arn', () => {
       // GIVEN
       const stack = new cdk.Stack();
+      acknowledgeTestValidationRules(stack);
       const expectTaskDefinitionArn = 'TD_ARN';
 
       // WHEN
@@ -268,12 +277,12 @@ describe('fargate task definition', () => {
 
       // THEN
       expect(taskDefinition.taskDefinitionArn).toEqual(expectTaskDefinitionArn);
-
     });
 
     test('can succeed using attributes', () => {
       // GIVEN
       const stack = new cdk.Stack();
+      acknowledgeTestValidationRules(stack);
       const expectTaskDefinitionArn = 'TD_ARN';
       const expectNetworkMode = ecs.NetworkMode.AWS_VPC;
       const expectTaskRole = new iam.Role(stack, 'TaskRole', {
@@ -299,12 +308,12 @@ describe('fargate task definition', () => {
       expect(taskDefinition.networkMode).toEqual(expectNetworkMode);
       expect(taskDefinition.taskRole).toEqual(expectTaskRole);
       expect(taskDefinition.executionRole).toEqual(expectExecutionRole);
-
     });
 
     test('returns a Fargate TaskDefinition that will throw an error when trying to access its networkMode but its networkMode is undefined', () => {
       // GIVEN
       const stack = new cdk.Stack();
+      acknowledgeTestValidationRules(stack);
       const expectTaskDefinitionArn = 'TD_ARN';
       const expectTaskRole = new iam.Role(stack, 'TaskRole', {
         assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
@@ -321,12 +330,12 @@ describe('fargate task definition', () => {
         taskDefinition.networkMode;
       }).toThrow('This operation requires the networkMode in ImportedTaskDefinition to be defined. ' +
         'Add the \'networkMode\' in ImportedTaskDefinitionProps to instantiate ImportedTaskDefinition');
-
     });
 
     test('returns a Fargate TaskDefinition that will throw an error when trying to access its taskRole but its taskRole is undefined', () => {
       // GIVEN
       const stack = new cdk.Stack();
+      acknowledgeTestValidationRules(stack);
       const expectTaskDefinitionArn = 'TD_ARN';
       const expectNetworkMode = ecs.NetworkMode.AWS_VPC;
 
@@ -346,6 +355,7 @@ describe('fargate task definition', () => {
     test('Passing in token for ephemeral storage will not throw error', () => {
       // GIVEN
       const stack = new cdk.Stack();
+      acknowledgeTestValidationRules(stack);
 
       // WHEN
       const param = new cdk.CfnParameter(stack, 'prammm', {
@@ -360,12 +370,13 @@ describe('fargate task definition', () => {
       // THEN
       expect(() => {
         taskDefinition.ephemeralStorageGiB;
-      }).toBeTruthy;
+      }).toBeTruthy();
     });
 
     test('runtime testing for windows container', () => {
       // GIVEN
       const stack = new cdk.Stack();
+      acknowledgeTestValidationRules(stack);
       new ecs.FargateTaskDefinition(stack, 'FargateTaskDef', {
         cpu: 1024,
         memoryLimitMiB: 2048,
@@ -400,6 +411,7 @@ describe('fargate task definition', () => {
     test('runtime testing for linux container', () => {
       // GIVEN
       const stack = new cdk.Stack();
+      acknowledgeTestValidationRules(stack);
       new ecs.FargateTaskDefinition(stack, 'FargateTaskDef', {
         cpu: 1024,
         memoryLimitMiB: 2048,
@@ -434,6 +446,7 @@ describe('fargate task definition', () => {
     test('creating a Fargate TaskDefinition with WINDOWS_SERVER_X operatingSystemFamily and incorrect cpu throws an error', () => {
       // GIVEN
       const stack = new cdk.Stack();
+      acknowledgeTestValidationRules(stack);
 
       // Not in CPU Ranage.
       expect(() => {
@@ -445,7 +458,7 @@ describe('fargate task definition', () => {
             operatingSystemFamily: ecs.OperatingSystemFamily.WINDOWS_SERVER_2019_CORE,
           },
         });
-      }).toThrowError(`If operatingSystemFamily is ${ecs.OperatingSystemFamily.WINDOWS_SERVER_2019_CORE._operatingSystemFamily}, then cpu must be in 1024 (1 vCPU), 2048 (2 vCPU), or 4096 (4 vCPU).`);
+      }).toThrow(`If operatingSystemFamily is ${ecs.OperatingSystemFamily.WINDOWS_SERVER_2019_CORE._operatingSystemFamily}, then cpu must be in 1024 (1 vCPU), 2048 (2 vCPU), or 4096 (4 vCPU).`);
 
       // Memory is not in 1 GB increments.
       expect(() => {
@@ -457,7 +470,7 @@ describe('fargate task definition', () => {
             operatingSystemFamily: ecs.OperatingSystemFamily.WINDOWS_SERVER_2019_CORE,
           },
         });
-      }).toThrowError('If provided cpu is 1024, then memoryMiB must have a min of 1024 and a max of 8192, in 1024 increments. Provided memoryMiB was 1025.');
+      }).toThrow('If provided cpu is 1024, then memoryMiB must have a min of 1024 and a max of 8192, in 1024 increments. Provided memoryMiB was 1025.');
 
       // Check runtimePlatform was been defined ,but not undefined cpu and memoryLimitMiB.
       expect(() => {
@@ -467,9 +480,7 @@ describe('fargate task definition', () => {
             operatingSystemFamily: ecs.OperatingSystemFamily.WINDOWS_SERVER_2004_CORE,
           },
         });
-      }).toThrowError('If operatingSystemFamily is WINDOWS_SERVER_2004_CORE, then cpu must be in 1024 (1 vCPU), 2048 (2 vCPU), or 4096 (4 vCPU). Provided value was: 256');
-
+      }).toThrow('If operatingSystemFamily is WINDOWS_SERVER_2004_CORE, then cpu must be in 1024 (1 vCPU), 2048 (2 vCPU), or 4096 (4 vCPU). Provided value was: 256');
     });
-
   });
 });

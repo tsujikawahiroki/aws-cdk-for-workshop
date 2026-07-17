@@ -13,6 +13,9 @@
 - [WebSocket APIs](#websocket-apis)
   - [Lambda Authorizer](#lambda-authorizer)
   - [IAM Authorizers](#iam-authorizer)
+- [Import Issues](#import-issues)
+  - [DotNet Namespace](#dotnet-namespace)
+  - [Java Package](#java-package)
 
 ## Introduction
 
@@ -164,6 +167,7 @@ Lambda authorizers use a Lambda function to control access to your HTTP API. Whe
 
 Lambda authorizers depending on their response, fall into either two types - Simple or IAM. You can learn about differences [here](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-lambda-authorizer.html#http-api-lambda-authorizer.payload-format-response).
 
+If the Lambda function is in another account, you need to provide an IAM role to the authorizer that has permission to invoke the Lambda function.
 
 ```ts
 import { HttpLambdaAuthorizer, HttpLambdaResponseType } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
@@ -172,8 +176,12 @@ import { HttpUrlIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 // This function handles your auth logic
 declare const authHandler: lambda.Function;
 
+// This role will be used to invoke the Lambda function
+declare const role: iam.Role;
+
 const authorizer = new HttpLambdaAuthorizer('BooksAuthorizer', authHandler, {
   responseTypes: [HttpLambdaResponseType.SIMPLE], // Define if returns simple and/or iam response
+  role, // Set role if the Lambda function is in another account
 });
 
 const api = new apigwv2.HttpApi(this, 'HttpApi');
@@ -279,4 +287,74 @@ user.attachInlinePolicy(new iam.Policy(this, 'AllowInvoke', {
   ],
 }));
 
+```
+
+## Import Issues
+
+`jsiirc.json` file is missing during the stablization process of this module, which caused import issues for DotNet and Java users who attempt to use this module. Unfortunately, to guarantee backward compatibility, we cannot simply correct the namespace for DotNet or package for Java. The following outlines the workaround.
+
+### DotNet Namespace
+
+Instead of the conventional namespace `Amazon.CDK.AWS.Apigatewayv2.Authorizers`, you would need to use the following namespace:
+
+```cs
+using Amazon.CDK.AwsApigatewayv2Authorizers;;
+```
+
+### Java Package
+
+Instead of conventional package `import software.amazon.awscdk.services.apigatewayv2_authorizers.*`, you would need to use the following package:
+
+```java
+import software.amazon.awscdk.aws_apigatewayv2_authorizers.*;
+
+// If you want to import a specific construct
+import software.amazon.awscdk.aws_apigatewayv2_authorizers.WebSocketIamAuthorizer;
+```
+
+## Export HTTP Authorizer Id
+You can retrieve the authorizer's id once it has been bound to a route to export the value.
+
+`HttpAuthorizer.fromHttpAuthorizerAttributes`
+
+```ts
+import { HttpLambdaAuthorizer, HttpLambdaResponseType } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
+import { HttpUrlIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
+import { CfnOutput } from 'aws-cdk-lib';
+
+// This function handles your auth logic
+declare const authHandler: lambda.Function;
+
+const authorizer = new HttpLambdaAuthorizer('BooksAuthorizer', authHandler, {
+  responseTypes: [HttpLambdaResponseType.SIMPLE], // Define if returns simple and/or iam response
+});
+
+const api = new apigwv2.HttpApi(this, 'HttpApi');
+
+api.addRoutes({
+  integration: new HttpUrlIntegration('BooksIntegration', 'https://get-books-proxy.example.com'),
+  path: '/books',
+  authorizer,
+});
+
+// You can only access authorizerId after it's been bound to a route
+// In this example we expect use CfnOutput
+new CfnOutput(this, 'authorizerId', { value: authorizer.authorizerId });
+new CfnOutput(this, 'authorizerType', { value: authorizer.authorizationType });
+```
+
+## Import an existing HTTP Authorizer
+If you want to import av existing HTTP Authorizer you simply provide the authorizer id and authorizer type used when the authorizer was created.
+
+```ts
+import { HttpAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2';
+import { Fn } from 'aws-cdk-lib'
+
+const authorizerId = Fn.importValue('authorizerId');
+const authorizerType = Fn.importValue('authorizerType');
+
+const authorizer = HttpAuthorizer.fromHttpAuthorizerAttributes(this, 'HttpAuthorizer', {
+    authorizerId,
+    authorizerType
+});
 ```

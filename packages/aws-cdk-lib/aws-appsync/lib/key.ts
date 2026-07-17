@@ -1,10 +1,10 @@
-import { BaseKeyCondition, BeginsWith, Between, BinaryCondition } from './private';
+import type { BaseKeyCondition } from './private';
+import { BeginsWith, Between, BinaryCondition } from './private';
 
 /**
  * Factory class for DynamoDB key conditions.
  */
 export class KeyCondition {
-
   /**
    * Condition k = arg, true if the key attribute k is equal to the Query argument
    */
@@ -27,7 +27,7 @@ export class KeyCondition {
   }
 
   /**
-   * Condition k > arg, true if the key attribute k is greater than the the Query argument
+   * Condition k > arg, true if the key attribute k is greater than the Query argument
    */
   public static gt(keyName: string, arg: string): KeyCondition {
     return new KeyCondition(new BinaryCondition(keyName, '>', arg));

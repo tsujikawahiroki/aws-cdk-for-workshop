@@ -1,9 +1,14 @@
-import { Construct } from 'constructs';
-import { Bucket, IBucket } from './bucket';
+import type { Construct } from 'constructs';
+import type { IBucket } from './bucket';
+import { Bucket } from './bucket';
+import type { BucketPolicyReference, IBucketPolicyRef } from './s3.generated';
 import { CfnBucket, CfnBucketPolicy } from './s3.generated';
 import { PolicyDocument } from '../../aws-iam';
-import { RemovalPolicy, Resource, Token, Tokenization } from '../../core';
+import type { RemovalPolicy } from '../../core';
+import { Resource, Token, Tokenization, Validations } from '../../core';
+import { addConstructMetadata, MethodMetadata } from '../../core/lib/metadata-resource';
 import { CfnReference } from '../../core/lib/private/cfn-reference';
+import { propertyInjectable } from '../../core/lib/prop-injectable';
 
 export interface BucketPolicyProps {
   /**
@@ -17,6 +22,13 @@ export interface BucketPolicyProps {
    * @default - RemovalPolicy.DESTROY.
    */
   readonly removalPolicy?: RemovalPolicy;
+
+  /**
+   * Policy document to apply to the bucket.
+   *
+   * @default - A new empty PolicyDocument will be created.
+   */
+  readonly document?: PolicyDocument;
 }
 
 /**
@@ -31,9 +43,26 @@ export interface BucketPolicyProps {
  * policy if one doesn't exist yet, otherwise it will add to the existing
  * policy.
  *
- * Prefer to use `addToResourcePolicy()` instead.
+ * The bucket policy method is implemented differently than `addToResourcePolicy()`
+ * as `BucketPolicy()` creates a new policy without knowing one earlier existed.
+ * e.g. if during Bucket creation, if `autoDeleteObject:true`, these policies are
+ * added to the bucket policy:
+ *    ["s3:DeleteObject*", "s3:GetBucket*", "s3:List*", "s3:PutBucketPolicy"],
+ * and when you add a new BucketPolicy with ["s3:GetObject", "s3:ListBucket"] on
+ * this existing bucket, invoking `BucketPolicy()` will create a new Policy
+ * without knowing one earlier exists already, so it creates a new one.
+ * In this case, the custom resource handler will not have access to
+ * `s3:GetBucketTagging` action which will cause failure during deletion of stack.
+ *
+ * Hence its strongly recommended to use `addToResourcePolicy()` method to add
+ * new permissions to existing policy.
+ *
  */
-export class BucketPolicy extends Resource {
+@propertyInjectable
+export class BucketPolicy extends Resource implements IBucketPolicyRef {
+  /** Uniquely identifies this class. */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-s3.BucketPolicy';
+
   /**
    * Create a mutable `BucketPolicy` from a `CfnBucketPolicy`.
    */
@@ -64,22 +93,25 @@ export class BucketPolicy extends Resource {
       bucket = Bucket.fromBucketName(cfnBucketPolicy, '@FromCfnBucket', cfnBucketPolicy.bucket);
     }
 
-    const ret = new class extends BucketPolicy {
-      public readonly document = PolicyDocument.fromJson(cfnBucketPolicy.policyDocument);
-    }(cfnBucketPolicy, id, {
+    const ret = new BucketPolicy(cfnBucketPolicy, id, {
       bucket,
+      document: PolicyDocument.fromJson(cfnBucketPolicy.policyDocument),
     });
+    Validations.of(ret).acknowledge({ id: 'CloudFormation-Validate::E3019', reason: 'We are intentionally creating a duplicate resource' });
+
     // mark the Bucket as having this Policy
     bucket.policy = ret;
     return ret;
   }
+
+  public readonly bucketPolicyRef: BucketPolicyReference;
 
   /**
    * A policy document containing permissions to add to the specified bucket.
    * For more information, see Access Policy Language Overview in the Amazon
    * Simple Storage Service Developer Guide.
    */
-  public readonly document = new PolicyDocument();
+  public readonly document: PolicyDocument;
 
   /** The Bucket this Policy applies to. */
   public readonly bucket: IBucket;
@@ -88,13 +120,17 @@ export class BucketPolicy extends Resource {
 
   constructor(scope: Construct, id: string, props: BucketPolicyProps) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     this.bucket = props.bucket;
+    this.document = props.document ?? new PolicyDocument();
 
     this.resource = new CfnBucketPolicy(this, 'Resource', {
       bucket: this.bucket.bucketName,
       policyDocument: this.document,
     });
+    this.bucketPolicyRef = this.resource.bucketPolicyRef;
 
     if (props.removalPolicy) {
       this.resource.applyRemovalPolicy(props.removalPolicy);
@@ -105,6 +141,7 @@ export class BucketPolicy extends Resource {
    * Sets the removal policy for the BucketPolicy.
    * @param removalPolicy the RemovalPolicy to set.
    */
+  @MethodMetadata()
   public applyRemovalPolicy(removalPolicy: RemovalPolicy) {
     this.resource.applyRemovalPolicy(removalPolicy);
   }

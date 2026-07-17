@@ -35,7 +35,9 @@ const userPool = new UserPool(stack, 'Pool', {
 
 const api = new GraphqlApi(stack, 'Api', {
   name: 'demoapi',
-  schema: SchemaFile.fromAsset(join(__dirname, 'integ.graphql.graphql')),
+  definition: {
+    schema: SchemaFile.fromAsset(join(__dirname, 'integ.graphql.graphql')),
+  },
   authorizationConfig: {
     defaultAuthorization: {
       authorizationType: AuthorizationType.USER_POOL,
@@ -178,12 +180,12 @@ customerDS.createResolver('MutationRemoveCustomer', {
   responseMappingTemplate: MappingTemplate.dynamoDbResultItem(),
 });
 
-const ops = [
-  { suffix: 'Eq', op: KeyCondition.eq },
-  { suffix: 'Lt', op: KeyCondition.lt },
-  { suffix: 'Le', op: KeyCondition.le },
-  { suffix: 'Gt', op: KeyCondition.gt },
-  { suffix: 'Ge', op: KeyCondition.ge },
+const ops: Array<{ suffix: string; op: (x: string, y: string) => KeyCondition }> = [
+  { suffix: 'Eq', op: (x, y) => KeyCondition.eq(x, y) },
+  { suffix: 'Lt', op: (x, y) => KeyCondition.lt(x, y) },
+  { suffix: 'Le', op: (x, y) => KeyCondition.le(x, y) },
+  { suffix: 'Gt', op: (x, y) => KeyCondition.gt(x, y) },
+  { suffix: 'Ge', op: (x, y) => KeyCondition.ge(x, y) },
 ];
 for (const { suffix, op } of ops) {
   orderDS.createResolver(`QueryGetCustomerOrders${suffix}`, {

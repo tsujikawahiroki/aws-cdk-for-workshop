@@ -1,7 +1,11 @@
 import * as cdk from 'aws-cdk-lib';
-import * as constructs from 'constructs';
-import { IResource, Resource } from 'aws-cdk-lib/core';
 import { CfnDataQualityRuleset } from 'aws-cdk-lib/aws-glue';
+import type { IResource } from 'aws-cdk-lib/core';
+import { Resource } from 'aws-cdk-lib/core';
+import { memoizedGetter } from 'aws-cdk-lib/core/lib/helpers-internal';
+import { addConstructMetadata } from 'aws-cdk-lib/core/lib/metadata-resource';
+import { propertyInjectable } from 'aws-cdk-lib/core/lib/prop-injectable';
+import type * as constructs from 'constructs';
 
 /**
  * Properties of a DataQualityTargetTable.
@@ -81,7 +85,11 @@ export interface DataQualityRulesetProps {
 /**
  * A Glue Data Quality ruleset.
  */
+@propertyInjectable
 export class DataQualityRuleset extends Resource implements IDataQualityRuleset {
+  /** Uniquely identifies this class. */
+  public static readonly PROPERTY_INJECTION_ID: string = '@aws-cdk.aws-glue-alpha.DataQualityRuleset';
+
   public static fromRulesetArn(scope: constructs.Construct, id: string, rulesetArn: string): IDataQualityRuleset {
     class Import extends Resource implements IDataQualityRuleset {
       public rulesetArn = rulesetArn;
@@ -108,22 +116,16 @@ export class DataQualityRuleset extends Resource implements IDataQualityRuleset 
     });
   }
 
-  /**
-   * Name of this ruleset.
-   */
-  public readonly rulesetName: string;
-
-  /**
-   * ARN of this ruleset.
-   */
-  public readonly rulesetArn: string;
+  private resource: CfnDataQualityRuleset;
 
   constructor(scope: constructs.Construct, id: string, props: DataQualityRulesetProps) {
     super(scope, id, {
       physicalName: props.rulesetName,
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
-    const rulesetResource = new CfnDataQualityRuleset(this, 'Resource', {
+    this.resource = new CfnDataQualityRuleset(this, 'Resource', {
       clientToken: props.clientToken,
       description: props.description,
       name: props.rulesetName,
@@ -131,9 +133,21 @@ export class DataQualityRuleset extends Resource implements IDataQualityRuleset 
       tags: props.tags,
       targetTable: props.targetTable,
     });
+  }
 
-    const resourceName = this.getResourceNameAttribute(rulesetResource.ref);
-    this.rulesetArn = DataQualityRuleset.buildRulesetArn(this, resourceName);
-    this.rulesetName = resourceName;
+  /**
+   * Name of this ruleset.
+   */
+  @memoizedGetter
+  public get rulesetName(): string {
+    return this.getResourceNameAttribute(this.resource.ref);
+  }
+
+  /**
+   * ARN of this ruleset.
+   */
+  @memoizedGetter
+  public get rulesetArn(): string {
+    return DataQualityRuleset.buildRulesetArn(this, this.rulesetName);
   }
 }

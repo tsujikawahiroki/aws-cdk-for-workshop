@@ -4,10 +4,10 @@ import { Construct } from 'constructs';
 import * as autoscaling from '../../../aws-autoscaling';
 import * as hooks from '../../../aws-autoscaling-hooktargets';
 import * as iam from '../../../aws-iam';
-import * as kms from '../../../aws-kms';
+import type * as kms from '../../../aws-kms';
 import * as lambda from '../../../aws-lambda';
 import * as cdk from '../../../core';
-import { ICluster } from '../cluster';
+import type { IClusterRef } from '../../../interfaces/generated/aws-ecs-interfaces.generated';
 
 // Reference for the source in this package:
 //
@@ -25,7 +25,7 @@ export interface InstanceDrainHookProps {
   /**
    * The cluster on which tasks have been scheduled
    */
-  cluster: ICluster;
+  cluster: IClusterRef;
 
   /**
    * How many seconds to give tasks to drain before the instance is terminated anyway
@@ -50,7 +50,6 @@ export interface InstanceDrainHookProps {
  * A hook to drain instances from ECS traffic before they're terminated
  */
 export class InstanceDrainHook extends Construct {
-
   /**
    * Constructs a new instance of the InstanceDrainHook class.
    */
@@ -63,12 +62,12 @@ export class InstanceDrainHook extends Construct {
     const fn = new lambda.Function(this, 'Function', {
       code: lambda.Code.fromInline(fs.readFileSync(path.join(__dirname, '..', '..', '..', 'custom-resource-handlers', 'dist', 'aws-ecs', 'lambda-source', 'index.py'), { encoding: 'utf-8' })),
       handler: 'index.lambda_handler',
-      runtime: lambda.Runtime.PYTHON_3_9,
+      runtime: lambda.Runtime.determineLatestPythonRuntime(this),
       // Timeout: some extra margin for additional API calls made by the Lambda,
       // up to a maximum of 15 minutes.
       timeout: cdk.Duration.seconds(Math.min(drainTime.toSeconds() + 10, 900)),
       environment: {
-        CLUSTER: props.cluster.clusterName,
+        CLUSTER: props.cluster.clusterRef.clusterName,
       },
     });
 
@@ -102,7 +101,7 @@ export class InstanceDrainHook extends Construct {
       actions: ['ecs:DescribeContainerInstances', 'ecs:DescribeTasks'],
       resources: ['*'],
       conditions: {
-        ArnEquals: { 'ecs:cluster': props.cluster.clusterArn },
+        ArnEquals: { 'ecs:cluster': props.cluster.clusterRef.clusterArn },
       },
     }));
 
@@ -113,7 +112,7 @@ export class InstanceDrainHook extends Construct {
         'ecs:SubmitContainerStateChange',
         'ecs:SubmitTaskStateChange',
       ],
-      resources: [props.cluster.clusterArn],
+      resources: [props.cluster.clusterRef.clusterArn],
     }));
 
     // Restrict the container-instance operations to the ECS Cluster
@@ -123,7 +122,7 @@ export class InstanceDrainHook extends Construct {
         'ecs:ListTasks',
       ],
       conditions: {
-        ArnEquals: { 'ecs:cluster': props.cluster.clusterArn },
+        ArnEquals: { 'ecs:cluster': props.cluster.clusterRef.clusterArn },
       },
       resources: ['*'],
     }));

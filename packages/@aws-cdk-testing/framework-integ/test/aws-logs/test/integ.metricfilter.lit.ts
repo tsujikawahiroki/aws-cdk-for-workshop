@@ -1,4 +1,5 @@
-import { App, RemovalPolicy, Stack, StackProps } from 'aws-cdk-lib';
+import type { StackProps } from 'aws-cdk-lib';
+import { App, RemovalPolicy, Stack } from 'aws-cdk-lib';
 import { FilterPattern, LogGroup, MetricFilter } from 'aws-cdk-lib/aws-logs';
 
 class MetricFilterIntegStack extends Stack {
@@ -15,7 +16,10 @@ class MetricFilterIntegStack extends Stack {
       metricNamespace: 'MyApp',
       metricName: 'Latency',
       filterName: 'MyFilterName',
-      filterPattern: FilterPattern.exists('$.latency'),
+      filterPattern: FilterPattern.all(
+        FilterPattern.exists('$.latency'),
+        FilterPattern.regexValue('$.message', '=', 'bind: address already in use'),
+      ),
       metricValue: '$.latency',
     });
     /// !hide

@@ -1,4 +1,4 @@
-import { BundlingOptions } from './bundling';
+import type { BundlingOptions } from './bundling';
 
 /**
  * Common interface for all assets.
@@ -53,8 +53,6 @@ export interface AssetOptions {
    *
    * @default - uploaded as-is to S3 if the asset is a regular file or a .zip file,
    * archived into a .zip file and uploaded to S3 otherwise
-   *
-   *
    */
   readonly bundling?: BundlingOptions;
 }
@@ -146,6 +144,16 @@ export interface FileAssetSource {
    * @default false
    */
   readonly deployTime?: boolean;
+
+  /**
+   * A display name for this asset
+   *
+   * If supplied, the display name will be used in locations where the asset
+   * identifier is printed, like in the CLI progress information.
+   *
+   * @default - The asset hash is used to display the asset
+   */
+  readonly displayName?: string;
 }
 
 export interface DockerImageAssetSource {
@@ -188,6 +196,21 @@ export interface DockerImageAssetSource {
    * @default - no build args are passed
    */
   readonly dockerBuildArgs?: { [key: string]: string };
+
+  /**
+   * Build contexts to pass to the `docker build` command.
+   *
+   * Build contexts can be used to specify additional directories or images
+   * to use during the build. Each entry specifies a named build context
+   * and its source (a directory path, a URL, or a docker image).
+   *
+   * Only allowed when `directoryName` is specified.
+   *
+   * @see https://docs.docker.com/build/building/context/#additional-build-contexts
+   *
+   * @default - no additional build contexts
+   */
+  readonly dockerBuildContexts?: { [key: string]: string };
 
   /**
    * Build secrets to pass to the `docker build` command.
@@ -293,6 +316,16 @@ export interface DockerImageAssetSource {
    * @default - cache is used
    */
   readonly dockerCacheDisabled?: boolean;
+
+  /**
+   * A display name for this asset
+   *
+   * If supplied, the display name will be used in locations where the asset
+   * identifier is printed, like in the CLI progress information.
+   *
+   * @default - The asset hash is used to display the asset
+   */
+  readonly displayName?: string;
 }
 
 /**
@@ -301,7 +334,7 @@ export interface DockerImageAssetSource {
 export enum FileAssetPackaging {
   /**
    * The asset source path points to a directory, which should be archived using
-   * zip and and then uploaded to Amazon S3.
+   * zip and then uploaded to Amazon S3.
    */
   ZIP_DIRECTORY = 'zip',
 

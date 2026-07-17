@@ -1,14 +1,20 @@
-import { Construct } from 'constructs';
-import { IConfigurationSet } from './configuration-set';
+import type { Construct } from 'constructs';
 import { CfnConfigurationSetEventDestination } from './ses.generated';
+import type * as events from '../../aws-events';
 import * as iam from '../../aws-iam';
-import * as sns from '../../aws-sns';
-import { Aws, IResource, Resource } from '../../core';
+import type * as firehose from '../../aws-kinesisfirehose';
+import type * as sns from '../../aws-sns';
+import type { IResource } from '../../core';
+import { Aws, Resource, Stack, ValidationError } from '../../core';
+import { addConstructMetadata } from '../../core/lib/metadata-resource';
+import { lit } from '../../core/lib/private/literal-string';
+import { propertyInjectable } from '../../core/lib/prop-injectable';
+import type { IConfigurationSetRef, IConfigurationSetEventDestinationRef, ConfigurationSetEventDestinationReference } from '../../interfaces/generated/aws-ses-interfaces.generated';
 
 /**
  * A configuration set event destination
  */
-export interface IConfigurationSetEventDestination extends IResource {
+export interface IConfigurationSetEventDestination extends IResource, IConfigurationSetEventDestinationRef {
   /**
    * The ID of the configuration set event destination
    *
@@ -67,6 +73,20 @@ export abstract class EventDestination {
   }
 
   /**
+   * Use Event Bus as event destination
+   */
+  public static eventBus(eventBus: events.IEventBusRef): EventDestination {
+    return { bus: eventBus };
+  }
+
+  /**
+   * Use Firehose Delivery Stream as event destination
+   */
+  public static firehoseDeliveryStream(stream: FirehoseDeliveryStreamDestination): EventDestination {
+    return { stream };
+  }
+
+  /**
    * A SNS topic to use as event destination
    *
    * @default - do not send events to a SNS topic
@@ -79,6 +99,20 @@ export abstract class EventDestination {
    * @default - do not send events to CloudWatch
    */
   public abstract readonly dimensions?: CloudWatchDimension[];
+
+  /**
+   * Use Event Bus as event destination
+   *
+   * @default - do not send events to Event bus
+   */
+  public abstract readonly bus?: events.IEventBusRef;
+
+  /**
+   * Use Firehose Delivery Stream
+   *
+   * @default - do not send events to Firehose Delivery Stream
+   */
+  public abstract readonly stream?: FirehoseDeliveryStreamDestination;
 }
 
 /**
@@ -88,7 +122,7 @@ export interface ConfigurationSetEventDestinationProps extends ConfigurationSetE
   /**
    * The configuration set that contains the event destination.
    */
-  readonly configurationSet: IConfigurationSet;
+  readonly configurationSet: IConfigurationSetRef;
 }
 
 /**
@@ -215,9 +249,30 @@ export enum CloudWatchDimensionSource {
 }
 
 /**
+ * An object that defines an Amazon Data Firehose destination for email events
+ */
+export interface FirehoseDeliveryStreamDestination {
+  /**
+   * The Amazon Data Firehose stream that the Amazon SES API v2 sends email events to.
+   */
+  readonly deliveryStream: firehose.IDeliveryStream;
+
+  /**
+   * The IAM role that the Amazon SES API v2 uses to send email events to the Amazon Data Firehose stream.
+   *
+   * @default - Create IAM Role for Amazon Data Firehose Delivery stream
+   */
+  readonly role?: iam.IRole;
+}
+
+/**
  * A configuration set event destination
  */
+@propertyInjectable
 export class ConfigurationSetEventDestination extends Resource implements IConfigurationSetEventDestination {
+  /** Uniquely identifies this class. */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-ses.ConfigurationSetEventDestination';
+
   /**
    * Use an existing configuration set
    */
@@ -227,19 +282,78 @@ export class ConfigurationSetEventDestination extends Resource implements IConfi
     configurationSetEventDestinationId: string): IConfigurationSetEventDestination {
     class Import extends Resource implements IConfigurationSetEventDestination {
       public readonly configurationSetEventDestinationId = configurationSetEventDestinationId;
+
+      public get configurationSetEventDestinationRef(): ConfigurationSetEventDestinationReference {
+        return {
+          configurationSetEventDestinationId: this.configurationSetEventDestinationId,
+        };
+      }
     }
     return new Import(scope, id);
   }
 
   public readonly configurationSetEventDestinationId: string;
 
+  public get configurationSetEventDestinationRef(): ConfigurationSetEventDestinationReference {
+    return {
+      configurationSetEventDestinationId: this.configurationSetEventDestinationId,
+    };
+  }
+
   constructor(scope: Construct, id: string, props: ConfigurationSetEventDestinationProps) {
     super(scope, id, {
       physicalName: props.configurationSetEventDestinationName,
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
+
+    if (
+      props.destination.bus &&
+      props.destination.bus.eventBusRef.eventBusArn != Stack.of(scope).formatArn({
+        service: 'events',
+        resource: 'event-bus',
+        resourceName: 'default',
+      })
+    ) {
+      throw new ValidationError(lit`DefaultBusEventDestination`, `Only the default bus can be used as an event destination. Got ${props.destination.bus.eventBusRef.eventBusArn}`, this);
+    }
+
+    let firehoseDeliveryStreamIamRoleArn = '';
+    if (props.destination.stream?.role) {
+      firehoseDeliveryStreamIamRoleArn = props.destination.stream.role.roleArn;
+    } else if (props.destination.stream) {
+      // As per https://docs.aws.amazon.com/ses/latest/dg/event-publishing-add-event-destination-firehose.html
+      const firehoseDeliveryStreamIamRole = new iam.Role(this, 'FirehoseDeliveryStreamIamRole', {
+        assumedBy: new iam.ServicePrincipal('ses.amazonaws.com', {
+          conditions: {
+            StringEquals: {
+              'AWS:SourceAccount': this.env.account,
+              'AWS:SourceArn': Stack.of(scope).formatArn({
+                service: 'ses',
+                resource: 'configuration-set',
+                resourceName: props.configurationSet.configurationSetRef.configurationSetName,
+              }),
+            },
+          },
+        }),
+        inlinePolicies: {
+          ['AllowFirehoseDeliveryStreamPublish']: new iam.PolicyDocument({
+            statements: [
+              new iam.PolicyStatement({
+                effect: iam.Effect.ALLOW,
+                actions: ['firehose:PutRecordBatch'],
+                resources: [props.destination.stream.deliveryStream.deliveryStreamArn],
+              }),
+            ],
+          }),
+        },
+      });
+
+      firehoseDeliveryStreamIamRoleArn = firehoseDeliveryStreamIamRole.roleArn;
+    }
 
     const configurationSet = new CfnConfigurationSetEventDestination(this, 'Resource', {
-      configurationSetName: props.configurationSet.configurationSetName,
+      configurationSetName: props.configurationSet.configurationSetRef.configurationSetName,
       eventDestination: {
         name: this.physicalName,
         enabled: props.enabled ?? true,
@@ -252,6 +366,13 @@ export class ConfigurationSetEventDestination extends Resource implements IConfi
               dimensionName: dimension.name,
               defaultDimensionValue: dimension.defaultValue,
             })),
+          }
+          : undefined,
+        eventBridgeDestination: props.destination.bus ? { eventBusArn: props.destination.bus.eventBusRef.eventBusArn } : undefined,
+        kinesisFirehoseDestination: props.destination.stream
+          ? {
+            deliveryStreamArn: props.destination.stream.deliveryStream.deliveryStreamArn,
+            iamRoleArn: firehoseDeliveryStreamIamRoleArn,
           }
           : undefined,
       },
@@ -267,7 +388,7 @@ export class ConfigurationSetEventDestination extends Resource implements IConfi
         conditions: {
           StringEquals: {
             'AWS:SourceAccount': this.env.account,
-            'AWS:SourceArn': `arn:${Aws.PARTITION}:ses:${this.env.region}:${this.env.account}:configuration-set/${props.configurationSet.configurationSetName}`,
+            'AWS:SourceArn': `arn:${Aws.PARTITION}:ses:${this.env.region}:${this.env.account}:configuration-set/${props.configurationSet.configurationSetRef.configurationSetName}`,
           },
         },
       }));

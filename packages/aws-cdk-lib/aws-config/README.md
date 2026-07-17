@@ -107,7 +107,7 @@ const evalComplianceFn = new lambda.Function(this, "CustomFunction", {
     "exports.handler = (event) => console.log(event);"
   ),
   handler: "index.handler",
-  runtime: lambda.Runtime.NODEJS_18_X,
+  runtime: lambda.Runtime.NODEJS_LATEST,
 });
 
 // A custom rule that runs on configuration changes of EC2 instances
@@ -206,6 +206,34 @@ const tagRule = new config.CustomRule(this, 'CostCenterTagRule', {
 });
 ```
 
+### Evaluation Mode
+
+You can specify the [evaluation mode](https://docs.aws.amazon.com/config/latest/developerguide/evaluate-config-rules.html) for a rule to determine when AWS Config runs evaluations.
+
+Use the `evaluationModes` property to specify the evaluation mode:
+
+```ts
+declare const fn: lambda.Function;
+declare const samplePolicyText: string;
+
+new config.ManagedRule(this, 'ManagedRule', {
+  identifier: config.ManagedRuleIdentifiers.API_GW_XRAY_ENABLED,
+  evaluationModes: config.EvaluationMode.DETECTIVE_AND_PROACTIVE,
+});
+
+new config.CustomRule(this, 'CustomRule', {
+  lambdaFunction: fn,
+  evaluationModes: config.EvaluationMode.PROACTIVE,
+});
+
+new config.CustomPolicy(this, 'CustomPolicy', {
+  policyText: samplePolicyText,
+  evaluationModes: config.EvaluationMode.DETECTIVE,
+});
+```
+
+**Note**: Proactive evaluation mode is not supported for all rules. See [AWS Config documentation](https://docs.aws.amazon.com/config/latest/developerguide/evaluate-config-rules.html#aws-config-rules-evaluation-modes) for more information.
+
 ### Events
 
 You can define Amazon EventBridge event rules which trigger when a compliance check fails
@@ -247,7 +275,7 @@ Compliance events are published to an SNS topic.
 const evalComplianceFn = new lambda.Function(this, 'CustomFunction', {
   code: lambda.AssetCode.fromInline('exports.handler = (event) => console.log(event);'),
   handler: 'index.handler',
-  runtime: lambda.Runtime.NODEJS_18_X,
+  runtime: lambda.Runtime.NODEJS_LATEST,
 });
 
 // A custom rule that runs on configuration changes of EC2 instances

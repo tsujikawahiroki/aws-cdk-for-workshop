@@ -1,10 +1,17 @@
-import { Construct } from 'constructs';
-import { IQueue, QueueAttributes, QueueBase, QueueEncryption } from './queue-base';
+import type { Construct } from 'constructs';
+import type { IQueue, QueueAttributes } from './queue-base';
+import { QueueBase, QueueEncryption } from './queue-base';
 import { CfnQueue } from './sqs.generated';
-import { validateProps } from './validate-props';
+import { validateQueueProps, validateRedriveAllowPolicy } from './validate-queue-props';
 import * as iam from '../../aws-iam';
 import * as kms from '../../aws-kms';
-import { Duration, RemovalPolicy, Stack, Token, ArnFormat, Annotations } from '../../core';
+import type { Duration } from '../../core';
+import { RemovalPolicy, Stack, Token, ArnFormat, Annotations } from '../../core';
+import { ValidationError } from '../../core/lib/errors';
+import { memoizedGetter } from '../../core/lib/helpers-internal';
+import { addConstructMetadata } from '../../core/lib/metadata-resource';
+import { lit } from '../../core/lib/private/literal-string';
+import { propertyInjectable } from '../../core/lib/prop-injectable';
 
 /**
  * Properties for creating a new Queue
@@ -42,10 +49,10 @@ export interface QueueProps {
   /**
    * The limit of how many bytes that a message can contain before Amazon SQS rejects it.
    *
-   * You can specify an integer value from 1024 bytes (1 KiB) to 262144 bytes
-   * (256 KiB). The default value is 262144 (256 KiB).
+   * You can specify an integer value from 1024 bytes (1 KiB) to 1048576 bytes
+   * (1 MiB). The default value is 1048576 (1 MiB).
    *
-   * @default 256KiB
+   * @default 1MiB
    */
   readonly maxMessageSizeBytes?: number;
 
@@ -198,7 +205,7 @@ export interface DeadLetterQueue {
   readonly queue: IQueue;
 
   /**
-   * The number of times a message can be unsuccesfully dequeued before being moved to the dead-letter queue.
+   * The number of times a message can be unsuccessfully dequeued before being moved to the dead-letter queue.
    */
   readonly maxReceiveCount: number;
 }
@@ -280,7 +287,12 @@ export enum RedrivePermission {
 /**
  * A new Amazon SQS queue
  */
+@propertyInjectable
 export class Queue extends QueueBase {
+  /**
+   * Uniquely identifies this class.
+   */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-sqs.Queue';
 
   /**
    * Import an existing SQS queue provided an ARN
@@ -325,10 +337,10 @@ export class Queue extends QueueBase {
         } else {
           if (typeof attrs.fifo !== 'undefined') {
             if (attrs.fifo && !queueName.endsWith('.fifo')) {
-              throw new Error("FIFO queue names must end in '.fifo'");
+              throw new ValidationError(lit`FifoQueueNames`, "FIFO queue names must end in '.fifo'", this);
             }
             if (!attrs.fifo && queueName.endsWith('.fifo')) {
-              throw new Error("Non-FIFO queue name may not end in '.fifo'");
+              throw new ValidationError(lit`NonFifoQueueName`, "Non-FIFO queue name may not end in '.fifo'", this);
             }
           }
           return queueName.endsWith('.fifo') ? true : false;
@@ -344,12 +356,21 @@ export class Queue extends QueueBase {
   /**
    * The ARN of this queue
    */
-  public readonly queueArn: string;
+  @memoizedGetter
+  public get queueArn(): string {
+    return this.getResourceArnAttribute(this._resource.attrArn, {
+      service: 'sqs',
+      resource: this.physicalName,
+    });
+  }
 
   /**
    * The name of this queue
    */
-  public readonly queueName: string;
+  @memoizedGetter
+  public get queueName(): string {
+    return this.getResourceNameAttribute(this._resource.attrQueueName);
+  }
 
   /**
    * The URL of this queue
@@ -378,25 +399,19 @@ export class Queue extends QueueBase {
 
   protected readonly autoCreatePolicy = true;
 
+  private readonly _resource: CfnQueue;
+
   constructor(scope: Construct, id: string, props: QueueProps = {}) {
     super(scope, id, {
       physicalName: props.queueName,
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
-    validateProps(props);
+    validateQueueProps(this, props);
 
     if (props.redriveAllowPolicy) {
-      const { redrivePermission, sourceQueues } = props.redriveAllowPolicy;
-      if (redrivePermission === RedrivePermission.BY_QUEUE) {
-        if (!sourceQueues || sourceQueues.length === 0) {
-          throw new Error('At least one source queue must be specified when RedrivePermission is set to \'byQueue\'');
-        }
-        if (sourceQueues && sourceQueues.length > 10) {
-          throw new Error('Up to 10 sourceQueues can be specified. Set RedrivePermission to \'allowAll\' to specify more');
-        }
-      } else if (redrivePermission && sourceQueues) {
-        throw new Error('sourceQueues cannot be configured when RedrivePermission is set to \'allowAll\' or \'denyAll\'');
-      }
+      validateRedriveAllowPolicy(this, props.redriveAllowPolicy);
     }
 
     const redrivePolicy = props.deadLetterQueue
@@ -434,11 +449,7 @@ export class Queue extends QueueBase {
     });
     queue.applyRemovalPolicy(props.removalPolicy ?? RemovalPolicy.DESTROY);
 
-    this.queueArn = this.getResourceArnAttribute(queue.attrArn, {
-      service: 'sqs',
-      resource: this.physicalName,
-    });
-    this.queueName = this.getResourceNameAttribute(queue.attrQueueName);
+    this._resource = queue;
     this.encryptionMasterKey = encryptionMasterKey;
     this.queueUrl = queue.ref;
     this.deadLetterQueue = props.deadLetterQueue;
@@ -452,7 +463,7 @@ export class Queue extends QueueBase {
       let encryption = props.encryption;
 
       if (encryption === QueueEncryption.SQS_MANAGED && props.encryptionMasterKey) {
-        throw new Error("'encryptionMasterKey' is not supported if encryption type 'SQS_MANAGED' is used");
+        throw new ValidationError(lit`EncryptionMasterKeySupportedEncryption`, "'encryptionMasterKey' is not supported if encryption type 'SQS_MANAGED' is used", this);
       }
 
       if (encryption !== QueueEncryption.KMS && props.encryptionMasterKey) {
@@ -513,7 +524,7 @@ export class Queue extends QueueBase {
         };
       }
 
-      throw new Error(`Unexpected 'encryptionType': ${encryption}`);
+      throw new ValidationError(lit`UnexpectedEncryptionType`, `Unexpected 'encryptionType': ${encryption}`, this);
     }
 
     // Enforce encryption of data in transit
@@ -537,30 +548,34 @@ export class Queue extends QueueBase {
     // If we have a name, see that it agrees with the FIFO setting
     if (typeof queueName === 'string') {
       if (fifoQueue && !queueName.endsWith('.fifo')) {
-        throw new Error("FIFO queue names must end in '.fifo'");
+        throw new ValidationError(lit`FifoQueueNames`, "FIFO queue names must end in '.fifo'", this);
       }
       if (!fifoQueue && queueName.endsWith('.fifo')) {
-        throw new Error("Non-FIFO queue name may not end in '.fifo'");
+        throw new ValidationError(lit`NonFifoQueueName`, "Non-FIFO queue name may not end in '.fifo'", this);
       }
     }
 
     if (props.contentBasedDeduplication && !fifoQueue) {
-      throw new Error('Content-based deduplication can only be defined for FIFO queues');
+      throw new ValidationError(lit`ContentBasedDeduplicationDefinedQueues`, 'Content-based deduplication can only be defined for FIFO queues', this);
     }
 
     if (props.deduplicationScope && !fifoQueue) {
-      throw new Error('Deduplication scope can only be defined for FIFO queues');
+      throw new ValidationError(lit`DeduplicationScopeDefinedQueues`, 'Deduplication scope can only be defined for FIFO queues', this);
     }
 
     if (props.fifoThroughputLimit && !fifoQueue) {
-      throw new Error('FIFO throughput limit can only be defined for FIFO queues');
+      throw new ValidationError(lit`ThroughputLimitDefinedQueues`, 'FIFO throughput limit can only be defined for FIFO queues', this);
     }
 
     return {
       contentBasedDeduplication: props.contentBasedDeduplication,
       deduplicationScope: props.deduplicationScope,
       fifoThroughputLimit: props.fifoThroughputLimit,
-      fifoQueue,
+
+      // This value will be passed directly into the L1 props, but the underlying `AWS::SQS::Queue`
+      // does not accept `FifoQueue: false`. It must either be `true` or absent. So change a `false` into
+      // an `undefined`.
+      fifoQueue: fifoQueue ? true : undefined,
     };
   }
 

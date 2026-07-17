@@ -1,7 +1,8 @@
 import * as cdk from 'aws-cdk-lib';
 import { IntegTest } from '@aws-cdk/integ-tests-alpha';
-import { Construct } from 'constructs';
-import { StackProps, Stack } from 'aws-cdk-lib';
+import type { Construct } from 'constructs';
+import type { StackProps } from 'aws-cdk-lib';
+import { Stack } from 'aws-cdk-lib';
 import {
   AdotLambdaLayerPythonSdkVersion,
   AdotLambdaLayerJavaSdkVersion,
@@ -17,7 +18,12 @@ import {
 } from 'aws-cdk-lib/aws-lambda';
 import { STANDARD_NODEJS_RUNTIME } from '../../config';
 
-const app = new cdk.App();
+const app = new cdk.App({
+  postCliContext: {
+    '@aws-cdk/aws-lambda:useCdkManagedLogGroup': false,
+    '@aws-cdk/aws-lambda:createNewPoliciesWithAddToRolePolicy': false,
+  },
+});
 
 interface StackUnderTestProps extends StackProps {
   architecture?: Architecture;
@@ -80,7 +86,6 @@ class StackUnderTest extends Stack {
   }
 }
 
-/* eslint-disable no-console */
 function handler(event: any, _context: any, callback: any) {
   console.log(JSON.stringify(event, undefined, 2));
   return callback();

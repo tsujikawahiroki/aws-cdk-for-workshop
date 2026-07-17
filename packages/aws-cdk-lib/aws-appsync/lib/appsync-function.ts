@@ -1,11 +1,17 @@
-import { Construct } from 'constructs';
+import type { Construct } from 'constructs';
 import { CfnFunctionConfiguration } from './appsync.generated';
-import { Code } from './code';
-import { BaseDataSource } from './data-source';
-import { IGraphqlApi } from './graphqlapi-base';
-import { MappingTemplate } from './mapping-template';
-import { FunctionRuntime } from './runtime';
-import { Resource, IResource, Lazy, Fn } from '../../core';
+import type { Code } from './code';
+import type { BaseDataSource } from './data-source';
+import { LambdaDataSource } from './data-source';
+import type { IGraphqlApi } from './graphqlapi-base';
+import type { MappingTemplate } from './mapping-template';
+import type { FunctionRuntime } from './runtime';
+import type { IResource } from '../../core';
+import { Resource, Lazy, Fn, ValidationError } from '../../core';
+import { addConstructMetadata } from '../../core/lib/metadata-resource';
+import { lit } from '../../core/lib/private/literal-string';
+import { propertyInjectable } from '../../core/lib/prop-injectable';
+import type { IFunctionConfigurationRef, FunctionConfigurationReference } from '../../interfaces/generated/aws-appsync-interfaces.generated';
 
 /**
  * the base properties for AppSync Functions
@@ -15,36 +21,51 @@ export interface BaseAppsyncFunctionProps {
    * the name of the AppSync Function
    */
   readonly name: string;
+
   /**
    * the description for this AppSync Function
    *
    * @default - no description
    */
   readonly description?: string;
+
   /**
    * the request mapping template for the AppSync Function
    *
    * @default - no request mapping template
    */
   readonly requestMappingTemplate?: MappingTemplate;
+
   /**
    * the response mapping template for the AppSync Function
    *
    * @default - no response mapping template
    */
   readonly responseMappingTemplate?: MappingTemplate;
+
   /**
    * The functions runtime
    *
    * @default - no function runtime, VTL mapping templates used
    */
   readonly runtime?: FunctionRuntime;
+
   /**
    * The function code
    *
    * @default - no code is used
    */
   readonly code?: Code;
+
+  /**
+   * The maximum number of resolver request inputs that will be sent to a single AWS Lambda function
+   * in a BatchInvoke operation.
+   *
+   * Can only be set when using LambdaDataSource.
+   *
+   * @default - No max batch size
+   */
+  readonly maxBatchSize?: number;
 }
 
 /**
@@ -74,7 +95,7 @@ export interface AppsyncFunctionAttributes {
 /**
  * Interface for AppSync Functions
  */
-export interface IAppsyncFunction extends IResource {
+export interface IAppsyncFunction extends IResource, IFunctionConfigurationRef {
   /**
    * the name of this AppSync Function
    *
@@ -96,7 +117,11 @@ export interface IAppsyncFunction extends IResource {
  *
  * @resource AWS::AppSync::FunctionConfiguration
  */
+@propertyInjectable
 export class AppsyncFunction extends Resource implements IAppsyncFunction {
+  /** Uniquely identifies this class. */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-appsync.AppsyncFunction';
+
   /**
    * Import Appsync Function from arn
    */
@@ -106,8 +131,13 @@ export class AppsyncFunction extends Resource implements IAppsyncFunction {
         produce: () => Fn.select(3, Fn.split('/', attrs.functionArn)),
       });
       public readonly functionArn = attrs.functionArn;
-      constructor (s: Construct, i: string) {
+      constructor(s: Construct, i: string) {
         super(s, i);
+      }
+      public get functionConfigurationRef(): FunctionConfigurationReference {
+        return {
+          functionArn: this.functionArn,
+        };
       }
     }
     return new Import(scope, id);
@@ -142,14 +172,20 @@ export class AppsyncFunction extends Resource implements IAppsyncFunction {
 
   public constructor(scope: Construct, id: string, props: AppsyncFunctionProps) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     // If runtime is specified, code must also be
     if (props.runtime && !props.code) {
-      throw new Error('Code is required when specifying a runtime');
+      throw new ValidationError(lit`CodeRequiredSpecifyingRuntime`, 'Code is required when specifying a runtime', scope);
     }
 
     if (props.code && (props.requestMappingTemplate || props.responseMappingTemplate)) {
-      throw new Error('Mapping templates cannot be used alongside code');
+      throw new ValidationError(lit`MappingTemplatesCannotAlongsideCode`, 'Mapping templates cannot be used alongside code', scope);
+    }
+
+    if (props.maxBatchSize && !(props.dataSource instanceof LambdaDataSource)) {
+      throw new ValidationError(lit`MaxbatchsizeOnlyDataSource`, 'maxBatchSize can only be set for the data source of type \LambdaDataSource\'', scope);
     }
 
     const code = props.code?.bind(this);
@@ -164,6 +200,7 @@ export class AppsyncFunction extends Resource implements IAppsyncFunction {
       functionVersion: '2018-05-29',
       requestMappingTemplate: props.requestMappingTemplate?.renderTemplate(),
       responseMappingTemplate: props.responseMappingTemplate?.renderTemplate(),
+      maxBatchSize: props.maxBatchSize,
     });
     this.functionName = this.function.attrName;
     this.functionArn = this.function.attrFunctionArn;
@@ -172,5 +209,11 @@ export class AppsyncFunction extends Resource implements IAppsyncFunction {
 
     this.function.addDependency(this.dataSource.ds);
     props.api.addSchemaDependency(this.function);
+  }
+
+  public get functionConfigurationRef(): FunctionConfigurationReference {
+    return {
+      functionArn: this.functionArn,
+    };
   }
 }

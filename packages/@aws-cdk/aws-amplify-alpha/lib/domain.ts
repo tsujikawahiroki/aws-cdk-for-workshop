@@ -1,9 +1,14 @@
-import * as iam from 'aws-cdk-lib/aws-iam';
-import { Lazy, Resource, IResolvable } from 'aws-cdk-lib/core';
-import { Construct } from 'constructs';
 import { CfnDomain } from 'aws-cdk-lib/aws-amplify';
-import { IApp } from './app';
-import { IBranch } from './branch';
+import type * as acm from 'aws-cdk-lib/aws-certificatemanager';
+import type * as iam from 'aws-cdk-lib/aws-iam';
+import type { IResolvable } from 'aws-cdk-lib/core';
+import { Lazy, Resource, Token, ValidationError } from 'aws-cdk-lib/core';
+import { lit } from 'aws-cdk-lib/core/lib/helpers-internal';
+import { addConstructMetadata, MethodMetadata } from 'aws-cdk-lib/core/lib/metadata-resource';
+import { propertyInjectable } from 'aws-cdk-lib/core/lib/prop-injectable';
+import type { Construct } from 'constructs';
+import type { IApp } from './app';
+import type { IBranch } from './branch';
 
 /**
  * Options to add a domain to an application
@@ -36,6 +41,13 @@ export interface DomainOptions {
    * @default - all repository branches ['*', 'pr*']
    */
   readonly autoSubdomainCreationPatterns?: string[];
+
+  /**
+   * The type of SSL/TLS certificate to use for your custom domain
+   *
+   * @default - Amplify uses the default certificate that it provisions and manages for you
+   */
+  readonly customCertificate?: acm.ICertificate;
 }
 
 /**
@@ -49,7 +61,7 @@ export interface DomainProps extends DomainOptions {
 
   /**
    * The IAM role with access to Route53 when using enableAutoSubdomain
-   * @default the IAM role from App.grantPrincipal
+   * @default - the IAM role from App.grantPrincipal
    */
   readonly autoSubDomainIamRole?: iam.IRole;
 }
@@ -57,8 +69,10 @@ export interface DomainProps extends DomainOptions {
 /**
  * An Amplify Console domain
  */
+@propertyInjectable
 export class Domain extends Resource {
-
+  /** Uniquely identifies this class. */
+  public static readonly PROPERTY_INJECTION_ID: string = '@aws-cdk.aws-amplify-alpha.Domain';
   /**
    * The ARN of the domain
    *
@@ -119,10 +133,19 @@ export class Domain extends Resource {
 
   constructor(scope: Construct, id: string, props: DomainProps) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     this.subDomains = props.subDomains || [];
 
     const domainName = props.domainName || id;
+    if (!Token.isUnresolved(domainName) && domainName.length > 255) {
+      throw new ValidationError(lit`DomainNameTooLong`, `Domain name must be 255 characters or less, got: ${domainName.length} characters.`, this);
+    }
+    if (!Token.isUnresolved(domainName) && !/^(((?!-)[A-Za-z0-9-]{0,62}[A-Za-z0-9])\.)+((?!-)[A-Za-z0-9-]{1,62}[A-Za-z0-9])(\.)?$/.test(domainName)) {
+      throw new ValidationError(lit`InvalidDomainName`, `Domain name must be a valid hostname, got: ${domainName}.`, this);
+    }
+
     const domain = new CfnDomain(this, 'Resource', {
       appId: props.app.appId,
       domainName,
@@ -130,6 +153,10 @@ export class Domain extends Resource {
       enableAutoSubDomain: !!props.enableAutoSubdomain,
       autoSubDomainCreationPatterns: props.autoSubdomainCreationPatterns || ['*', 'pr*'],
       autoSubDomainIamRole: props.autoSubDomainIamRole?.roleArn,
+      certificateSettings: props.customCertificate ? {
+        certificateType: 'CUSTOM',
+        customCertificateArn: props.customCertificate.certificateArn,
+      } : undefined,
     });
 
     this.arn = domain.attrArn;
@@ -150,6 +177,7 @@ export class Domain extends Resource {
    * @param branch The branch
    * @param prefix The prefix. Use '' to map to the root of the domain. Defaults to branch name.
    */
+  @MethodMetadata()
   public mapSubDomain(branch: IBranch, prefix?: string) {
     this.subDomains.push({ branch, prefix });
     return this;
@@ -158,6 +186,7 @@ export class Domain extends Resource {
   /**
    * Maps a branch to the domain root
    */
+  @MethodMetadata()
   public mapRoot(branch: IBranch) {
     return this.mapSubDomain(branch, '');
   }

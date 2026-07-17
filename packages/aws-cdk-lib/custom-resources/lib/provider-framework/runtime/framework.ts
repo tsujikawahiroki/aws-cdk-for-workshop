@@ -1,10 +1,12 @@
+/* eslint-disable @cdklabs/no-throw-default-error */
+
 /* eslint-disable max-len */
-/* eslint-disable no-console */
+
 import * as cfnResponse from './cfn-response';
 import * as consts from './consts';
 import { invokeFunction, startExecution } from './outbound';
 import { getEnv, log, parseJsonPayload } from './util';
-import { IsCompleteResponse, OnEventResponse } from '../types';
+import type { IsCompleteResponse, OnEventResponse } from '../types';
 
 // use consts for handler names to compiler-enforce the coupling with construction code.
 export = {
@@ -30,12 +32,21 @@ async function onEvent(cfnRequest: AWSLambda.CloudFormationCustomResourceEvent) 
   cfnRequest.ResourceProperties = cfnRequest.ResourceProperties || { };
 
   const onEventResult = await invokeUserFunction(consts.USER_ON_EVENT_FUNCTION_ARN_ENV, sanitizedRequest, cfnRequest.ResponseURL) as OnEventResponse;
-  log('onEvent returned:', onEventResult);
+  if (onEventResult?.NoEcho) {
+    log('redacted onEvent returned:', cfnResponse.redactDataFromPayload(onEventResult));
+  } else {
+    log('onEvent returned:', onEventResult);
+  }
 
   // merge the request and the result from onEvent to form the complete resource event
   // this also performs validation.
   const resourceEvent = createResponseEvent(cfnRequest, onEventResult);
-  log('event:', onEventResult);
+  const sanitizedEvent = { ...resourceEvent, ResponseURL: '...' };
+  if (onEventResult?.NoEcho) {
+    log('readacted event:', cfnResponse.redactDataFromPayload(sanitizedEvent));
+  } else {
+    log('event:', sanitizedEvent);
+  }
 
   // determine if this is an async provider based on whether we have an isComplete handler defined.
   // if it is not defined, then we are basically ready to return a positive response.
@@ -46,13 +57,11 @@ async function onEvent(cfnRequest: AWSLambda.CloudFormationCustomResourceEvent) 
   // ok, we are not complete, so kick off the waiter workflow
   const waiter = {
     stateMachineArn: getEnv(consts.WAITER_STATE_MACHINE_ARN_ENV),
-    name: resourceEvent.RequestId,
     input: JSON.stringify(resourceEvent),
   };
 
   log('starting waiter', {
     stateMachineArn: getEnv(consts.WAITER_STATE_MACHINE_ARN_ENV),
-    name: resourceEvent.RequestId,
   });
 
   // kick off waiter state machine
@@ -62,10 +71,18 @@ async function onEvent(cfnRequest: AWSLambda.CloudFormationCustomResourceEvent) 
 // invoked a few times until `complete` is true or until it times out.
 async function isComplete(event: AWSCDKAsyncCustomResource.IsCompleteRequest) {
   const sanitizedRequest = { ...event, ResponseURL: '...' } as const;
-  log('isComplete', sanitizedRequest);
+  if (event?.NoEcho) {
+    log('redacted isComplete request', cfnResponse.redactDataFromPayload(sanitizedRequest));
+  } else {
+    log('isComplete', sanitizedRequest);
+  }
 
   const isCompleteResult = await invokeUserFunction(consts.USER_IS_COMPLETE_FUNCTION_ARN_ENV, sanitizedRequest, event.ResponseURL) as IsCompleteResponse;
-  log('user isComplete returned:', isCompleteResult);
+  if (event?.NoEcho) {
+    log('redacted user isComplete returned:', cfnResponse.redactDataFromPayload(isCompleteResult));
+  } else {
+    log('user isComplete returned:', isCompleteResult);
+  }
 
   // if we are not complete, return false, and don't send a response back.
   if (!isCompleteResult.IsComplete) {

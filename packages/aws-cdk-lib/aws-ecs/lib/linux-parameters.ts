@@ -1,6 +1,11 @@
 import { Construct } from 'constructs';
-import { CfnTaskDefinition } from './ecs.generated';
+import type { CfnTaskDefinition } from './ecs.generated';
 import * as cdk from '../../core';
+import { ValidationError } from '../../core';
+import type { IArrayBox } from '../../core/lib/helpers-internal';
+import { Box } from '../../core/lib/helpers-internal';
+import { noBoxStackTraces } from '../../core/lib/no-box-stack-traces';
+import { lit } from '../../core/lib/private/literal-string';
 
 /**
  * The properties for defining Linux-specific options that are applied to the container.
@@ -32,24 +37,25 @@ export interface LinuxParametersProps {
   readonly maxSwap?: cdk.Size;
 
   /**
-    * This allows you to tune a container's memory swappiness behavior. This parameter
-    * maps to the --memory-swappiness option to docker run. The swappiness relates
-    * to the kernel's tendency to swap memory. A value of 0 will cause swapping to
-    * not happen unless absolutely necessary. A value of 100 will cause pages to
-    * be swapped very aggressively.
-    *
-    * This parameter is only supported when you are using the EC2 launch type.
-    * Accepted values are whole numbers between 0 and 100. If a value is not
-    * specified for maxSwap then this parameter is ignored.
-    *
-    * @default 60
-    */
+   * This allows you to tune a container's memory swappiness behavior. This parameter
+   * maps to the --memory-swappiness option to docker run. The swappiness relates
+   * to the kernel's tendency to swap memory. A value of 0 will cause swapping to
+   * not happen unless absolutely necessary. A value of 100 will cause pages to
+   * be swapped very aggressively.
+   *
+   * This parameter is only supported when you are using the EC2 launch type.
+   * Accepted values are whole numbers between 0 and 100. If a value is not
+   * specified for maxSwap then this parameter is ignored.
+   *
+   * @default 60
+   */
   readonly swappiness?: number;
 }
 
 /**
  * Linux-specific options that are applied to the container.
  */
+@noBoxStackTraces
 export class LinuxParameters extends Construct {
   /**
    * Whether the init process is enabled
@@ -74,22 +80,22 @@ export class LinuxParameters extends Construct {
   /**
    * Capabilities to be added
    */
-  private readonly capAdd = new Array<Capability>();
+  private readonly capAdd: IArrayBox<Capability>;
 
   /**
    * Capabilities to be dropped
    */
-  private readonly capDrop = new Array<Capability>();
+  private readonly capDrop: IArrayBox<Capability>;
 
   /**
    * Device mounts
    */
-  private readonly devices = new Array<Device>();
+  private readonly devices: IArrayBox<Device>;
 
   /**
    * TmpFs mounts
    */
-  private readonly tmpfs = new Array<Tmpfs>();
+  private readonly tmpfs: IArrayBox<Tmpfs>;
 
   /**
    * Constructs a new instance of the LinuxParameters class.
@@ -98,6 +104,11 @@ export class LinuxParameters extends Construct {
     super(scope, id);
 
     this.validateProps(props);
+
+    this.capAdd = Box.fromArray();
+    this.capDrop = Box.fromArray();
+    this.devices = Box.fromArray();
+    this.tmpfs = Box.fromArray();
 
     this.sharedMemorySize = props.sharedMemorySize;
     this.initProcessEnabled = props.initProcessEnabled;
@@ -111,7 +122,7 @@ export class LinuxParameters extends Construct {
       props.sharedMemorySize !== undefined &&
       (!Number.isInteger(props.sharedMemorySize) || props.sharedMemorySize < 0)
     ) {
-      throw new Error(`sharedMemorySize: Must be an integer greater than 0; received ${props.sharedMemorySize}.`);
+      throw new ValidationError(lit`MustBeSharedMemorySizeIntegerGreater`, `sharedMemorySize: Must be an integer greater than 0; received ${props.sharedMemorySize}.`, this);
     }
 
     if (
@@ -119,7 +130,7 @@ export class LinuxParameters extends Construct {
       props.swappiness !== undefined &&
       (!Number.isInteger(props.swappiness) || props.swappiness < 0 || props.swappiness > 100)
     ) {
-      throw new Error(`swappiness: Must be an integer between 0 and 100; received ${props.swappiness}.`);
+      throw new ValidationError(lit`MustBeSwappinessIntegerBetween`, `swappiness: Must be an integer between 0 and 100; received ${props.swappiness}.`, this);
     }
   }
 
@@ -165,11 +176,11 @@ export class LinuxParameters extends Construct {
       maxSwap: this.maxSwap?.toMebibytes(),
       swappiness: this.swappiness,
       capabilities: {
-        add: cdk.Lazy.list({ produce: () => this.capAdd }, { omitEmpty: true }),
-        drop: cdk.Lazy.list({ produce: () => this.capDrop }, { omitEmpty: true }),
+        add: cdk.Token.asList(this.capAdd, { displayHint: 'capAdd' }),
+        drop: cdk.Token.asList(this.capDrop, { displayHint: 'capDrop' }),
       },
-      devices: cdk.Lazy.any({ produce: () => this.devices.map(renderDevice) }, { omitEmptyArray: true }),
-      tmpfs: cdk.Lazy.any({ produce: () => this.tmpfs.map(renderTmpfs) }, { omitEmptyArray: true }),
+      devices: this.devices.map(renderDevice),
+      tmpfs: this.tmpfs.map(renderTmpfs),
     };
   }
 }

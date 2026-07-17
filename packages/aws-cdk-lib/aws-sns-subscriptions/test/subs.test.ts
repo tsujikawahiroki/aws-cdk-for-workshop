@@ -7,7 +7,7 @@ import { App, CfnParameter, Duration, RemovalPolicy, Stack, Token } from '../../
 import * as cxapi from '../../cx-api';
 import * as subs from '../lib';
 
-/* eslint-disable quote-props */
+/* eslint-disable @stylistic/quote-props */
 const restrictSqsDescryption = { [cxapi.SNS_SUBSCRIPTIONS_SQS_DECRYPTION_POLICY]: true };
 let stack: Stack;
 let topic: sns.Topic;
@@ -16,7 +16,6 @@ beforeEach(() => {
   stack = new Stack();
   topic = new sns.Topic(stack, 'MyTopic', {
     topicName: 'topicName',
-    displayName: 'displayName',
   });
 });
 
@@ -28,7 +27,6 @@ test('url subscription', () => {
       'MyTopic86869434': {
         'Type': 'AWS::SNS::Topic',
         'Properties': {
-          'DisplayName': 'displayName',
           'TopicName': 'topicName',
         },
       },
@@ -60,7 +58,6 @@ test('url subscription with user provided dlq', () => {
       'MyTopic86869434': {
         'Type': 'AWS::SNS::Topic',
         'Properties': {
-          'DisplayName': 'displayName',
           'TopicName': 'topicName',
         },
       },
@@ -140,7 +137,6 @@ test('url subscription (with raw delivery)', () => {
       'MyTopic86869434': {
         'Type': 'AWS::SNS::Topic',
         'Properties': {
-          'DisplayName': 'displayName',
           'TopicName': 'topicName',
         },
       },
@@ -166,7 +162,6 @@ test('url subscription (unresolved url with protocol)', () => {
       'MyTopic86869434': {
         'Type': 'AWS::SNS::Topic',
         'Properties': {
-          'DisplayName': 'displayName',
           'TopicName': 'topicName',
         },
       },
@@ -196,7 +191,6 @@ test('url subscription (double unresolved url with protocol)', () => {
       'MyTopic86869434': {
         'Type': 'AWS::SNS::Topic',
         'Properties': {
-          'DisplayName': 'displayName',
           'TopicName': 'topicName',
         },
       },
@@ -226,14 +220,14 @@ test('url subscription (double unresolved url with protocol)', () => {
 
 test('url subscription (unknown protocol)', () => {
   expect(() => topic.addSubscription(new subs.UrlSubscription('some-protocol://foobar.com/')))
-    .toThrowError(/URL must start with either http:\/\/ or https:\/\//);
+    .toThrow(/URL must start with either http:\/\/ or https:\/\//);
 });
 
 test('url subscription (unresolved url without protocol)', () => {
   const urlToken = Token.asString({ Ref: 'my-url-1' });
 
   expect(() => topic.addSubscription(new subs.UrlSubscription(urlToken)))
-    .toThrowError(/Must provide protocol if url is unresolved/);
+    .toThrow(/Must provide protocol if url is unresolved/);
 });
 
 test('queue subscription', () => {
@@ -246,7 +240,6 @@ test('queue subscription', () => {
       'MyTopic86869434': {
         'Type': 'AWS::SNS::Topic',
         'Properties': {
-          'DisplayName': 'displayName',
           'TopicName': 'topicName',
         },
       },
@@ -326,7 +319,6 @@ test('queue subscription cross region', () => {
 
   const topic1 = new sns.Topic(topicStack, 'Topic', {
     topicName: 'topicName',
-    displayName: 'displayName',
   });
 
   const queue = new sqs.Queue(queueStack, 'MyQueue');
@@ -338,7 +330,6 @@ test('queue subscription cross region', () => {
       'TopicBFC7AF6E': {
         'Type': 'AWS::SNS::Topic',
         'Properties': {
-          'DisplayName': 'displayName',
           'TopicName': 'topicName',
         },
       },
@@ -432,7 +423,6 @@ test('queue subscription cross region, env agnostic', () => {
 
   const topic1 = new sns.Topic(topicStack, 'Topic', {
     topicName: 'topicName',
-    displayName: 'displayName',
   });
 
   const queue = new sqs.Queue(queueStack, 'MyQueue');
@@ -444,7 +434,6 @@ test('queue subscription cross region, env agnostic', () => {
       'TopicBFC7AF6E': {
         'Type': 'AWS::SNS::Topic',
         'Properties': {
-          'DisplayName': 'displayName',
           'TopicName': 'topicName',
         },
       },
@@ -534,7 +523,6 @@ test('queue subscription cross region, topic env agnostic', () => {
 
   const topic1 = new sns.Topic(topicStack, 'Topic', {
     topicName: 'topicName',
-    displayName: 'displayName',
   });
 
   const queue = new sqs.Queue(queueStack, 'MyQueue');
@@ -546,7 +534,6 @@ test('queue subscription cross region, topic env agnostic', () => {
       'TopicBFC7AF6E': {
         'Type': 'AWS::SNS::Topic',
         'Properties': {
-          'DisplayName': 'displayName',
           'TopicName': 'topicName',
         },
       },
@@ -660,7 +647,6 @@ test('queue subscription cross region, queue env agnostic', () => {
 
   const topic1 = new sns.Topic(topicStack, 'Topic', {
     topicName: 'topicName',
-    displayName: 'displayName',
   });
 
   const queue = new sqs.Queue(queueStack, 'MyQueue');
@@ -672,7 +658,6 @@ test('queue subscription cross region, queue env agnostic', () => {
       'TopicBFC7AF6E': {
         'Type': 'AWS::SNS::Topic',
         'Properties': {
-          'DisplayName': 'displayName',
           'TopicName': 'topicName',
         },
       },
@@ -774,7 +759,6 @@ test('queue subscription with user provided dlq', () => {
       'MyTopic86869434': {
         'Type': 'AWS::SNS::Topic',
         'Properties': {
-          'DisplayName': 'displayName',
           'TopicName': 'topicName',
         },
       },
@@ -926,7 +910,6 @@ test('encrypted queue subscription', () => {
       'MyTopic86869434': {
         'Type': 'AWS::SNS::Topic',
         'Properties': {
-          'DisplayName': 'displayName',
           'TopicName': 'topicName',
         },
       },
@@ -1050,7 +1033,6 @@ describe('Restrict sqs decryption feature flag', () => {
     );
     const topicUnderTest = new sns.Topic(stackUnderTest, 'MyTopic', {
       topicName: 'topicName',
-      displayName: 'displayName',
     });
     const key = new kms.Key(stackUnderTest, 'MyKey', {
       removalPolicy: RemovalPolicy.DESTROY,
@@ -1121,7 +1103,6 @@ describe('Restrict sqs decryption feature flag', () => {
     );
     const topicUnderTest = new sns.Topic(stackUnderTest, 'MyTopic', {
       topicName: 'topicName',
-      displayName: 'displayName',
     });
     const key = new kms.Key(stackUnderTest, 'MyKey', {
       removalPolicy: RemovalPolicy.DESTROY,
@@ -1201,7 +1182,7 @@ test('throws an error when a queue is encrypted by AWS managed KMS kye for queue
 
   // THEN
   expect(() => topic.addSubscription(new subs.SqsSubscription(queue)))
-    .toThrowError(/SQS queue encrypted by AWS managed KMS key cannot be used as SNS subscription/);
+    .toThrow(/SQS queue encrypted by AWS managed KMS key cannot be used as SNS subscription/);
 });
 
 test('throws an error when a dead-letter queue is encrypted by AWS managed KMS kye for queue subscription', () => {
@@ -1215,7 +1196,7 @@ test('throws an error when a dead-letter queue is encrypted by AWS managed KMS k
   expect(() => topic.addSubscription(new subs.SqsSubscription(queue, {
     deadLetterQueue: dlq,
   })))
-    .toThrowError(/SQS queue encrypted by AWS managed KMS key cannot be used as dead-letter queue/);
+    .toThrow(/SQS queue encrypted by AWS managed KMS key cannot be used as dead-letter queue/);
 });
 
 test('importing SQS queue and specify this as subscription', () => {
@@ -1247,7 +1228,6 @@ test('lambda subscription', () => {
       'MyTopic86869434': {
         'Type': 'AWS::SNS::Topic',
         'Properties': {
-          'DisplayName': 'displayName',
           'TopicName': 'topicName',
         },
       },
@@ -1295,7 +1275,7 @@ test('lambda subscription', () => {
               'Arn',
             ],
           },
-          'Runtime': lambda.Runtime.NODEJS_LATEST.name,
+          'Runtime': 'nodejs24.x',
         },
         'DependsOn': [
           'MyFuncServiceRole54065130',
@@ -1343,7 +1323,6 @@ test('lambda subscription, cross region env agnostic', () => {
 
   const topic1 = new sns.Topic(topicStack, 'Topic', {
     topicName: 'topicName',
-    displayName: 'displayName',
   });
   const func = new lambda.Function(lambdaStack, 'MyFunc', {
     runtime: lambda.Runtime.NODEJS_LATEST,
@@ -1399,7 +1378,7 @@ test('lambda subscription, cross region env agnostic', () => {
             ],
           },
           'Handler': 'index.handler',
-          'Runtime': lambda.Runtime.NODEJS_LATEST.name,
+          'Runtime': 'nodejs24.x',
         },
         'DependsOn': [
           'MyFuncServiceRole54065130',
@@ -1457,7 +1436,6 @@ test('lambda subscription, cross region', () => {
 
   const topic1 = new sns.Topic(topicStack, 'Topic', {
     topicName: 'topicName',
-    displayName: 'displayName',
   });
   const func = new lambda.Function(lambdaStack, 'MyFunc', {
     runtime: lambda.Runtime.NODEJS_LATEST,
@@ -1581,7 +1559,6 @@ test('email subscription', () => {
       'MyTopic86869434': {
         'Type': 'AWS::SNS::Topic',
         'Properties': {
-          'DisplayName': 'displayName',
           'TopicName': 'topicName',
         },
       },
@@ -1608,7 +1585,6 @@ test('email subscription with unresolved', () => {
       'MyTopic86869434': {
         'Type': 'AWS::SNS::Topic',
         'Properties': {
-          'DisplayName': 'displayName',
           'TopicName': 'topicName',
         },
       },
@@ -1639,7 +1615,6 @@ test('email and url subscriptions with unresolved', () => {
       'MyTopic86869434': {
         'Type': 'AWS::SNS::Topic',
         'Properties': {
-          'DisplayName': 'displayName',
           'TopicName': 'topicName',
         },
       },
@@ -1687,7 +1662,6 @@ test('email and url subscriptions with unresolved - four subscriptions', () => {
       'MyTopic86869434': {
         'Type': 'AWS::SNS::Topic',
         'Properties': {
-          'DisplayName': 'displayName',
           'TopicName': 'topicName',
         },
       },
@@ -1759,7 +1733,6 @@ test('multiple subscriptions', () => {
       'MyTopic86869434': {
         'Type': 'AWS::SNS::Topic',
         'Properties': {
-          'DisplayName': 'displayName',
           'TopicName': 'topicName',
         },
       },
@@ -1862,7 +1835,7 @@ test('multiple subscriptions', () => {
               'Arn',
             ],
           },
-          'Runtime': lambda.Runtime.NODEJS_LATEST.name,
+          'Runtime': 'nodejs24.x',
         },
         'DependsOn': [
           'MyFuncServiceRole54065130',
@@ -1909,7 +1882,7 @@ test('throws with mutliple subscriptions of the same subscriber', () => {
   topic.addSubscription(new subs.SqsSubscription(queue));
 
   expect(() => topic.addSubscription(new subs.SqsSubscription(queue)))
-    .toThrowError(/A subscription with id \"MyTopic\" already exists under the scope Default\/MyQueue/);
+    .toThrow(/A subscription with id \"MyTopic\" already exists under the scope Default\/MyQueue/);
 });
 
 test('with filter policy', () => {
@@ -2090,7 +2063,6 @@ test('sms subscription', () => {
       'MyTopic86869434': {
         'Type': 'AWS::SNS::Topic',
         'Properties': {
-          'DisplayName': 'displayName',
           'TopicName': 'topicName',
         },
       },
@@ -2117,7 +2089,6 @@ test('sms subscription with unresolved', () => {
       'MyTopic86869434': {
         'Type': 'AWS::SNS::Topic',
         'Properties': {
-          'DisplayName': 'displayName',
           'TopicName': 'topicName',
         },
       },

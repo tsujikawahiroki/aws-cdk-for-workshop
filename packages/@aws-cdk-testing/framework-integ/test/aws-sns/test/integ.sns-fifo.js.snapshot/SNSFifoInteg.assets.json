@@ -1,15 +1,16 @@
 {
-  "version": "20.0.0",
+  "version": "54.0.0",
   "files": {
-    "84d514b00d9e3dc065215aeb875494767355d96ed11c81410036cd85a35e6c46": {
+    "95e4308cfb39098d2340b58a41c3c0a411d8ee728e1d1fe9858a10b7ea556dbf": {
+      "displayName": "SNSFifoInteg Template",
       "source": {
         "path": "SNSFifoInteg.template.json",
         "packaging": "file"
       },
       "destinations": {
-        "current_account-current_region": {
+        "current_account-current_region-9f6cafee": {
           "bucketName": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}",
-          "objectKey": "84d514b00d9e3dc065215aeb875494767355d96ed11c81410036cd85a35e6c46.json",
+          "objectKey": "95e4308cfb39098d2340b58a41c3c0a411d8ee728e1d1fe9858a10b7ea556dbf.json",
           "assumeRoleArn": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cdk-hnb659fds-file-publishing-role-${AWS::AccountId}-${AWS::Region}"
         }
       }

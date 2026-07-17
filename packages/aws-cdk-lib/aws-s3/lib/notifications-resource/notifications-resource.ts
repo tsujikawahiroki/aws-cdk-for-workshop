@@ -1,9 +1,18 @@
-import { Construct, IConstruct } from 'constructs';
+import type { IConstruct } from 'constructs';
+import { Construct } from 'constructs';
 import { NotificationsResourceHandler } from './notifications-resource-handler';
 import * as iam from '../../../aws-iam';
 import * as cdk from '../../../core';
-import { Bucket, IBucket, EventType, NotificationKeyFilter } from '../bucket';
-import { BucketNotificationDestinationType, IBucketNotificationDestination } from '../destination';
+import { ValidationError } from '../../../core/lib/errors';
+import type { IArrayBox, IBox } from '../../../core/lib/helpers-internal';
+import { Box } from '../../../core/lib/helpers-internal';
+import { noBoxStackTraces } from '../../../core/lib/no-box-stack-traces';
+import { lit } from '../../../core/lib/private/literal-string';
+import * as cxapi from '../../../cx-api';
+import type { IBucket, EventType, NotificationKeyFilter } from '../bucket';
+import { Bucket } from '../bucket';
+import type { IBucketNotificationDestination } from '../destination';
+import { BucketNotificationDestinationType } from '../destination';
 
 interface NotificationsProps {
   /**
@@ -15,6 +24,11 @@ interface NotificationsProps {
    * The role to be used by the lambda handler
    */
   handlerRole?: iam.IRole;
+
+  /**
+   * Skips notification validation of Amazon SQS, Amazon SNS, and Lambda destinations.
+   */
+  skipDestinationValidation: boolean;
 }
 
 /**
@@ -32,19 +46,22 @@ interface NotificationsProps {
  * @see
  * https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-s3-bucket-notificationconfig.html
  */
+@noBoxStackTraces
 export class BucketNotifications extends Construct {
-  private eventBridgeEnabled = false;
-  private readonly lambdaNotifications = new Array<LambdaFunctionConfiguration>();
-  private readonly queueNotifications = new Array<QueueConfiguration>();
-  private readonly topicNotifications = new Array<TopicConfiguration>();
+  private readonly eventBridgeEnabled: IBox<boolean> = Box.fromValue(false);
+  private readonly lambdaNotifications: IArrayBox<LambdaFunctionConfiguration> = Box.fromArray();
+  private readonly queueNotifications: IArrayBox<QueueConfiguration> = Box.fromArray();
+  private readonly topicNotifications: IArrayBox<TopicConfiguration> = Box.fromArray();
   private resource?: cdk.CfnResource;
   private readonly bucket: IBucket;
   private readonly handlerRole?: iam.IRole;
+  private readonly skipDestinationValidation: boolean;
 
   constructor(scope: Construct, id: string, props: NotificationsProps) {
     super(scope, id);
     this.bucket = props.bucket;
     this.handlerRole = props.handlerRole;
+    this.skipDestinationValidation = props.skipDestinationValidation;
   }
 
   /**
@@ -63,7 +80,7 @@ export class BucketNotifications extends Construct {
     const targetProps = target.bind(this, this.bucket);
     const commonConfig: CommonConfiguration = {
       Events: [event],
-      Filter: renderFilters(filters),
+      Filter: renderFilters(filters, this),
     };
 
     // if the target specifies any dependencies, add them to the custom resource.
@@ -73,7 +90,7 @@ export class BucketNotifications extends Construct {
       resource.node.addDependency(...targetProps.dependencies);
     }
 
-    // based on the target type, add the the correct configurations array
+    // based on the target type, add the correct configurations array
     switch (targetProps.type) {
       case BucketNotificationDestinationType.LAMBDA:
         this.lambdaNotifications.push({ ...commonConfig, LambdaFunctionArn: targetProps.arn });
@@ -88,22 +105,27 @@ export class BucketNotifications extends Construct {
         break;
 
       default:
-        throw new Error('Unsupported notification target type:' + BucketNotificationDestinationType[targetProps.type]);
+        throw new ValidationError(lit`UnsupportedNotificationTargetType`, 'Unsupported notification target type:' + BucketNotificationDestinationType[targetProps.type], this);
     }
   }
 
   public enableEventBridgeNotification() {
     this.createResourceOnce();
-    this.eventBridgeEnabled = true;
+    this.eventBridgeEnabled.set(true);
   }
 
-  private renderNotificationConfiguration(): NotificationConfiguration {
-    return {
-      EventBridgeConfiguration: this.eventBridgeEnabled ? {} : undefined,
-      LambdaFunctionConfigurations: this.lambdaNotifications.length > 0 ? this.lambdaNotifications : undefined,
-      QueueConfigurations: this.queueNotifications.length > 0 ? this.queueNotifications : undefined,
-      TopicConfigurations: this.topicNotifications.length > 0 ? this.topicNotifications : undefined,
-    };
+  private renderNotificationConfiguration() {
+    return Box.combine({
+      eventBridge: this.eventBridgeEnabled,
+      lambda: this.lambdaNotifications,
+      queue: this.queueNotifications,
+      topic: this.topicNotifications,
+    }, v => ({
+      EventBridgeConfiguration: v.eventBridge ? {} : undefined,
+      LambdaFunctionConfigurations: v.lambda.length > 0 ? v.lambda : undefined,
+      QueueConfigurations: v.queue.length > 0 ? v.queue : undefined,
+      TopicConfigurations: v.topic.length > 0 ? v.topic : undefined,
+    }));
   }
 
   /**
@@ -117,24 +139,37 @@ export class BucketNotifications extends Construct {
         role: this.handlerRole,
       });
 
-      const managed = this.bucket instanceof Bucket;
+      let managed = this.bucket instanceof Bucket;
 
-      if (!managed) {
-        handler.addToRolePolicy(new iam.PolicyStatement({
-          actions: ['s3:GetBucketNotification'],
-          resources: ['*'],
-        }));
+      // We should treat buckets as unmanaged because it will not remove notifications added somewhere else
+      // Adding a feature flag to prevent it brings unexpected changes to customers
+      // Put it here because we still need to create the permission if it's unmanaged bucket.
+      if (cdk.FeatureFlags.of(this).isEnabled(cxapi.S3_KEEP_NOTIFICATION_IN_IMPORTED_BUCKET)) {
+        managed = false;
       }
+
+      // Add permissions for this bucket to the handler via a dedicated policy.
+      // Each bucket gets its own IAM policy so that when a notification is removed,
+      // the policy is deleted (not updated), and CloudFormation correctly orders
+      // the custom resource deletion before the policy deletion.
+      // See https://github.com/aws/aws-cdk/issues/37667
+      const handlerPolicy = this.addHandlerPermissions(handler, managed);
 
       this.resource = new cdk.CfnResource(this, 'Resource', {
         type: 'Custom::S3BucketNotifications',
         properties: {
           ServiceToken: handler.functionArn,
           BucketName: this.bucket.bucketName,
-          NotificationConfiguration: cdk.Lazy.any({ produce: () => this.renderNotificationConfiguration() }),
+          NotificationConfiguration: this.renderNotificationConfiguration(),
           Managed: managed,
+          SkipDestinationValidation: this.skipDestinationValidation,
         },
       });
+
+      // The custom resource must depend on its dedicated IAM policy so that
+      // on deletion, the custom resource is deleted first (handler still has
+      // permission), then the policy is deleted.
+      this.resource.node.addDependency(handlerPolicy);
 
       // Add dependency on bucket policy if it exists to avoid race conditions
       // S3 does not allow calling PutBucketPolicy and PutBucketNotification APIs at the same time
@@ -153,9 +188,42 @@ export class BucketNotifications extends Construct {
 
     return this.resource;
   }
+
+  /**
+   * Add scoped permissions for managing bucket notifications to the handler's role.
+   *
+   * Grants specific IAM permissions to the bucket ARN instead of using wildcard permissions.
+   * This implements the principle of least privilege by limiting the handler's access to only
+   * the buckets it needs to manage.
+   *
+   * @param handler The notifications resource handler
+   * @param managed Whether this is a managed (CDK-created) bucket
+   */
+  private addHandlerPermissions(handler: NotificationsResourceHandler, managed: boolean): iam.Policy {
+    const statements = [
+      new iam.PolicyStatement({
+        actions: ['s3:PutBucketNotification'],
+        resources: [this.bucket.bucketArn],
+      }),
+    ];
+
+    // Unmanaged (imported) buckets need GetBucketNotification to read existing configurations
+    // before merging with new notifications. Managed buckets don't need this since CDK
+    // controls their complete notification state from creation.
+    if (!managed) {
+      statements.push(new iam.PolicyStatement({
+        actions: ['s3:GetBucketNotification'],
+        resources: [this.bucket.bucketArn],
+      }));
+    }
+
+    const policy = new iam.Policy(this, 'HandlerPolicy', { statements });
+    handler.role.attachInlinePolicy(policy);
+    return policy;
+  }
 }
 
-function renderFilters(filters?: NotificationKeyFilter[]): Filter | undefined {
+function renderFilters(filters: NotificationKeyFilter[], scope: BucketNotifications): Filter | undefined {
   if (!filters || filters.length === 0) {
     return undefined;
   }
@@ -166,12 +234,12 @@ function renderFilters(filters?: NotificationKeyFilter[]): Filter | undefined {
 
   for (const rule of filters) {
     if (!rule.suffix && !rule.prefix) {
-      throw new Error('NotificationKeyFilter must specify `prefix` and/or `suffix`');
+      throw new ValidationError(lit`NotificationKeyFilterMustSpecifyPrefixOrSuffix`, 'NotificationKeyFilter must specify `prefix` and/or `suffix`', scope);
     }
 
     if (rule.suffix) {
       if (hasSuffix) {
-        throw new Error('Cannot specify more than one suffix rule in a filter.');
+        throw new ValidationError(lit`CannotSpecifyMultipleSuffixRules`, 'Cannot specify more than one suffix rule in a filter.', scope);
       }
       renderedRules.push({ Name: 'suffix', Value: rule.suffix });
       hasSuffix = true;
@@ -179,7 +247,7 @@ function renderFilters(filters?: NotificationKeyFilter[]): Filter | undefined {
 
     if (rule.prefix) {
       if (hasPrefix) {
-        throw new Error('Cannot specify more than one prefix rule in a filter.');
+        throw new ValidationError(lit`CannotSpecifyMultiplePrefixRules`, 'Cannot specify more than one prefix rule in a filter.', scope);
       }
       renderedRules.push({ Name: 'prefix', Value: rule.prefix });
       hasPrefix = true;
@@ -193,20 +261,11 @@ function renderFilters(filters?: NotificationKeyFilter[]): Filter | undefined {
   };
 }
 
-interface NotificationConfiguration {
-  EventBridgeConfiguration?: EventBridgeConfiguration;
-  LambdaFunctionConfigurations?: LambdaFunctionConfiguration[];
-  QueueConfigurations?: QueueConfiguration[];
-  TopicConfigurations?: TopicConfiguration[];
-}
-
 interface CommonConfiguration {
   Id?: string;
   Events: EventType[];
   Filter?: Filter;
 }
-
-interface EventBridgeConfiguration { }
 
 interface LambdaFunctionConfiguration extends CommonConfiguration {
   LambdaFunctionArn: string;

@@ -1,12 +1,21 @@
-import { Construct } from 'constructs';
+import type { Construct } from 'constructs';
 import * as ec2 from '../../../aws-ec2';
-import { Lazy, Resource, Stack } from '../../../core';
-import { BaseService, BaseServiceOptions, DeploymentControllerType, IBaseService, IService, LaunchType } from '../base/base-service';
-import { fromServiceAttributes, extractServiceNameFromArn } from '../base/from-service-attributes';
-import { NetworkMode, TaskDefinition } from '../base/task-definition';
-import { ICluster } from '../cluster';
-import { CfnService } from '../ecs.generated';
-import { PlacementConstraint, PlacementStrategy } from '../placement';
+import type * as elb from '../../../aws-elasticloadbalancing';
+import { Annotations, Resource, Stack, Token, ValidationError } from '../../../core';
+import type { IArrayBox } from '../../../core/lib/helpers-internal';
+import { Box } from '../../../core/lib/helpers-internal';
+import { addConstructMetadata, MethodMetadata } from '../../../core/lib/metadata-resource';
+import { lit } from '../../../core/lib/private/literal-string';
+import { propertyInjectable } from '../../../core/lib/prop-injectable';
+import { AvailabilityZoneRebalancing } from '../availability-zone-rebalancing';
+import type { BaseServiceOptions, IBaseService, IService } from '../base/base-service';
+import { BaseService, DeploymentControllerType, LaunchType } from '../base/base-service';
+import { extractServiceNameFromArn, fromServiceAttributes } from '../base/from-service-attributes';
+import type { TaskDefinition } from '../base/task-definition';
+import { NetworkMode } from '../base/task-definition';
+import type { ICluster } from '../cluster';
+import type { CfnService, ServiceReference } from '../ecs.generated';
+import type { PlacementConstraint, PlacementStrategy } from '../placement';
 
 /**
  * The properties for defining a service using the EC2 launch type.
@@ -82,6 +91,19 @@ export interface Ec2ServiceProps extends BaseServiceOptions {
    * @default false
    */
   readonly daemon?: boolean;
+
+  /**
+   * Whether to use Availability Zone rebalancing for the service.
+   *
+   * If enabled: `maxHealthyPercent` must be greater than 100; `daemon` must be false; if there
+   * are any `placementStrategies`, the first must be "spread across Availability Zones"; there
+   * must be no `placementConstraints` using `attribute:ecs.availability-zone`, and the
+   * service must not be a target of a Classic Load Balancer.
+   *
+   * @see https://docs.aws.amazon.com/AmazonECS/latest/developerguide/service-rebalancing.html
+   * @default AvailabilityZoneRebalancing.ENABLED
+   */
+  readonly availabilityZoneRebalancing?: AvailabilityZoneRebalancing;
 }
 
 /**
@@ -120,7 +142,12 @@ export interface Ec2ServiceAttributes {
  *
  * @resource AWS::ECS::Service
  */
+@propertyInjectable
 export class Ec2Service extends BaseService implements IEc2Service {
+  /**
+   * Uniquely identifies this class.
+   */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-ecs.Ec2Service';
 
   /**
    * Imports from the specified service ARN.
@@ -129,6 +156,12 @@ export class Ec2Service extends BaseService implements IEc2Service {
     class Import extends Resource implements IEc2Service {
       public readonly serviceArn = ec2ServiceArn;
       public readonly serviceName = extractServiceNameFromArn(this, ec2ServiceArn);
+
+      public get serviceRef(): ServiceReference {
+        return {
+          serviceArn: this.serviceArn,
+        };
+      }
     }
     return new Import(scope, id);
   }
@@ -140,33 +173,49 @@ export class Ec2Service extends BaseService implements IEc2Service {
     return fromServiceAttributes(scope, id, attrs);
   }
 
-  private constraints?: CfnService.PlacementConstraintProperty[];
-  private readonly strategies: CfnService.PlacementStrategyProperty[];
+  private readonly constraints: IArrayBox<CfnService.PlacementConstraintProperty>;
+  private readonly strategies: IArrayBox<CfnService.PlacementStrategyProperty>;
+  private constraintsInitialized = false;
+  private strategiesInitialized = false;
+
   private readonly daemon: boolean;
+  private readonly availabilityZoneRebalancingEnabled: boolean;
 
   /**
    * Constructs a new instance of the Ec2Service class.
    */
   constructor(scope: Construct, id: string, props: Ec2ServiceProps) {
     if (props.daemon && props.desiredCount !== undefined) {
-      throw new Error('Daemon mode launches one task on every instance. Don\'t supply desiredCount.');
+      throw new ValidationError(lit`DaemonModeLaunchesTask`, 'Daemon mode launches one task on every instance. Don\'t supply desiredCount.', scope);
     }
 
     if (props.daemon && props.maxHealthyPercent !== undefined && props.maxHealthyPercent !== 100) {
-      throw new Error('Maximum percent must be 100 for daemon mode.');
+      throw new ValidationError(lit`MustBeMaximumPercentDaemon`, 'Maximum percent must be 100 for daemon mode.', scope);
     }
 
     if (props.minHealthyPercent !== undefined && props.maxHealthyPercent !== undefined && props.minHealthyPercent >= props.maxHealthyPercent) {
-      throw new Error('Minimum healthy percent must be less than maximum healthy percent.');
+      throw new ValidationError(lit`MustBeMinimumHealthyPercent`, 'Minimum healthy percent must be less than maximum healthy percent.', scope);
     }
 
     if (!props.taskDefinition.isEc2Compatible) {
-      throw new Error('Supplied TaskDefinition is not configured for compatibility with EC2');
+      throw new ValidationError(lit`SuppliedTaskDefinitionConfiguredCompatibility`, 'Supplied TaskDefinition is not configured for compatibility with EC2', scope);
     }
 
     if (props.securityGroup !== undefined && props.securityGroups !== undefined) {
-      throw new Error('Only one of SecurityGroup or SecurityGroups can be populated.');
+      throw new ValidationError(lit`OneSecurityGroupSecurityGroups`, 'Only one of SecurityGroup or SecurityGroups can be populated.', scope);
     }
+
+    if (props.availabilityZoneRebalancing === AvailabilityZoneRebalancing.ENABLED) {
+      if (props.daemon) {
+        throw new ValidationError(lit`AvailabilityZoneRebalancing`, 'AvailabilityZoneRebalancing.ENABLED cannot be used with daemon mode', scope);
+      }
+      if (!Token.isUnresolved(props.maxHealthyPercent) && props.maxHealthyPercent === 100) {
+        throw new ValidationError(lit`AvailabilityZoneRebalancing`, 'AvailabilityZoneRebalancing.ENABLED requires maxHealthyPercent > 100', scope);
+      }
+    }
+
+    const constraints = Box.fromArray([], { omitEmpty: false });
+    const strategies = Box.fromArray([], { omitEmpty: false });
 
     super(scope, id, {
       ...props,
@@ -179,14 +228,19 @@ export class Ec2Service extends BaseService implements IEc2Service {
     {
       cluster: props.cluster.clusterName,
       taskDefinition: props.deploymentController?.type === DeploymentControllerType.EXTERNAL ? undefined : props.taskDefinition.taskDefinitionArn,
-      placementConstraints: Lazy.any({ produce: () => this.constraints }),
-      placementStrategies: Lazy.any({ produce: () => this.strategies }, { omitEmptyArray: true }),
+      placementConstraints: constraints.derive(c => this.constraintsInitialized ? c : undefined),
+      placementStrategies: strategies.derive(s => this.strategiesInitialized ? s : undefined),
       schedulingStrategy: props.daemon ? 'DAEMON' : 'REPLICA',
+      availabilityZoneRebalancing: props.availabilityZoneRebalancing,
     }, props.taskDefinition);
 
-    this.constraints = undefined;
-    this.strategies = [];
+    this.constraints = constraints;
+    this.strategies = strategies;
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
+
     this.daemon = props.daemon || false;
+    this.availabilityZoneRebalancingEnabled = props.availabilityZoneRebalancing === AvailabilityZoneRebalancing.ENABLED;
 
     let securityGroups;
     if (props.securityGroup !== undefined) {
@@ -206,32 +260,47 @@ export class Ec2Service extends BaseService implements IEc2Service {
       //
       // In that case, reference the same security groups but make sure new rules are
       // created in the current scope (i.e., this stack)
-      validateNoNetworkingProps(props);
+      validateNoNetworkingProps(scope, props);
       this.connections.addSecurityGroup(...securityGroupsInThisStack(this, props.cluster.connections.securityGroups));
     }
 
     if (props.placementConstraints) {
       this.addPlacementConstraints(...props.placementConstraints);
     }
-    this.addPlacementStrategies(...props.placementStrategies || []);
+    if (props.placementStrategies) {
+      this.addPlacementStrategies(...props.placementStrategies);
+    }
 
     this.node.addValidation({
       validate: () => !this.taskDefinition.defaultContainer ? ['A TaskDefinition must have at least one essential container'] : [],
     });
 
     this.node.addValidation({ validate: this.validateEc2Service.bind(this) });
+
+    if (props.minHealthyPercent === undefined && props.daemon) {
+      Annotations.of(this).addWarningV2('@aws-cdk/aws-ecs:minHealthyPercentDaemon', 'minHealthyPercent has not been configured so the default value of 0% for a daemon service is used. See https://github.com/aws/aws-cdk/issues/31705');
+    }
   }
 
   /**
    * Adds one or more placement strategies to use for tasks in the service. For more information, see
    * [Amazon ECS Task Placement Strategies](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-placement-strategies.html).
    */
-  public addPlacementStrategies(...strategies: PlacementStrategy[]) {
-    if (strategies.length > 0 && this.daemon) {
-      throw new Error("Can't configure placement strategies when daemon=true");
+  @MethodMetadata()
+  public addPlacementStrategies(...newStrategies: PlacementStrategy[]) {
+    if (newStrategies.length > 0 && this.daemon) {
+      throw new ValidationError(lit`CantConfigurePlacementStrategies`, "Can't configure placement strategies when daemon=true", this);
     }
 
-    for (const strategy of strategies) {
+    if (newStrategies.length > 0 && this.strategies.length === 0 && this.availabilityZoneRebalancingEnabled) {
+      const [placement] = newStrategies[0].toJson();
+      if (placement.type !== 'spread' || placement.field !== BuiltInAttributes.AVAILABILITY_ZONE) {
+        throw new ValidationError(lit`AvailabilityZoneBalancing`, `AvailabilityZoneBalancing.ENABLED requires that the first placement strategy, if any, be 'spread across "${BuiltInAttributes.AVAILABILITY_ZONE}"'`, this);
+      }
+    }
+
+    this.strategiesInitialized = true;
+    for (const strategy of newStrategies) {
       this.strategies.push(...strategy.toJson());
     }
   }
@@ -240,10 +309,20 @@ export class Ec2Service extends BaseService implements IEc2Service {
    * Adds one or more placement constraints to use for tasks in the service. For more information, see
    * [Amazon ECS Task Placement Constraints](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-placement-constraints.html).
    */
+  @MethodMetadata()
   public addPlacementConstraints(...constraints: PlacementConstraint[]) {
-    this.constraints = [];
+    this.constraintsInitialized = true;
+    this.constraints.set([]);
     for (const constraint of constraints) {
-      this.constraints.push(...constraint.toJson());
+      const items = constraint.toJson();
+      if (this.availabilityZoneRebalancingEnabled) {
+        for (const item of items) {
+          if (item.type === 'memberOf' && item.expression?.includes(BuiltInAttributes.AVAILABILITY_ZONE)) {
+            throw new ValidationError(lit`AvailabilityZoneBalancing`, `AvailabilityZoneBalancing.ENABLED disallows usage of "${BuiltInAttributes.AVAILABILITY_ZONE}"`, this);
+          }
+        }
+      }
+      this.constraints.push(...items);
     }
   }
 
@@ -257,17 +336,32 @@ export class Ec2Service extends BaseService implements IEc2Service {
     }
     return ret;
   }
+
+  /**
+   * Registers the service as a target of a Classic Load Balancer (CLB).
+   *
+   * Don't call this. Call `loadBalancer.addTarget()` instead.
+   *
+   * @override
+   */
+  @MethodMetadata()
+  public attachToClassicLB(loadBalancer: elb.LoadBalancer): void {
+    if (this.availabilityZoneRebalancingEnabled) {
+      throw new ValidationError(lit`AvailabilityZoneRebalancing`, 'AvailabilityZoneRebalancing.ENABLED disallows using the service as a target of a Classic Load Balancer', this);
+    }
+    super.attachToClassicLB(loadBalancer);
+  }
 }
 
 /**
  * Validate combinations of networking arguments.
  */
-function validateNoNetworkingProps(props: Ec2ServiceProps) {
+function validateNoNetworkingProps(scope: Construct, props: Ec2ServiceProps) {
   if (props.vpcSubnets !== undefined
     || props.securityGroup !== undefined
     || props.securityGroups !== undefined
     || props.assignPublicIp) {
-    throw new Error('vpcSubnets, securityGroup(s) and assignPublicIp can only be used in AwsVpc networking mode');
+    throw new ValidationError(lit`VpcSubnets`, 'vpcSubnets, securityGroup(s) and assignPublicIp can only be used in AwsVpc networking mode', scope);
   }
 }
 

@@ -1,6 +1,6 @@
-import { Construct } from 'constructs';
-import { CfnProject } from './codebuild.generated';
-import { IProject } from './project';
+import type { Construct } from 'constructs';
+import type { CfnProject } from './codebuild.generated';
+import type { IProject } from './project';
 import {
   BITBUCKET_SOURCE_TYPE,
   CODECOMMIT_SOURCE_TYPE,
@@ -8,9 +8,11 @@ import {
   GITHUB_SOURCE_TYPE,
   S3_SOURCE_TYPE,
 } from './source-types';
-import * as codecommit from '../../aws-codecommit';
+import type * as codecommit from '../../aws-codecommit';
 import * as iam from '../../aws-iam';
-import * as s3 from '../../aws-s3';
+import type * as s3 from '../../aws-s3';
+import { UnscopedValidationError } from '../../core';
+import { lit } from '../../core/lib/private/literal-string';
 
 /**
  * The type returned from `ISource#bind`.
@@ -22,7 +24,7 @@ export interface SourceConfig {
 
   /**
    * `AWS::CodeBuild::Project.SourceVersion`
-   * @see http://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-codebuild-project.html#cfn-codebuild-project-sourceversion
+   * @see https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-codebuild-project.html#cfn-codebuild-project-sourceversion
    * @default the latest version
    */
   readonly sourceVersion?: string;
@@ -179,6 +181,11 @@ export enum EventAction {
   PULL_REQUEST_UPDATED = 'PULL_REQUEST_UPDATED',
 
   /**
+   * Closing a Pull Request.
+   */
+  PULL_REQUEST_CLOSED = 'PULL_REQUEST_CLOSED',
+
+  /**
    * Merging a Pull Request.
    */
   PULL_REQUEST_MERGED = 'PULL_REQUEST_MERGED',
@@ -188,6 +195,24 @@ export enum EventAction {
    * Note that this event is only supported for GitHub and GitHubEnterprise sources.
    */
   PULL_REQUEST_REOPENED = 'PULL_REQUEST_REOPENED',
+
+  /**
+   * A release is created in the repository.
+   * Works with GitHub only.
+   */
+  RELEASED = 'RELEASED',
+
+  /**
+   * A prerelease is created in the repository.
+   * Works with GitHub only.
+   */
+  PRERELEASED = 'PRERELEASED',
+
+  /**
+   * A workflow job is queued in the repository.
+   * Works with GitHub only.
+   */
+  WORKFLOW_JOB_QUEUED = 'WORKFLOW_JOB_QUEUED',
 }
 
 enum WebhookFilterTypes {
@@ -196,6 +221,7 @@ enum WebhookFilterTypes {
   HEAD_REF = 'HEAD_REF',
   ACTOR_ACCOUNT_ID = 'ACTOR_ACCOUNT_ID',
   BASE_REF = 'BASE_REF',
+  REPOSITORY_NAME = 'REPOSITORY_NAME',
 }
 
 /**
@@ -222,7 +248,7 @@ export class FilterGroup {
 
   private constructor(actions: Set<EventAction>, filters: CfnProject.WebhookFilterProperty[]) {
     if (actions.size === 0) {
-      throw new Error('A filter group must contain at least one event action');
+      throw new UnscopedValidationError(lit`FilterGroupContainLeast`, 'A filter group must contain at least one event action');
     }
     this.actions = actions;
     this.filters = filters;
@@ -398,6 +424,30 @@ export class FilterGroup {
     return this.addFilePathFilter(pattern, false);
   }
 
+  /**
+   * Create a new FilterGroup with an added condition:
+   * the push that is the source of the event affect only a repository name that matches the given pattern.
+   * Note that you can only use this method if this Group contains only the `WORKFLOW_JOB_QUEUED` event action,
+   * only for GitHub sources and only for organization webhook.
+   *
+   * @param pattern a regular expression
+   */
+  public andRepositoryNameIs(pattern: string): FilterGroup {
+    return this.addRepositoryNameFilter(pattern, true);
+  }
+
+  /**
+   * Create a new FilterGroup with an added condition:
+   * the push that is the source of the event must not affect a repository name that matches the given pattern.
+   * Note that you can only use this method if this Group contains only the `WORKFLOW_JOB_QUEUED` event action,
+   * only for GitHub sources and only for organization webhook.
+   *
+   * @param pattern a regular expression
+   */
+  public andRepositoryNameIsNot(pattern: string): FilterGroup {
+    return this.addRepositoryNameFilter(pattern, false);
+  }
+
   /** @internal */
   public get _actions(): EventAction[] {
     return set2Array(this.actions);
@@ -443,13 +493,17 @@ export class FilterGroup {
 
   private addBaseRefFilter(refName: string, include: boolean) {
     if (this.actions.has(EventAction.PUSH)) {
-      throw new Error('A base reference condition cannot be added if a Group contains a PUSH event action');
+      throw new UnscopedValidationError(lit`BaseReferenceConditionCannot`, 'A base reference condition cannot be added if a Group contains a PUSH event action');
     }
     return this.addFilter(WebhookFilterTypes.BASE_REF, refName, include);
   }
 
   private addFilePathFilter(pattern: string, include: boolean): FilterGroup {
     return this.addFilter(WebhookFilterTypes.FILE_PATH, pattern, include);
+  }
+
+  private addRepositoryNameFilter(pattern: string, include: boolean): FilterGroup {
+    return this.addFilter(WebhookFilterTypes.REPOSITORY_NAME, pattern, include);
   }
 
   private addFilter(type: WebhookFilterTypes, pattern: string, include: boolean) {
@@ -536,11 +590,11 @@ abstract class ThirdPartyGitSource extends GitSource {
     const webhook = this.webhook ?? (anyFilterGroupsProvided ? true : undefined);
 
     if (!webhook && anyFilterGroupsProvided) {
-      throw new Error('`webhookFilters` cannot be used when `webhook` is `false`');
+      throw new UnscopedValidationError(lit`WebhookFiltersCannotWebhookFalse`, '`webhookFilters` cannot be used when `webhook` is `false`');
     }
 
     if (!webhook && this.webhookTriggersBatchBuild) {
-      throw new Error('`webhookTriggersBatchBuild` cannot be used when `webhook` is `false`');
+      throw new UnscopedValidationError(lit`WebhookTriggersBatchBuildCannot`, '`webhookTriggersBatchBuild` cannot be used when `webhook` is `false`');
     }
 
     const superConfig = super.bind(_scope, project);
@@ -695,7 +749,7 @@ abstract class CommonGithubSource extends ThirdPartyGitSource {
  */
 export interface GitHubSourceProps extends CommonGithubSourceProps {
   /**
-   * The GitHub account/user that owns the repo.
+   * The GitHub Organization/user that owns the repo.
    *
    * @example 'awslabs'
    */
@@ -705,8 +759,9 @@ export interface GitHubSourceProps extends CommonGithubSourceProps {
    * The name of the repo (without the username).
    *
    * @example 'aws-cdk'
+   * @default undefined will create an organization webhook
    */
-  readonly repo: string;
+  readonly repo?: string;
 }
 
 /**
@@ -714,11 +769,14 @@ export interface GitHubSourceProps extends CommonGithubSourceProps {
  */
 class GitHubSource extends CommonGithubSource {
   public readonly type = GITHUB_SOURCE_TYPE;
-  private readonly httpsCloneUrl: string;
-
+  private readonly sourceLocation: string;
+  private readonly organization?: string;
+  protected readonly webhookFilters: FilterGroup[];
   constructor(props: GitHubSourceProps) {
     super(props);
-    this.httpsCloneUrl = `https://github.com/${props.owner}/${props.repo}.git`;
+    this.organization = props.repo === undefined ? props.owner : undefined;
+    this.webhookFilters = props.webhookFilters ?? (this.organization ? [FilterGroup.inEventOf(EventAction.WORKFLOW_JOB_QUEUED)] : []);
+    this.sourceLocation = this.organization ? 'CODEBUILD_DEFAULT_WEBHOOK_SOURCE_LOCATION' : `https://github.com/${props.owner}/${props.repo}.git`;
   }
 
   public bind(_scope: Construct, project: IProject): SourceConfig {
@@ -726,10 +784,16 @@ class GitHubSource extends CommonGithubSource {
     return {
       sourceProperty: {
         ...superConfig.sourceProperty,
-        location: this.httpsCloneUrl,
+        location: this.sourceLocation,
       },
       sourceVersion: superConfig.sourceVersion,
-      buildTriggers: superConfig.buildTriggers,
+      buildTriggers: this.organization
+        ? {
+          ...superConfig.buildTriggers,
+          scopeConfiguration: {
+            name: this.organization,
+          },
+        } : superConfig.buildTriggers,
     };
   }
 }
@@ -767,11 +831,11 @@ class GitHubEnterpriseSource extends CommonGithubSource {
 
   public bind(_scope: Construct, _project: IProject): SourceConfig {
     if (this.hasCommitMessageFilterAndPrEvent()) {
-      throw new Error('COMMIT_MESSAGE filters cannot be used with GitHub Enterprise Server pull request events');
+      throw new UnscopedValidationError(lit`CommitMessageFiltersCannotUsed`, 'COMMIT_MESSAGE filters cannot be used with GitHub Enterprise Server pull request events');
     }
 
     if (this.hasFilePathFilterAndPrEvent()) {
-      throw new Error('FILE_PATH filters cannot be used with GitHub Enterprise Server pull request events');
+      throw new UnscopedValidationError(lit`FilePathFiltersCannotUsed`, 'FILE_PATH filters cannot be used with GitHub Enterprise Server pull request events');
     }
 
     const superConfig = super.bind(_scope, _project);
@@ -853,7 +917,7 @@ class BitBucketSource extends ThirdPartyGitSource {
   public bind(_scope: Construct, _project: IProject): SourceConfig {
     // BitBucket sources don't support the PULL_REQUEST_REOPENED event action
     if (this.anyWebhookFilterContainsPrReopenedEventAction()) {
-      throw new Error('BitBucket sources do not support the PULL_REQUEST_REOPENED webhook event action');
+      throw new UnscopedValidationError(lit`BitbucketSourcesSupportPullRequestReopened`, 'BitBucket sources do not support the PULL_REQUEST_REOPENED webhook event action');
     }
 
     const superConfig = super.bind(_scope, _project);

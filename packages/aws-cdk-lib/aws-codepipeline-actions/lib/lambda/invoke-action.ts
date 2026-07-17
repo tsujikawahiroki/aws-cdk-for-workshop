@@ -1,8 +1,9 @@
-import { Construct } from 'constructs';
+import type { Construct } from 'constructs';
 import * as codepipeline from '../../../aws-codepipeline';
 import * as iam from '../../../aws-iam';
-import * as lambda from '../../../aws-lambda';
-import { Stack } from '../../../core';
+import type * as lambda from '../../../aws-lambda';
+import { Stack, UnscopedValidationError } from '../../../core';
+import { lit } from '../../../core/lib/private/literal-string';
 import { Action } from '../action';
 
 /**
@@ -84,7 +85,7 @@ export class LambdaInvokeAction extends Action {
     this.props = props;
 
     if (props.userParameters && props.userParametersString) {
-      throw new Error('Only one of userParameters or userParametersString can be specified');
+      throw new UnscopedValidationError(lit`OneUserParametersUserParameters`, 'Only one of userParameters or userParametersString can be specified');
     }
   }
 
@@ -111,7 +112,7 @@ export class LambdaInvokeAction extends Action {
       resources: ['*'],
     }));
 
-    // allow pipeline to invoke this lambda functionn
+    // allow pipeline to invoke this lambda function
     this.props.lambda.grantInvoke(options.role);
 
     // allow the Role access to the Bucket, if there are any inputs/outputs

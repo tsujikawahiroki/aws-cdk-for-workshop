@@ -1,15 +1,19 @@
-import { Construct } from 'constructs';
+import type { Construct } from 'constructs';
 import { CfnDeploymentConfig } from './codedeploy.generated';
-import { MinimumHealthyHosts } from './host-health-config';
+import type { MinimumHealthyHosts, MinimumHealthyHostsPerZone } from './host-health-config';
 import { arnForDeploymentConfig, validateName } from './private/utils';
-import { TrafficRouting } from './traffic-routing-config';
-import { ArnFormat, Resource, Stack } from '../../core';
+import type { TrafficRouting } from './traffic-routing-config';
+import type { Duration } from '../../core';
+import { ArnFormat, Resource, Stack, ValidationError } from '../../core';
+import { memoizedGetter } from '../../core/lib/helpers-internal';
+import { lit } from '../../core/lib/private/literal-string';
+import type { DeploymentConfigReference, IDeploymentConfigRef, IDeploymentGroupRef } from '../../interfaces/generated/aws-codedeploy-interfaces.generated';
 
 /**
  * The base class for ServerDeploymentConfig, EcsDeploymentConfig,
  * and LambdaDeploymentConfig deployment configurations.
  */
-export interface IBaseDeploymentConfig {
+export interface IBaseDeploymentConfig extends IDeploymentConfigRef {
   /**
    * The physical, human-readable name of the Deployment Configuration.
    * @attribute
@@ -55,6 +59,43 @@ export enum ComputePlatform {
 }
 
 /**
+ * Configuration for CodeDeploy to deploy your application to one Availability Zone at a time within an AWS Region.
+ */
+export interface ZonalConfig {
+  /**
+   * The period of time that CodeDeploy must wait after completing a deployment to an Availability Zone.
+   *
+   * Accepted Values:
+   *  * 0
+   *  * Greater than or equal to 1
+   *
+   * @default - CodeDeploy starts deploying to the next Availability Zone immediately
+   */
+  readonly monitorDuration?: Duration;
+
+  /**
+   * The period of time that CodeDeploy must wait after completing a deployment to the first Availability Zone.
+   *
+   * Accepted Values:
+   *  * 0
+   *  * Greater than or equal to 1
+   *
+   * @default - the same value as `monitorDuration`
+   */
+  readonly firstZoneMonitorDuration?: Duration;
+
+  /**
+   * The number or percentage of instances that must remain available per Availability Zone during a deployment.
+   * This option works in conjunction with the `minimumHealthyHosts` option.
+   *
+   * @see https://docs.aws.amazon.com/codedeploy/latest/userguide/instances-health.html#minimum-healthy-hosts-az
+   *
+   * @default - 0 percent
+   */
+  readonly minimumHealthyHostsPerZone?: MinimumHealthyHostsPerZone;
+}
+
+/**
  * Complete base deployment config properties that are required to be supplied by the implementation
  * of the BaseDeploymentConfig class.
  */
@@ -78,6 +119,15 @@ export interface BaseDeploymentConfigProps extends BaseDeploymentConfigOptions {
    * @default None
    */
   readonly minimumHealthyHosts?: MinimumHealthyHosts;
+
+  /**
+   * Configure CodeDeploy to deploy your application to one Availability Zone at a time within an AWS Region.
+   *
+   * @see https://docs.aws.amazon.com/codedeploy/latest/userguide/deployment-configurations-create.html#zonal-config
+   *
+   * @default - deploy your application to a random selection of hosts across a Region
+   */
+  readonly zonalConfig?: ZonalConfig;
 }
 
 /**
@@ -97,29 +147,49 @@ export abstract class BaseDeploymentConfig extends Resource implements IBaseDepl
    */
   protected static fromDeploymentConfigName(scope: Construct, id: string, deploymentConfigName: string): IBaseDeploymentConfig {
     ignore(id);
-    const arn = Stack.of(scope).formatArn({
+    const stack = Stack.of(scope);
+    const arn = stack.formatArn({
       service: 'codedeploy',
       resource: 'deploymentconfig',
       resourceName: deploymentConfigName,
       arnFormat: ArnFormat.COLON_RESOURCE_NAME,
     });
-    return {
-      deploymentConfigName: deploymentConfigName,
-      deploymentConfigArn: arn,
-    };
+
+    class Import extends Resource implements IBaseDeploymentConfig {
+      public readonly deploymentConfigName = deploymentConfigName;
+      public readonly deploymentConfigArn = arn;
+      public get deploymentConfigRef(): DeploymentConfigReference {
+        return {
+          deploymentConfigName: this.deploymentConfigName,
+        };
+      }
+    }
+
+    return new Import(scope, `${id}:Imported`);
   }
 
-  /**
-   * The name of the deployment config
-   * @attribute
-   */
-  public readonly deploymentConfigName: string;
+  private readonly resource: CfnDeploymentConfig;
 
-  /**
-   * The arn of the deployment config
-   * @attribute
-   */
-  public readonly deploymentConfigArn: string;
+  @memoizedGetter
+  public get deploymentConfigName(): string {
+    return this.getResourceNameAttribute(this.resource.ref);
+  }
+
+  @memoizedGetter
+  public get deploymentConfigArn(): string {
+    return this.getResourceArnAttribute(arnForDeploymentConfig(this.resource.ref), {
+      service: 'codedeploy',
+      resource: 'deploymentconfig',
+      resourceName: this.physicalName,
+      arnFormat: ArnFormat.COLON_RESOURCE_NAME,
+    });
+  }
+
+  public get deploymentConfigRef(): DeploymentConfigReference {
+    return {
+      deploymentConfigName: this.deploymentConfigName,
+    };
+  }
 
   public constructor(scope: Construct, id: string, props?: BaseDeploymentConfigProps) {
     super(scope, id, {
@@ -128,31 +198,63 @@ export abstract class BaseDeploymentConfig extends Resource implements IBaseDepl
 
     // Traffic routing is not applicable to Server-based deployment configs
     if (props?.trafficRouting && (props?.computePlatform === undefined || props?.computePlatform === ComputePlatform.SERVER)) {
-      throw new Error('Traffic routing config must not be specified for a Server-base deployment configuration');
+      throw new ValidationError(lit`TrafficRoutingConfigSpecifiedServer`, 'Traffic routing config must not be specified for a Server-base deployment configuration', this);
     }
 
     // Minimum healthy hosts is only applicable to Server-based deployment configs
     if (props?.minimumHealthyHosts && props?.computePlatform && props?.computePlatform !== ComputePlatform.SERVER) {
-      throw new Error('Minimum healthy hosts config must only be specified for a Server-base deployment configuration');
+      throw new ValidationError(lit`MinimumHealthyHostsConfigSpecified`, 'Minimum healthy hosts config must only be specified for a Server-base deployment configuration', this);
     }
 
-    const resource = new CfnDeploymentConfig(this, 'Resource', {
+    if (props?.zonalConfig) {
+      if (props.zonalConfig.monitorDuration) {
+        this.validateMinimumDuration(props.zonalConfig.monitorDuration, 'monitorDuration');
+      }
+      if (props.zonalConfig.firstZoneMonitorDuration) {
+        this.validateMinimumDuration(props.zonalConfig.firstZoneMonitorDuration, 'firstZoneMonitorDuration');
+      }
+    }
+
+    this.resource = new CfnDeploymentConfig(this, 'Resource', {
       deploymentConfigName: this.physicalName,
       computePlatform: props?.computePlatform,
       trafficRoutingConfig: props?.trafficRouting?.bind(this),
       minimumHealthyHosts: props?.minimumHealthyHosts?._json,
-    });
-
-    this.deploymentConfigName = this.getResourceNameAttribute(resource.ref);
-    this.deploymentConfigArn = this.getResourceArnAttribute(arnForDeploymentConfig(resource.ref), {
-      service: 'codedeploy',
-      resource: 'deploymentconfig',
-      resourceName: this.physicalName,
-      arnFormat: ArnFormat.COLON_RESOURCE_NAME,
+      zonalConfig: props?.zonalConfig ? {
+        monitorDurationInSeconds: props.zonalConfig.monitorDuration?.toSeconds(),
+        firstZoneMonitorDurationInSeconds: props.zonalConfig.firstZoneMonitorDuration?.toSeconds(),
+        minimumHealthyHostsPerZone: props.zonalConfig.minimumHealthyHostsPerZone?._json,
+      } : undefined,
     });
 
     this.node.addValidation({ validate: () => validateName('Deployment config', this.physicalName) });
   }
+
+  private validateMinimumDuration(duration: Duration, name: string) {
+    const milliseconds = duration.toMilliseconds();
+    if (milliseconds > 0 && milliseconds < 1000) {
+      throw new ValidationError(lit`DurationTooShort`, `${name} must be greater than or equal to 1 second or be equal to 0, got ${milliseconds}ms`, this);
+    }
+  }
 }
 
 function ignore(_x: any) { return; }
+
+/**
+ * A DeploymentConfig that can specialize itself based on the target group it will be used for
+ *
+ * For example, this is used for AWS-managed deployment configs: these are already
+ * present in every region, but we need a region-specific ARN to reference them.
+ * Since we might use them in conjunction with cross-region DeploymentGroups, we
+ * need to specialize the account and region to the DeploymentGroup before
+ * using.
+ *
+ * A DeploymentGroup must call `bindEnvironment()` first if it detects this type,
+ * before reading the DeploymentConfig ARN.
+ */
+export interface IBindableDeploymentConfig extends IDeploymentConfigRef {
+  /**
+   * Bind the predefined deployment config to the environment of the given resource
+   */
+  bindEnvironment(deploymentGroup: IDeploymentGroupRef): IDeploymentConfigRef;
+}

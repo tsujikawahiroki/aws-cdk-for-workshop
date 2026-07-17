@@ -3,7 +3,7 @@ import { HttpApi, HttpMethod, HttpRoute, HttpRouteKey } from 'aws-cdk-lib/aws-ap
 import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
-import { App, Stack } from 'aws-cdk-lib';
+import { App, Stack, CfnOutput } from 'aws-cdk-lib';
 import { HttpUserPoolAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
 
 /*
@@ -13,7 +13,11 @@ import { HttpUserPoolAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2-authorizers
  * * `curl -s -o /dev/null -w "%{http_code}" -H 'Authorization: allow' <url>` should return 200
  */
 
-const app = new App();
+const app = new App({
+  postCliContext: {
+    '@aws-cdk/aws-lambda:useCdkManagedLogGroup': false,
+  },
+});
 const stack = new Stack(app, 'AuthorizerInteg');
 
 const userPool = new cognito.UserPool(stack, 'userpool');
@@ -29,7 +33,7 @@ const httpApiWithDefaultAuthorizer = new HttpApi(stack, 'MyHttpApiWithDefaultAut
 });
 
 const handler = new lambda.Function(stack, 'lambda', {
-  runtime: lambda.Runtime.NODEJS_18_X,
+  runtime: lambda.Runtime.NODEJS_20_X,
   handler: 'index.handler',
   code: lambda.AssetCode.fromAsset(path.join(__dirname, '..', 'integ.user-pool.handler'), { exclude: ['*.ts'] }),
 });
@@ -45,4 +49,11 @@ new HttpRoute(stack, 'Route', {
   httpApi: httpApiWithDefaultAuthorizer,
   routeKey: HttpRouteKey.with('/v1/mything/{proxy+}', HttpMethod.ANY),
   integration: new HttpLambdaIntegration('RootIntegration', handler),
+});
+
+new CfnOutput(stack, 'AuthorizerId', {
+  value: authorizer.authorizerId,
+});
+new CfnOutput(stack, 'AuthorizationType', {
+  value: authorizer.authorizationType,
 });

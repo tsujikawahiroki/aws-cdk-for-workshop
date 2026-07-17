@@ -1,5 +1,6 @@
 import { Secret } from 'aws-cdk-lib/aws-secretsmanager';
 import { App, CfnOutput, RemovalPolicy, Stack } from 'aws-cdk-lib';
+import { IntegTest } from '@aws-cdk/integ-tests-alpha';
 import { ProviderAttribute, UserPool, UserPoolIdentityProviderGoogle } from 'aws-cdk-lib/aws-cognito';
 
 /*
@@ -35,10 +36,8 @@ new UserPoolIdentityProviderGoogle(stack, 'google', {
     givenName: ProviderAttribute.GOOGLE_GIVEN_NAME,
     familyName: ProviderAttribute.GOOGLE_FAMILY_NAME,
     email: ProviderAttribute.GOOGLE_EMAIL,
+    emailVerified: ProviderAttribute.GOOGLE_EMAIL_VERIFIED,
     gender: ProviderAttribute.GOOGLE_GENDER,
-    custom: {
-      names: ProviderAttribute.GOOGLE_NAMES,
-    },
   },
 });
 
@@ -46,7 +45,7 @@ const client = userpool.addClient('client');
 
 const domain = userpool.addDomain('domain', {
   cognitoDomain: {
-    domainPrefix: 'nija-test-pool',
+    domainPrefix: 'nija-test-pool-google',
   },
 });
 
@@ -54,4 +53,8 @@ new CfnOutput(stack, 'SignInLink', {
   value: domain.signInUrl(client, {
     redirectUri: 'https://example.com',
   }),
+});
+
+new IntegTest(app, 'integ-user-pool-idp-google-test', {
+  testCases: [stack],
 });

@@ -1,3 +1,4 @@
+
 import * as fs from 'fs';
 import * as path from 'path';
 import { Template } from '../../assertions';
@@ -18,7 +19,7 @@ describe(synthetics.Code.fromInline, () => {
       };`);
 
     // THEN
-    expect(inline.bind(stack, 'index.handler', synthetics.RuntimeFamily.NODEJS).inlineCode).toEqual(`
+    expect(inline.bind(stack, 'index.handler', synthetics.RuntimeFamily.NODEJS, synthetics.Runtime.SYNTHETICS_NODEJS_PUPPETEER_9_1.name).inlineCode).toEqual(`
       exports.handler = async () => {
         console.log(\'hello world\');
       };`);
@@ -26,7 +27,7 @@ describe(synthetics.Code.fromInline, () => {
 
   test('fails if empty', () => {
     expect(() => synthetics.Code.fromInline(''))
-      .toThrowError('Canary inline code cannot be empty');
+      .toThrow('Canary inline code cannot be empty');
   });
 
   test('fails if handler is not "index.handler"', () => {
@@ -34,13 +35,13 @@ describe(synthetics.Code.fromInline, () => {
     const stack = new Stack(new App(), 'canaries');
 
     // THEN
-    expect(() => synthetics.Code.fromInline('code').bind(stack, 'canary.handler', synthetics.RuntimeFamily.NODEJS))
-      .toThrowError('The handler for inline code must be "index.handler" (got "canary.handler")');
+    expect(() => synthetics.Code.fromInline('code').bind(stack, 'canary.handler', synthetics.RuntimeFamily.NODEJS, synthetics.Runtime.SYNTHETICS_NODEJS_PUPPETEER_9_1.name))
+      .toThrow('The handler for inline code must be "index.handler" (got "canary.handler")');
   });
 });
 
 describe(synthetics.Code.fromAsset, () => {
-  test('fromAsset works for node runtimes', () => {
+  test('fromAsset works for node with node runtimes', () => {
     // GIVEN
     const stack = new Stack(new App(), 'canaries');
 
@@ -58,8 +59,38 @@ describe(synthetics.Code.fromAsset, () => {
     Template.fromStack(stack).hasResourceProperties('AWS::Synthetics::Canary', {
       Code: {
         Handler: 'canary.handler',
-        S3Bucket: stack.resolve(directoryAsset.bind(stack, 'canary.handler', synthetics.RuntimeFamily.NODEJS).s3Location?.bucketName),
-        S3Key: stack.resolve(directoryAsset.bind(stack, 'canary.handler', synthetics.RuntimeFamily.NODEJS).s3Location?.objectKey),
+        S3Bucket: stack.resolve(directoryAsset.bind(stack, 'canary.handler', synthetics.RuntimeFamily.NODEJS, synthetics.Runtime.SYNTHETICS_NODEJS_PUPPETEER_9_1.name).s3Location?.bucketName),
+        S3Key: stack.resolve(directoryAsset.bind(stack, 'canary.handler', synthetics.RuntimeFamily.NODEJS, synthetics.Runtime.SYNTHETICS_NODEJS_PUPPETEER_9_1.name).s3Location?.objectKey),
+      },
+    });
+  });
+
+  test.each(['canary.handler', 'playwright/canary.handler'])('fromAsset works for node with playwright runtimes', (handler) => {
+    // GIVEN
+    const stack = new Stack(new App(), 'canaries');
+
+    // WHEN
+    const directoryAsset = synthetics.Code.fromAsset(path.join(__dirname, 'canaries'));
+    new synthetics.Canary(stack, 'Canary', {
+      test: synthetics.Test.custom({
+        handler,
+        code: directoryAsset,
+      }),
+      runtime: synthetics.Runtime.SYNTHETICS_NODEJS_PLAYWRIGHT_1_0,
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::Synthetics::Canary', {
+      Code: {
+        Handler: handler,
+        S3Bucket: stack.resolve(
+          directoryAsset.bind(
+            stack, handler, synthetics.RuntimeFamily.NODEJS, synthetics.Runtime.SYNTHETICS_NODEJS_PLAYWRIGHT_1_0.name,
+          ).s3Location?.bucketName),
+        S3Key: stack.resolve(
+          directoryAsset.bind(
+            stack, handler, synthetics.RuntimeFamily.NODEJS, synthetics.Runtime.SYNTHETICS_NODEJS_PLAYWRIGHT_1_0.name,
+          ).s3Location?.objectKey),
       },
     });
   });
@@ -82,8 +113,8 @@ describe(synthetics.Code.fromAsset, () => {
     Template.fromStack(stack).hasResourceProperties('AWS::Synthetics::Canary', {
       Code: {
         Handler: 'canary.handler',
-        S3Bucket: stack.resolve(directoryAsset.bind(stack, 'canary.handler', synthetics.RuntimeFamily.PYTHON).s3Location?.bucketName),
-        S3Key: stack.resolve(directoryAsset.bind(stack, 'canary.handler', synthetics.RuntimeFamily.PYTHON).s3Location?.objectKey),
+        S3Bucket: stack.resolve(directoryAsset.bind(stack, 'canary.handler', synthetics.RuntimeFamily.PYTHON, synthetics.Runtime.SYNTHETICS_PYTHON_SELENIUM_4_1.name).s3Location?.bucketName),
+        S3Key: stack.resolve(directoryAsset.bind(stack, 'canary.handler', synthetics.RuntimeFamily.PYTHON, synthetics.Runtime.SYNTHETICS_PYTHON_SELENIUM_4_1.name).s3Location?.objectKey),
       },
     });
   });
@@ -143,7 +174,7 @@ describe(synthetics.Code.fromAsset, () => {
   test('fails if path does not exist', () => {
     const assetPath = path.join(__dirname, 'does-not-exist');
     expect(() => synthetics.Code.fromAsset(assetPath))
-      .toThrowError(`${assetPath} is not a valid path`);
+      .toThrow(`${assetPath} is not a valid path`);
   });
 
   test('fails if non-zip asset is used', () => {
@@ -152,18 +183,18 @@ describe(synthetics.Code.fromAsset, () => {
 
     // THEN
     const assetPath = path.join(__dirname, 'canaries', 'nodejs', 'node_modules', 'canary.js');
-    expect(() => synthetics.Code.fromAsset(assetPath).bind(stack, 'canary.handler', synthetics.RuntimeFamily.NODEJS))
-      .toThrowError(`Asset must be a .zip file or a directory (${assetPath})`);
+    expect(() => synthetics.Code.fromAsset(assetPath).bind(stack, 'canary.handler', synthetics.RuntimeFamily.NODEJS, synthetics.Runtime.SYNTHETICS_NODEJS_PUPPETEER_9_1.name))
+      .toThrow(`Asset must be a .zip file or a directory (${assetPath})`);
   });
 
-  test('fails if node runtime and "nodejs/node_modules" folder structure not used', () => {
+  test('fails if node with puppeteer runtime and "nodejs/node_modules" folder structure not used', () => {
     // GIVEN
     const stack = new Stack(new App(), 'canaries');
 
     // THEN
     const assetPath = path.join(__dirname, 'canaries', 'nodejs', 'node_modules');
-    expect(() => synthetics.Code.fromAsset(assetPath).bind(stack, 'canary.handler', synthetics.RuntimeFamily.NODEJS))
-      .toThrowError(`The canary resource requires that the handler is present at "nodejs/node_modules/canary.js" but not found at ${assetPath} (https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch_Synthetics_Canaries_WritingCanary_Nodejs.html)`);
+    expect(() => synthetics.Code.fromAsset(assetPath).bind(stack, 'canary.handler', synthetics.RuntimeFamily.NODEJS, synthetics.Runtime.SYNTHETICS_NODEJS_PUPPETEER_9_1.name))
+      .toThrow(`The canary resource requires that the handler is present at "nodejs/node_modules/canary.js" but not found at ${assetPath} (https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch_Synthetics_Canaries_WritingCanary_Nodejs.html)`);
   });
 
   test('fails if python runtime and "python" folder structure not used', () => {
@@ -172,8 +203,18 @@ describe(synthetics.Code.fromAsset, () => {
 
     // THEN
     const assetPath = path.join(__dirname, 'canaries', 'python');
-    expect(() => synthetics.Code.fromAsset(assetPath).bind(stack, 'canary.handler', synthetics.RuntimeFamily.PYTHON))
-      .toThrowError(`The canary resource requires that the handler is present at "python/canary.py" but not found at ${assetPath} (https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch_Synthetics_Canaries_WritingCanary_Python.html)`);
+    expect(() => synthetics.Code.fromAsset(assetPath).bind(stack, 'canary.handler', synthetics.RuntimeFamily.PYTHON, synthetics.Runtime.SYNTHETICS_PYTHON_SELENIUM_4_1.name))
+      .toThrow(`The canary resource requires that the handler is present at "python/canary.py" but not found at ${assetPath} (https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch_Synthetics_Canaries_WritingCanary_Python.html)`);
+  });
+
+  test('fails if node with playwright runtime and {filename}.js, {filename}.cjs, or {filename}.mjs file not found', () => {
+    // GIVEN
+    const stack = new Stack(new App(), 'canaries');
+
+    // THEN
+    const assetPath = path.join(__dirname, 'canaries', 'nodejs');
+    expect(() => synthetics.Code.fromAsset(assetPath).bind(stack, 'canary.handler', synthetics.RuntimeFamily.NODEJS, synthetics.Runtime.SYNTHETICS_NODEJS_PLAYWRIGHT_1_0.name))
+      .toThrow(`The canary resource requires that the handler is present at one of the following extensions: .cjs, .mjs, .js but not found at ${assetPath}`);
   });
 
   test('fails if handler is specified incorrectly', () => {
@@ -182,8 +223,48 @@ describe(synthetics.Code.fromAsset, () => {
 
     // THEN
     const assetPath = path.join(__dirname, 'canaries', 'nodejs', 'node_modules');
-    expect(() => synthetics.Code.fromAsset(assetPath).bind(stack, 'incorrect.handler', synthetics.RuntimeFamily.NODEJS))
-      .toThrowError(`The canary resource requires that the handler is present at "nodejs/node_modules/incorrect.js" but not found at ${assetPath} (https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch_Synthetics_Canaries_WritingCanary_Nodejs.html)`);
+    expect(() => synthetics.Code.fromAsset(assetPath).bind(stack, 'incorrect.handler', synthetics.RuntimeFamily.NODEJS, synthetics.Runtime.SYNTHETICS_NODEJS_PUPPETEER_9_1.name))
+      .toThrow(`The canary resource requires that the handler is present at "nodejs/node_modules/incorrect.js" but not found at ${assetPath} (https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch_Synthetics_Canaries_WritingCanary_Nodejs.html)`);
+  });
+
+  test('puppeteer runtime >= 11.0 allows JS files in root path', () => {
+    // GIVEN
+    const stack = new Stack(new App(), 'canaries');
+    const assetPath = path.join(__dirname, 'canaries', 'puppeteer');
+
+    // WHEN/THEN - should not throw for puppeteer 11.0+
+    expect(() => synthetics.Code.fromAsset(assetPath).bind(stack, 'canary.handler', synthetics.RuntimeFamily.NODEJS, synthetics.Runtime.SYNTHETICS_NODEJS_PUPPETEER_11_0.name))
+      .not.toThrow();
+  });
+
+  test('puppeteer runtime >= 11.0 also allows nodejs/node_modules structure', () => {
+    // GIVEN
+    const stack = new Stack(new App(), 'canaries');
+    const assetPath = path.join(__dirname, 'canaries');
+
+    // WHEN/THEN - should not throw for puppeteer 11.0+ with nodejs structure (has both root canary.js and nodejs/node_modules/canary.js)
+    expect(() => synthetics.Code.fromAsset(assetPath).bind(stack, 'canary.handler', synthetics.RuntimeFamily.NODEJS, synthetics.Runtime.SYNTHETICS_NODEJS_PUPPETEER_11_0.name))
+      .not.toThrow();
+  });
+
+  test('puppeteer runtime < 11.0 requires nodejs/node_modules structure', () => {
+    // GIVEN
+    const stack = new Stack(new App(), 'canaries');
+    const assetPath = path.join(__dirname, 'canaries');
+
+    // WHEN/THEN - should not throw for puppeteer < 11.0 since nodejs/node_modules/canary.js exists
+    expect(() => synthetics.Code.fromAsset(assetPath).bind(stack, 'canary.handler', synthetics.RuntimeFamily.NODEJS, synthetics.Runtime.SYNTHETICS_NODEJS_PUPPETEER_10_0.name))
+      .not.toThrow();
+  });
+
+  test('puppeteer runtime < 11.0 fails without nodejs/node_modules structure', () => {
+    // GIVEN
+    const stack = new Stack(new App(), 'canaries');
+    const assetPath = path.join(__dirname, 'canaries', 'puppeteer'); // Only has root-level files
+
+    // WHEN/THEN - should throw for puppeteer < 11.0 without nodejs/node_modules structure
+    expect(() => synthetics.Code.fromAsset(assetPath).bind(stack, 'canary.handler', synthetics.RuntimeFamily.NODEJS, synthetics.Runtime.SYNTHETICS_NODEJS_PUPPETEER_10_0.name))
+      .toThrow(`The canary resource requires that the handler is present at "nodejs/node_modules/canary.js" but not found at ${assetPath}`);
   });
 
   test('passes if bundling is specified', () => {
@@ -208,7 +289,29 @@ describe(synthetics.Code.fromAsset, () => {
     });
 
     // THEN
-    expect(() => code.bind(stack, 'canary.handler', synthetics.RuntimeFamily.NODEJS))
+    expect(() => code.bind(stack, 'canary.handler', synthetics.RuntimeFamily.NODEJS, synthetics.Runtime.SYNTHETICS_NODEJS_PUPPETEER_9_1.name))
+      .not.toThrow();
+  });
+
+  test('puppeteer 11.0+ with bundling allows root-level JS files', () => {
+    // GIVEN
+    const stack = new Stack(new App(), 'canaries');
+    const assetPath = path.join(__dirname, 'canaries', 'nodejs', 'node_modules');
+    const code = synthetics.Code.fromAsset(assetPath, {
+      bundling: {
+        image: DockerImage.fromRegistry('dummy'),
+        local: {
+          tryBundle(outputDir) {
+            // Create JS file in root for puppeteer 11.0+
+            fs.copyFileSync(path.join(assetPath, 'canary.js'), path.join(outputDir, 'canary.js'));
+            return true;
+          },
+        },
+      },
+    });
+
+    // THEN - should not throw for puppeteer 11.0+ with root-level file
+    expect(() => code.bind(stack, 'canary.handler', synthetics.RuntimeFamily.NODEJS, synthetics.Runtime.SYNTHETICS_NODEJS_PUPPETEER_11_0.name))
       .not.toThrow();
   });
 
@@ -231,8 +334,8 @@ describe(synthetics.Code.fromAsset, () => {
     });
 
     // THEN
-    expect(() => code.bind(stack, 'canary.handler', synthetics.RuntimeFamily.NODEJS))
-      .toThrowError(`The canary resource requires that the handler is present at "nodejs/node_modules/canary.js" but not found at ${assetPath} (https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch_Synthetics_Canaries_WritingCanary_Nodejs.html)`);
+    expect(() => code.bind(stack, 'canary.handler', synthetics.RuntimeFamily.NODEJS, synthetics.Runtime.SYNTHETICS_NODEJS_PUPPETEER_9_1.name))
+      .toThrow(`The canary resource requires that the handler is present at "nodejs/node_modules/canary.js" but not found at ${assetPath} (https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch_Synthetics_Canaries_WritingCanary_Nodejs.html)`);
   });
 });
 
@@ -244,7 +347,7 @@ describe(synthetics.Code.fromBucket, () => {
 
     // WHEN
     const code = synthetics.Code.fromBucket(bucket, 'code.js');
-    const codeConfig = code.bind(stack, 'code.handler', synthetics.RuntimeFamily.NODEJS);
+    const codeConfig = code.bind(stack, 'code.handler', synthetics.RuntimeFamily.NODEJS, synthetics.Runtime.SYNTHETICS_NODEJS_PUPPETEER_9_1.name);
 
     // THEN
     expect(codeConfig.s3Location?.bucketName).toEqual(bucket.bucketName);

@@ -489,7 +489,7 @@
      "S3Bucket": {
       "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
      },
-     "S3Key": "1be0bac6581864b510bdbf0a114f1d3429244758da7657cc365f73d371fe70ed.zip"
+     "S3Key": "55549d0bfa9628b306c349544b7d95017221e259e17875f3d38f2a3d2da5043f.zip"
     },
     "Timeout": 900,
     "MemorySize": 128,
@@ -500,7 +500,7 @@
       "Arn"
      ]
     },
-    "Runtime": "nodejs18.x",
+    "Runtime": "nodejs24.x",
     "Description": "Lambda function for removing all inbound/outbound rules from the VPC default security group"
    },
    "DependsOn": [
@@ -898,7 +898,7 @@
       "Fn::Join": [
        "",
        [
-        "#!/bin/bash\n# fingerprint: 8787022e9944cbeb\n(\n  set +e\n  /opt/aws/bin/cfn-init -v --region ",
+        "#!/bin/bash\n# fingerprint: dd55d0ee17423ecf\n(\n  set +e\n  /opt/aws/bin/cfn-init -v --region ",
         {
          "Ref": "AWS::Region"
         },
@@ -946,6 +946,25 @@
         "mode": "000644",
         "owner": "root",
         "group": "root"
+       }
+      },
+      "commands": {
+       "000": {
+        "command": [
+         "useradd",
+         "-u",
+         "1001",
+         "eguser"
+        ]
+       },
+       "001": {
+        "command": [
+         "usermod",
+         "-a",
+         "-G",
+         "eguser",
+         "eguser"
+        ]
        }
       }
      }

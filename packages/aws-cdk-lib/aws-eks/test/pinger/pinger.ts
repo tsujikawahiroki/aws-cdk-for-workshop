@@ -1,5 +1,5 @@
 import { Construct } from 'constructs';
-import * as ec2 from '../../../aws-ec2';
+import type * as ec2 from '../../../aws-ec2';
 import * as lambda from '../../../aws-lambda';
 import { CustomResource, Token, Duration } from '../../../core';
 import * as cr from '../../../custom-resources';
@@ -11,7 +11,6 @@ export interface PingerProps {
   readonly subnets?: ec2.ISubnet[];
 }
 export class Pinger extends Construct {
-
   private _resource: CustomResource;
 
   constructor(scope: Construct, id: string, props: PingerProps) {

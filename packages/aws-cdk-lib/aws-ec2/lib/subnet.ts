@@ -1,13 +1,13 @@
 import { CidrBlock, NetworkUtils } from './network-util';
-import { ISubnet } from './vpc';
-import { Token } from '../../core';
+import type { ISubnet } from './vpc';
+import { Token, UnscopedValidationError } from '../../core';
+import { lit } from '../../core/lib/private/literal-string';
 /**
  * Contains logic which chooses a set of subnets from a larger list, in conjunction
  * with SubnetSelection, to determine where to place AWS resources such as VPC
  * endpoints, EC2 instances, etc.
  */
 export abstract class SubnetFilter {
-
   /**
    * Chooses subnets by id.
    */
@@ -17,21 +17,21 @@ export abstract class SubnetFilter {
 
   /**
    * Chooses subnets which are in one of the given availability zones.
-  */
+   */
   public static availabilityZones(availabilityZones: string[]): SubnetFilter {
     return new AvailabilityZoneSubnetFilter(availabilityZones);
   }
 
   /**
    * Chooses subnets such that there is at most one per availability zone.
-  */
+   */
   public static onePerAz(): SubnetFilter {
     return new OnePerAZSubnetFilter();
   }
 
   /**
    * Chooses subnets which contain any of the specified IP addresses.
-  */
+   */
   public static containsIpAddresses(ipv4addrs: string[]): SubnetFilter {
     return new ContainsIpAddressesSubnetFilter(ipv4addrs);
   }
@@ -55,7 +55,7 @@ export abstract class SubnetFilter {
    * Executes the subnet filtering logic, returning a filtered set of subnets.
    */
   public selectSubnets(_subnets: ISubnet[]): ISubnet[] {
-    throw new Error('Cannot select subnets with an abstract SubnetFilter. `selectSubnets` needs to be implmemented.');
+    throw new UnscopedValidationError(lit`CannotSelectSubnetsAbstractSubnet`, 'Cannot select subnets with an abstract SubnetFilter. `selectSubnets` needs to be implmemented.');
   }
 }
 
@@ -63,7 +63,6 @@ export abstract class SubnetFilter {
  * Chooses subnets which are in one of the given availability zones.
  */
 class AvailabilityZoneSubnetFilter extends SubnetFilter {
-
   private readonly availabilityZones: string[];
 
   constructor(availabilityZones: string[]) {
@@ -83,7 +82,6 @@ class AvailabilityZoneSubnetFilter extends SubnetFilter {
  * Chooses subnets such that there is at most one per availability zone.
  */
 class OnePerAZSubnetFilter extends SubnetFilter {
-
   constructor() {
     super();
   }
@@ -109,7 +107,6 @@ class OnePerAZSubnetFilter extends SubnetFilter {
  * Chooses subnets which contain any of the specified IP addresses.
  */
 class ContainsIpAddressesSubnetFilter extends SubnetFilter {
-
   private readonly ipAddresses: string[];
 
   constructor(ipAddresses: string[]) {
@@ -140,7 +137,6 @@ class ContainsIpAddressesSubnetFilter extends SubnetFilter {
  * Chooses subnets based on the subnetId
  */
 class SubnetIdSubnetFilter extends SubnetFilter {
-
   private readonly subnetIds: string[];
 
   constructor(subnetIds: string[]) {
@@ -160,7 +156,7 @@ class SubnetIdSubnetFilter extends SubnetFilter {
  * Chooses subnets based on the CIDR Netmask
  */
 class CidrMaskSubnetFilter extends SubnetFilter {
-  private readonly mask: number
+  private readonly mask: number;
 
   constructor(mask: number) {
     super();
@@ -179,11 +175,10 @@ class CidrMaskSubnetFilter extends SubnetFilter {
 }
 
 /**
-  * Chooses subnets which are inside any of the specified CIDR range.
-  */
+ * Chooses subnets which are inside any of the specified CIDR range.
+ */
 class CidrRangesSubnetFilter extends SubnetFilter {
-
-  private readonly cidrRanges: string[]
+  private readonly cidrRanges: string[];
 
   constructor(cidrRanges: string[]) {
     super();

@@ -1,8 +1,9 @@
 import { Template } from '../../assertions';
 import { App, CfnOutput, Stack } from '../../core';
-import * as cxapi from '../../cx-api';
 import * as iam from '../lib';
 import { ServicePrincipal } from '../lib';
+
+const dummySamlMetadata = '<md:EntityDescriptor xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata" entityID="https://idp.example.com">' + 'x'.repeat(1000) + '</md:EntityDescriptor>';
 
 test('use of cross-stack role reference does not lead to URLSuffix being exported', () => {
   // GIVEN
@@ -155,7 +156,7 @@ test.each([
   const app = new App();
   const stack = new Stack(app, 'TestStack', { env: { region } });
   const provider = new iam.SamlProvider(stack, 'MyProvider', {
-    metadataDocument: iam.SamlMetadataDocument.fromXml('document'),
+    metadataDocument: iam.SamlMetadataDocument.fromXml(dummySamlMetadata),
   });
 
   // WHEN
@@ -364,28 +365,12 @@ describe('deprecated ServicePrincipal behavior', () => {
     const afSouthStack = new Stack(undefined, undefined, { env: { region: 'af-south-1' } });
     const principalName = iam.ServicePrincipal.servicePrincipalName('states.amazonaws.com');
 
-    expect(usEastStack.resolve(principalName)).toEqual('states.us-east-1.amazonaws.com');
-    expect(afSouthStack.resolve(principalName)).toEqual('states.af-south-1.amazonaws.com');
+    expect(usEastStack.resolve(principalName)).toEqual('states.amazonaws.com');
+    expect(afSouthStack.resolve(principalName)).toEqual('states.amazonaws.com');
   });
 
   test('Passing non-string as accountId parameter in AccountPrincipal constructor should throw error', () => {
-    expect(() => new iam.AccountPrincipal(1234)).toThrowError('accountId should be of type string');
-  });
-
-  test('ServicePrincipal in agnostic stack generates lookup table', () => {
-    // GIVEN
-    const stack = new Stack();
-
-    // WHEN
-    new iam.Role(stack, 'Role', {
-      assumedBy: new iam.ServicePrincipal('states.amazonaws.com'),
-    });
-
-    // THEN
-    const template = Template.fromStack(stack);
-    const mappings = template.findMappings('ServiceprincipalMap');
-    expect(mappings.ServiceprincipalMap['af-south-1']?.states).toEqual('states.af-south-1.amazonaws.com');
-    expect(mappings.ServiceprincipalMap['us-east-1']?.states).toEqual('states.us-east-1.amazonaws.com');
+    expect(() => new iam.AccountPrincipal(1234)).toThrow('accountId should be of type string');
   });
 });
 
@@ -396,9 +381,7 @@ describe('standardized Service Principal behavior', () => {
 
   let app: App;
   beforeEach(() => {
-    app = new App({
-      postCliContext: { [cxapi.IAM_STANDARDIZED_SERVICE_PRINCIPALS]: true },
-    });
+    app = new App();
   });
 
   test('no more regional service principals by default', () => {
@@ -415,7 +398,6 @@ describe('standardized Service Principal behavior', () => {
     const stack = new Stack(app, 'Stack', { env: { region: 'af-south-1' } });
     expect(stack.resolve(afSouth1StatesPrincipal.policyFragment).principalJson).toEqual({ Service: ['states.amazonaws.com'] });
   });
-
 });
 
 test('Can enable session tags', () => {
@@ -488,4 +470,52 @@ test('Can enable session tags with conditions (order of calls is irrelevant)', (
       ],
     },
   }, 2);
+});
+
+test('Can use custom service principle name to create servicePrinciple', () => {
+  // GIVEN
+  const stack = new Stack();
+
+  // WHEN
+  new iam.Role(stack, 'Role', {
+    assumedBy: iam.ServicePrincipal.fromStaticServicePrincipleName('elasticmapreduce.amazonaws.com.cn'),
+  });
+
+  // THEN
+  Template.fromStack(stack).hasResourceProperties('AWS::IAM::Role', {
+    AssumeRolePolicyDocument: {
+      Statement: [
+        {
+          Action: 'sts:AssumeRole',
+          Effect: 'Allow',
+          Principal: { Service: 'elasticmapreduce.amazonaws.com.cn' },
+        },
+      ],
+      Version: '2012-10-17',
+    },
+  });
+});
+
+test('ServicePrinciple construct by default reset the principle name to the default format', () => {
+  // GIVEN
+  const stack = new Stack();
+
+  // WHEN
+  new iam.Role(stack, 'Role', {
+    assumedBy: new iam.ServicePrincipal('elasticmapreduce.amazonaws.com.cn'),
+  });
+
+  // THEN
+  Template.fromStack(stack).hasResourceProperties('AWS::IAM::Role', {
+    AssumeRolePolicyDocument: {
+      Statement: [
+        {
+          Action: 'sts:AssumeRole',
+          Effect: 'Allow',
+          Principal: { Service: 'elasticmapreduce.amazonaws.com' },
+        },
+      ],
+      Version: '2012-10-17',
+    },
+  });
 });

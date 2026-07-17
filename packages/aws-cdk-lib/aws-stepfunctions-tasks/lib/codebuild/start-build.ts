@@ -1,18 +1,15 @@
-import { Construct } from 'constructs';
+import type { Construct } from 'constructs';
 import * as codebuild from '../../../aws-codebuild';
 import * as iam from '../../../aws-iam';
 import * as sfn from '../../../aws-stepfunctions';
 import * as cdk from '../../../core';
 import { integrationResourceArn, validatePatternSupported } from '../private/task-utils';
 
-/**
- * Properties for CodeBuildStartBuild
- */
-export interface CodeBuildStartBuildProps extends sfn.TaskStateBaseProps {
+interface CodeBuildStartBuildOptions {
   /**
    * CodeBuild project to start
    */
-  readonly project: codebuild.IProject;
+  readonly project: codebuild.IProjectRef;
   /**
    * A set of environment variables to be used for this build only.
    *
@@ -22,11 +19,40 @@ export interface CodeBuildStartBuildProps extends sfn.TaskStateBaseProps {
 }
 
 /**
+ * Properties for CodeBuildStartBuild using JSONPath
+ */
+export interface CodeBuildStartBuildJsonPathProps extends sfn.TaskStateJsonPathBaseProps, CodeBuildStartBuildOptions {}
+
+/**
+ * Properties for CodeBuildStartBuild using JSONata
+ */
+export interface CodeBuildStartBuildJsonataProps extends sfn.TaskStateJsonataBaseProps, CodeBuildStartBuildOptions {}
+
+/**
+ * Properties for CodeBuildStartBuild
+ */
+export interface CodeBuildStartBuildProps extends sfn.TaskStateBaseProps, CodeBuildStartBuildOptions {}
+
+/**
  * Start a CodeBuild Build as a task
  *
  * @see https://docs.aws.amazon.com/step-functions/latest/dg/connect-codebuild.html
  */
 export class CodeBuildStartBuild extends sfn.TaskStateBase {
+  /**
+   * Start a CodeBuild Build as a task using JSONPath
+   */
+  public static jsonPath(scope: Construct, id: string, props: CodeBuildStartBuildJsonPathProps) {
+    return new CodeBuildStartBuild(scope, id, props);
+  }
+
+  /**
+   * Start a CodeBuild Build as a task using JSONata
+   */
+  public static jsonata(scope: Construct, id: string, props: CodeBuildStartBuildJsonataProps) {
+    return new CodeBuildStartBuild(scope, id, { ...props, queryLanguage: sfn.QueryLanguage.JSONATA });
+  }
+
   private static readonly SUPPORTED_INTEGRATION_PATTERNS: sfn.IntegrationPattern[] = [
     sfn.IntegrationPattern.REQUEST_RESPONSE,
     sfn.IntegrationPattern.RUN_JOB,
@@ -47,7 +73,7 @@ export class CodeBuildStartBuild extends sfn.TaskStateBase {
       metricPrefixSingular: 'CodeBuildProject',
       metricPrefixPlural: 'CodeBuildProjects',
       metricDimensions: {
-        ProjectArn: this.props.project.projectArn,
+        ProjectArn: this.props.project.projectRef.projectArn,
       },
     };
 
@@ -57,7 +83,7 @@ export class CodeBuildStartBuild extends sfn.TaskStateBase {
   private configurePolicyStatements(): iam.PolicyStatement[] {
     let policyStatements = [
       new iam.PolicyStatement({
-        resources: [this.props.project.projectArn],
+        resources: [this.props.project.projectRef.projectArn],
         actions: [
           'codebuild:StartBuild',
           'codebuild:StopBuild',
@@ -90,15 +116,16 @@ export class CodeBuildStartBuild extends sfn.TaskStateBase {
   /**
    * @internal
    */
-  protected _renderTask(): any {
+  protected _renderTask(topLevelQueryLanguage?: sfn.QueryLanguage): any {
+    const queryLanguage = sfn._getActualQueryLanguage(topLevelQueryLanguage, this.props.queryLanguage);
     return {
       Resource: integrationResourceArn('codebuild', 'startBuild', this.integrationPattern),
-      Parameters: sfn.FieldUtils.renderObject({
-        ProjectName: this.props.project.projectName,
+      ...this._renderParametersOrArguments({
+        ProjectName: this.props.project.projectRef.projectName,
         EnvironmentVariablesOverride: this.props.environmentVariablesOverride
           ? this.serializeEnvVariables(this.props.environmentVariablesOverride)
           : undefined,
-      }),
+      }, queryLanguage),
     };
   }
 

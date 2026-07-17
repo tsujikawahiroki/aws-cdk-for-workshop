@@ -1,6 +1,6 @@
 import { Key } from 'aws-cdk-lib/aws-kms';
 import { Bucket, BucketEncryption } from 'aws-cdk-lib/aws-s3';
-import { StateMachine } from 'aws-cdk-lib/aws-stepfunctions';
+import { DefinitionBody, StateMachine } from 'aws-cdk-lib/aws-stepfunctions';
 import { App, CfnOutput, RemovalPolicy, Stack } from 'aws-cdk-lib';
 import { S3Location, SageMakerCreateTrainingJob, InputMode } from 'aws-cdk-lib/aws-stepfunctions-tasks';
 
@@ -33,7 +33,7 @@ const trainingData = new Bucket(stack, 'TrainingData', {
 });
 
 const sm = new StateMachine(stack, 'StateMachine', {
-  definition: new SageMakerCreateTrainingJob(stack, 'TrainTask', {
+  definitionBody: DefinitionBody.fromChainable(new SageMakerCreateTrainingJob(stack, 'TrainTask', {
     algorithmSpecification: {
       algorithmName: 'BlazingText',
       trainingInputMode: InputMode.FAST_FILE,
@@ -48,9 +48,24 @@ const sm = new StateMachine(stack, 'StateMachine', {
     }],
     outputDataConfig: { s3OutputLocation: S3Location.fromBucket(trainingData, 'result/') },
     trainingJobName: 'mytrainingjob',
-  }),
+  })),
+});
+
+const smWithoutInputData = new StateMachine(stack, 'StateMachineAnother', {
+  definitionBody: DefinitionBody.fromChainable(new SageMakerCreateTrainingJob(stack, 'TrainTaskAnother', {
+    algorithmSpecification: {
+      algorithmName: 'BlazingText',
+      trainingInputMode: InputMode.FAST_FILE,
+    },
+    outputDataConfig: { s3OutputLocation: S3Location.fromBucket(trainingData, 'result/') },
+    trainingJobName: 'mytrainingjob',
+  })),
 });
 
 new CfnOutput(stack, 'stateMachineArn', {
   value: sm.stateMachineArn,
+});
+
+new CfnOutput(stack, 'stateMachineArn2', {
+  value: smWithoutInputData.stateMachineArn,
 });

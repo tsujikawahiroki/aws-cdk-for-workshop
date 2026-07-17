@@ -1,12 +1,16 @@
+import * as cdk from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 import * as iam from 'aws-cdk-lib/aws-iam';
-import * as cdk from 'aws-cdk-lib';
 import * as iotevents from '../lib';
 
 let stack: cdk.Stack;
 let input: iotevents.IInput;
 beforeEach(() => {
   stack = new cdk.Stack();
+  cdk.Validations.of(stack).acknowledge({
+    id: 'CloudFormation-Validate::E3710',
+    reason: 'Service is shutdown',
+  });
   input = iotevents.Input.fromInputName(stack, 'MyInput', 'test-input');
 });
 
@@ -237,7 +241,7 @@ test('can set an action to multiple detector models', () => {
     }),
   });
 
-  // THEN creates two detector model resouces and two iam policy resources
+  // THEN creates two detector model resources and two iam policy resources
   Template.fromStack(stack).resourceCountIs('AWS::IoTEvents::DetectorModel', 2);
   Template.fromStack(stack).resourceCountIs('AWS::IAM::Policy', 2);
 
@@ -469,7 +473,7 @@ test('cannot create without event', () => {
   }).toThrow('Detector Model must have at least one Input with a condition');
 });
 
-test('cannot create transitions that transit to duprecated target state', () => {
+test('cannot create transitions that transit to deprecated target state', () => {
   const firstState = new iotevents.State({
     stateName: 'firstState',
     onEnter: [{

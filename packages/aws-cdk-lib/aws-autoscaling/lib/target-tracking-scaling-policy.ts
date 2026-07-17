@@ -1,8 +1,10 @@
 import { Construct } from 'constructs';
-import { IAutoScalingGroup } from './auto-scaling-group';
 import { CfnScalingPolicy } from './autoscaling.generated';
-import * as cloudwatch from '../../aws-cloudwatch';
-import { Duration } from '../../core';
+import type * as cloudwatch from '../../aws-cloudwatch';
+import type { Duration } from '../../core';
+import { ValidationError } from '../../core';
+import { lit } from '../../core/lib/private/literal-string';
+import type { IAutoScalingGroupRef } from '../../interfaces/generated/aws-autoscaling-interfaces.generated';
 
 /**
  * Base interface for target tracking props
@@ -95,7 +97,7 @@ export interface TargetTrackingScalingPolicyProps extends BasicTargetTrackingSca
   /*
    * The auto scaling group
    */
-  readonly autoScalingGroup: IAutoScalingGroup;
+  readonly autoScalingGroup: IAutoScalingGroupRef;
 }
 
 export class TargetTrackingScalingPolicy extends Construct {
@@ -110,23 +112,23 @@ export class TargetTrackingScalingPolicy extends Construct {
   private resource: CfnScalingPolicy;
 
   constructor(scope: Construct, id: string, props: TargetTrackingScalingPolicyProps) {
+    super(scope, id);
+
     if ((props.customMetric === undefined) === (props.predefinedMetric === undefined)) {
-      throw new Error('Exactly one of \'customMetric\' or \'predefinedMetric\' must be specified.');
+      throw new ValidationError(lit`ExactlyOneCustomMetricPredefined`, 'Exactly one of \'customMetric\' or \'predefinedMetric\' must be specified.', this);
     }
 
     if (props.predefinedMetric === PredefinedMetric.ALB_REQUEST_COUNT_PER_TARGET && !props.resourceLabel) {
-      throw new Error('When tracking the ALBRequestCountPerTarget metric, the ALB identifier must be supplied in resourceLabel');
+      throw new ValidationError(lit`TrackingRequestCountPerTarget`, 'When tracking the ALBRequestCountPerTarget metric, the ALB identifier must be supplied in resourceLabel', this);
     }
 
     if (props.customMetric && !props.customMetric.toMetricConfig().metricStat) {
-      throw new Error('Only direct metrics are supported for Target Tracking. Use Step Scaling or supply a Metric object.');
+      throw new ValidationError(lit`DirectMetricsSupportedTargetTracking`, 'Only direct metrics are supported for Target Tracking. Use Step Scaling or supply a Metric object.', this);
     }
-
-    super(scope, id);
 
     this.resource = new CfnScalingPolicy(this, 'Resource', {
       policyType: 'TargetTrackingScaling',
-      autoScalingGroupName: props.autoScalingGroup.autoScalingGroupName,
+      autoScalingGroupName: props.autoScalingGroup.autoScalingGroupRef.autoScalingGroupName,
       cooldown: props.cooldown && props.cooldown.toSeconds().toString(),
       estimatedInstanceWarmup: props.estimatedInstanceWarmup && props.estimatedInstanceWarmup.toSeconds(),
       targetTrackingConfiguration: {

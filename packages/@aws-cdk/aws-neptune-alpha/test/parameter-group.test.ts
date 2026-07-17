@@ -1,9 +1,8 @@
-import { Template } from 'aws-cdk-lib/assertions';
 import { Stack } from 'aws-cdk-lib';
+import { Template } from 'aws-cdk-lib/assertions';
 import { ClusterParameterGroup, ParameterGroup, ParameterGroupFamily } from '../lib';
 
 describe('ClusterParameterGroup', () => {
-
   test('create a cluster parameter group', () => {
     // GIVEN
     const stack = new Stack();

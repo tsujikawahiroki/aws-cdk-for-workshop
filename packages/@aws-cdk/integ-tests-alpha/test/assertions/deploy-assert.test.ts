@@ -1,11 +1,11 @@
-import { Match, Template } from 'aws-cdk-lib/assertions';
 import { App, CustomResource, Stack } from 'aws-cdk-lib';
+import { Match, Template } from 'aws-cdk-lib/assertions';
+import { ApplicationLogLevel } from 'aws-cdk-lib/aws-lambda';
 import { ActualResult, ExpectedResult, InvocationType, LogType } from '../../lib/assertions';
 import { DeployAssert } from '../../lib/assertions/private/deploy-assert';
 import { IntegTest } from '../../lib/test-case';
 
 describe('DeployAssert', () => {
-
   test('of', () => {
     const app = new App();
     const stack = new Stack(app, 'TestStack');
@@ -222,7 +222,7 @@ describe('DeployAssert', () => {
       const deplossert = new DeployAssert(app);
       deplossert.awsApiCall('@aws-sdk/client-ssm', 'GetParameterCommand').expect(
         ExpectedResult.objectLike({}),
-      );;
+      );
 
       // THEN
       const template = Template.fromStack(deplossert.scope);
@@ -379,7 +379,7 @@ describe('DeployAssert', () => {
 
 describe('User provided assertions stack', () => {
   test('Same stack for integration test and assertions', () => {
-    //GIVEN
+    // GIVEN
     const app = new App();
     const stack = new Stack(app, 'TestStack');
 
@@ -398,7 +398,7 @@ describe('User provided assertions stack', () => {
   });
 
   test('Different stack for integration test and assertions', () => {
-    //GIVEN
+    // GIVEN
     const app = new App();
     const integStack = new Stack(app, 'TestStack');
     const assertionStack = new Stack(app, 'AssertionsStack');
@@ -419,7 +419,7 @@ describe('User provided assertions stack', () => {
   });
 
   test('not throw when environment matches', () => {
-    //GIVEN
+    // GIVEN
     const app = new App();
     const env = { region: 'us-west-2' };
     const integStack = new Stack(app, 'IntegStack', { env: env });
@@ -436,5 +436,50 @@ describe('User provided assertions stack', () => {
       // THEN
       app.synth();
     }).not.toThrow(/only supported for stacks deployed to the same environment/);
+  });
+
+  test('providerLogLevel is passed through to the provider', () => {
+    // GIVEN
+    const app = new App();
+    const stack = new Stack(app, 'TestStack');
+    const integ = new IntegTest(app, 'integ', {
+      testCases: [stack],
+      providerLogLevel: ApplicationLogLevel.INFO,
+    });
+
+    // WHEN
+    integ.assertions.awsApiCall('MyService', 'MyApi');
+
+    // THEN
+    const assertStack = (integ.assertions as DeployAssert).scope;
+    const template = Template.fromStack(assertStack);
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      LoggingConfig: {
+        LogFormat: 'JSON',
+        ApplicationLogLevel: 'INFO',
+      },
+    });
+  });
+
+  test('providerLogLevel is passed through to waiter state machine providers', () => {
+    // GIVEN
+    const app = new App();
+    const stack = new Stack(app, 'TestStack');
+    const integ = new IntegTest(app, 'integ', {
+      testCases: [stack],
+      providerLogLevel: ApplicationLogLevel.INFO,
+    });
+
+    // WHEN
+    integ.assertions.awsApiCall('MyService', 'MyApi').waitForAssertions();
+
+    // THEN
+    const assertStack = (integ.assertions as DeployAssert).scope;
+    const template = Template.fromStack(assertStack);
+    // All Lambda functions (main + isComplete + onTimeout) should have the log level
+    const lambdas = template.findResources('AWS::Lambda::Function');
+    for (const [, resource] of Object.entries(lambdas)) {
+      expect((resource as any).Properties.LoggingConfig.ApplicationLogLevel).toEqual('INFO');
+    }
   });
 });

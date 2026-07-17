@@ -2,7 +2,9 @@ import { DropEmptyObjectAtTheEndOfAnArray } from './drop-empty-object-at-the-end
 import { accountIfDifferentFromStack, regionIfDifferentFromStack } from './env-tokens';
 import { dispatchMetric, metricKey } from './metric-util';
 import { dropUndefined } from './object';
-import { IMetric } from '../metric-types';
+import { UnscopedValidationError } from '../../../core';
+import { lit } from '../../../core/lib/private/literal-string';
+import type { IMetric, MetricExpressionConfig } from '../metric-types';
 
 /**
  * Return the JSON structure which represents these metrics in a graph.
@@ -28,6 +30,20 @@ export function allMetricsGraphJson(left: IMetric[], right: IMetric[]): any[] {
   return mset.entries.map(entry => new DropEmptyObjectAtTheEndOfAnArray(metricGraphJson(entry.metric, entry.tag, entry.id)));
 }
 
+// The options for both search expression and math expression are same. Thus, can be handled by a common function.
+const applyExpressionOptions = (options: any, exprConfig: MetricExpressionConfig) => {
+  options.expression = exprConfig.expression;
+  if (exprConfig.searchAccount) {
+    options.accountId = accountIfDifferentFromStack(exprConfig.searchAccount);
+  }
+  if (exprConfig.searchRegion) {
+    options.region = regionIfDifferentFromStack(exprConfig.searchRegion);
+  }
+  if (exprConfig.period && exprConfig.period !== 300) {
+    options.period = exprConfig.period;
+  }
+};
+
 function metricGraphJson(metric: IMetric, yAxis?: string, id?: string) {
   const config = metric.toMetricConfig();
 
@@ -47,17 +63,25 @@ function metricGraphJson(metric: IMetric, yAxis?: string, id?: string) {
       }
 
       // Metric attributes that are rendered to graph options
-      if (stat.account) { options.accountId = accountIfDifferentFromStack(stat.account); }
-      if (stat.region) { options.region = regionIfDifferentFromStack(stat.region); }
+      if (stat.accountOverride) {
+        options.accountId = stat.accountOverride;
+      } else if (stat.account) {
+        options.accountId = accountIfDifferentFromStack(stat.account);
+      }
+      if (stat.regionOverride) {
+        options.region = stat.regionOverride;
+      } else if (stat.region) {
+        options.region = regionIfDifferentFromStack(stat.region);
+      }
       if (stat.period && stat.period.toSeconds() !== 300) { options.period = stat.period.toSeconds(); }
       if (stat.statistic && stat.statistic !== 'Average') { options.stat = stat.statistic; }
     },
 
-    withExpression(expr) {
-      options.expression = expr.expression;
-      if (expr.searchAccount) { options.accountId = accountIfDifferentFromStack(expr.searchAccount); }
-      if (expr.searchRegion) { options.region = regionIfDifferentFromStack(expr.searchRegion); }
-      if (expr.period && expr.period !== 300) { options.period = expr.period; }
+    withMathExpression(mathExpr) {
+      applyExpressionOptions(options, mathExpr);
+    },
+    withSearchExpression(searchExpr) {
+      applyExpressionOptions(options, searchExpr);
     },
   });
 
@@ -105,6 +129,14 @@ export interface MetricEntry<A> {
    * ID for this metric object
    */
   id?: string;
+
+  /**
+   * The level we discovered this metric at.
+   *
+   * Top-level has 1, metrics used by a math expression at level N will have
+   * N+1.
+   */
+  level: number;
 }
 
 /**
@@ -122,7 +154,7 @@ export class MetricSet<A> {
    */
   public addTopLevel(tag: A, ...metrics: IMetric[]) {
     for (const metric of metrics) {
-      this.addOne(metric, tag);
+      this.addOne(metric, 1, tag);
     }
   }
 
@@ -142,7 +174,7 @@ export class MetricSet<A> {
    * one (and the new ones "renderingPropertieS" will be honored instead of the old
    * one's).
    */
-  private addOne(metric: IMetric, tag?: A, id?: string) {
+  private addOne(metric: IMetric, level: number, tag?: A, id?: string) {
     const key = metricKey(metric);
 
     let existingEntry: MetricEntry<A> | undefined;
@@ -151,7 +183,7 @@ export class MetricSet<A> {
     if (id) {
       existingEntry = this.metricById.get(id);
       if (existingEntry && metricKey(existingEntry.metric) !== key) {
-        throw new Error(`Cannot have two different metrics share the same id ('${id}') in one Alarm or Graph. Rename one of them.`);
+        throw new UnscopedValidationError(lit`CannotShareSameIdForDifferentMetrics`, `Cannot have two different metrics share the same id ('${id}') in one Alarm or Graph. Rename one of them.`);
       }
     }
 
@@ -170,7 +202,7 @@ export class MetricSet<A> {
     if (existingEntry) {
       entry = existingEntry;
     } else {
-      entry = { metric };
+      entry = { metric, level };
       this.metrics.push(entry);
       this.metricByKey.set(key, entry);
     }
@@ -190,7 +222,7 @@ export class MetricSet<A> {
     const conf = metric.toMetricConfig();
     if (conf.mathExpression) {
       for (const [subId, subMetric] of Object.entries(conf.mathExpression.usingMetrics)) {
-        this.addOne(subMetric, undefined, subId);
+        this.addOne(subMetric, level + 1, undefined, subId);
       }
     }
   }

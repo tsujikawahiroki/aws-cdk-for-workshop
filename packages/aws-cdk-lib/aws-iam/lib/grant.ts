@@ -1,7 +1,15 @@
-import { Dependable, IConstruct, IDependable } from 'constructs';
+import type { IConstruct, IDependable } from 'constructs';
+import { Dependable } from 'constructs';
 import { PolicyStatement } from './policy-statement';
-import { IGrantable, IPrincipal } from './principals';
+import type { IGrantable, IPrincipal } from './principals';
+import type { IEnvironmentAware } from '../../core';
+import { CfnResource } from '../../core';
 import * as cdk from '../../core';
+import { Traits } from '../../core/lib/helpers-internal';
+import { lit } from '../../core/lib/private/literal-string';
+
+const POLICY_FACTORY_MAP_SYMBOL = Symbol.for('cdk-resource-policy-factory');
+const ENCRYPTED_RESOURCE_FACTORY_MAP_SYMBOL = Symbol.for('cdk-encrypted-resource-factory');
 
 /**
  * Basic options for a grant operation
@@ -44,7 +52,7 @@ export interface GrantWithResourceOptions extends CommonGrantOptions {
    * The statement will be added to the resource policy if it couldn't be
    * added to the principal policy.
    */
-  readonly resource: IResourceWithPolicy;
+  readonly resource: IResourceWithPolicyV2;
 
   /**
    * When referring to the resource in a resource policy, use this as ARN.
@@ -57,6 +65,24 @@ export interface GrantWithResourceOptions extends CommonGrantOptions {
 }
 
 /**
+ * Options for a grant operation that directly adds a policy statement to a resource
+ *
+ * This differs from GrantWithResourceOptions in that it requires a pre-constructed
+ * PolicyStatement rather than constructing one from individual permissions.
+ * Use this when you need fine-grained control over the initial policy statement's contents.
+ */
+export interface GrantPolicyWithResourceOptions extends GrantWithResourceOptions {
+  /**
+   * The policy statement to add to the resource's policy
+   *
+   * This statement will be passed to the resource's addToResourcePolicy method.
+   * The actual handling of the statement depends on the specific IResourceWithPolicyV2
+   * implementation.
+   */
+  readonly statement: PolicyStatement;
+}
+
+/**
  * Options for a grant operation that only applies to principals
  *
  */
@@ -65,6 +91,7 @@ export interface GrantOnPrincipalOptions extends CommonGrantOptions {
    * Construct to report warnings on in case grant could not be registered
    *
    * @default - the construct in which this construct is defined
+   * @deprecated The scope argument is currently unused.
    */
   readonly scope?: IConstruct;
 }
@@ -79,7 +106,7 @@ export interface GrantOnPrincipalAndResourceOptions extends CommonGrantOptions {
    *
    * The statement will always be added to the resource policy.
    */
-  readonly resource: IResourceWithPolicy;
+  readonly resource: IResourceWithPolicyV2;
 
   /**
    * When referring to the resource in a resource policy, use this as ARN.
@@ -120,10 +147,7 @@ export class Grant implements IDependable {
    *   resource construct.
    */
   public static addToPrincipalOrResource(options: GrantWithResourceOptions): Grant {
-    const result = Grant.addToPrincipal({
-      ...options,
-      scope: options.resource,
-    });
+    const result = Grant.addToPrincipal(options);
 
     const resourceAndPrincipalAccountComparison = options.grantee.grantPrincipal.principalAccount
       ? cdk.Token.compareStrings(options.resource.env.account, options.grantee.grantPrincipal.principalAccount)
@@ -158,6 +182,63 @@ export class Grant implements IDependable {
   }
 
   /**
+   * Add a pre-constructed policy statement to the resource's policy
+   *
+   * This method provides direct, low-level control over the initial policy statement being added.
+   * It is useful when you need to:
+   * - Add complex policy statements that can't be expressed through other grant methods
+   * - Specify the initial structure of the policy statement
+   * - Add statements with custom conditions or other advanced IAM features
+   *
+   * Important differences from other grant methods:
+   * - Only modifies the resource policy, never modifies any principal's policy
+   * - Takes a complete PolicyStatement rather than constructing one from parameters
+   * - Always attempts to add the statement, regardless of principal type or account
+   * - Does not attempt any automatic principal/resource policy selection logic
+   *
+   * Note: The final form of the policy statement in the resource's policy may differ
+   * from the provided statement, depending on the resource's implementation of
+   * addToResourcePolicy.
+   *
+   * @param options Contains both the target resource and the policy statement to add
+   * @returns A Grant object representing the result of the operation
+   *
+   * @example
+   *
+   * declare const grantee: iam.IGrantable;
+   * declare const actions: string[];
+   * declare const resourceArns: string[];
+   * declare const bucket: s3.Bucket;
+   *
+   * const statement = new iam.PolicyStatement({
+   *   effect: iam.Effect.ALLOW,
+   *   actions: actions,
+   *   principals: [new iam.ServicePrincipal('lambda.amazonaws.com')],
+   *   conditions: {
+   *     StringEquals: {
+   *       'aws:SourceAccount': Stack.of(this).account,
+   *     },
+   *   },
+   * });
+   * iam.Grant.addStatementToResourcePolicy({
+   *     grantee: grantee,
+   *     actions: actions,
+   *     resourceArns: resourceArns,
+   *     resource: bucket,
+   *     statement: statement,
+   *  });
+   *
+   */
+  public static addStatementToResourcePolicy(options: GrantPolicyWithResourceOptions) {
+    const resourceResult = options.resource.addToResourcePolicy(options.statement);
+    return new Grant({
+      resourceStatement: options.statement,
+      options,
+      policyDependable: resourceResult.statementAdded ? resourceResult.policyDependable ?? options.resource : undefined,
+    });
+  }
+
+  /**
    * Try to grant the given permissions to the given principal
    *
    * Absence of a principal leads to a warning, but failing to add
@@ -176,7 +257,7 @@ export class Grant implements IDependable {
     }
 
     if (!addedToPrincipal.policyDependable) {
-      throw new Error('Contract violation: when Principal returns statementAdded=true, it should return a dependable');
+      throw new cdk.UnscopedValidationError(lit`ContractViolationPrincipalStatementAdded`, 'Contract violation: when Principal returns statementAdded=true, it should return a dependable');
     }
 
     return new Grant({ principalStatement: statement, options, policyDependable: addedToPrincipal.policyDependable });
@@ -192,10 +273,7 @@ export class Grant implements IDependable {
    * Statement will be the resource statement.
    */
   public static addToPrincipalAndResource(options: GrantOnPrincipalAndResourceOptions): Grant {
-    const result = Grant.addToPrincipal({
-      ...options,
-      scope: options.resource,
-    });
+    const result = Grant.addToPrincipal(options);
 
     const statement = new PolicyStatement({
       actions: options.actions,
@@ -249,7 +327,7 @@ export class Grant implements IDependable {
   public readonly resourceStatement?: PolicyStatement;
 
   /**
-   * The statements that were added to the principal's policy
+   * The statements that were added to the resource policy
    */
   public readonly resourceStatements = new Array<PolicyStatement>();
 
@@ -297,8 +375,7 @@ export class Grant implements IDependable {
    */
   public assertSuccess(): void {
     if (!this.success) {
-      // eslint-disable-next-line max-len
-      throw new Error(`${describeGrant(this.options)} could not be added on either identity or resource policy.`);
+      throw new cdk.UnscopedValidationError(lit`GrantCouldNotBeAdded`, `${describeGrant(this.options)} could not be added on either identity or resource policy.`);
     }
   }
 
@@ -350,13 +427,170 @@ interface GrantProps {
 }
 
 /**
+ * Result of a call to grantOnKey().
+ */
+export interface GrantOnKeyResult {
+  /**
+   * The Grant object, if a grant was created.
+   *
+   * @default No grant
+   */
+  readonly grant?: Grant;
+}
+
+/**
+ * Utility class for discovering and managing resource policy traits
+ *
+ * This class provides methods to retrieve IResourceWithPolicyV2 instances from constructs,
+ * enabling resource-based policy management during IAM grant operations.
+ */
+export class ResourceWithPolicies {
+  /**
+   * Retrieve the IResourceWithPolicyV2 associated with a construct, if available.
+   */
+  public static of(resource: IEnvironmentAware): IResourceWithPolicyV2 | undefined {
+    if (GrantableResources.isResourceWithPolicy(resource)) {
+      return resource;
+    }
+
+    return resource instanceof CfnResource ? ResourceWithPolicies.traits.of(resource) : undefined;
+  }
+
+  /**
+   * Register a factory for a specific CloudFormation resource type and scope
+   */
+  public static register(scope: IConstruct, cfnType: string, factory: IResourcePolicyFactory) {
+    ResourceWithPolicies.traits.register(scope, cfnType, factory, POLICY_FACTORY_MAP_SYMBOL);
+  }
+
+  private static traits = new Traits<IResourceWithPolicyV2, IResourcePolicyFactory>(
+    POLICY_FACTORY_MAP_SYMBOL,
+    type => DefaultPolicyFactories.get(type),
+  );
+}
+
+/**
+ * Utility class for discovering and registering encrypted resource traits
+ *
+ * This class provides methods to retrieve IEncryptedResource instances from constructs,
+ * enabling automatic KMS key permission grants during IAM grant operations.
+ */
+export class EncryptedResources {
+  /**
+   * Retrieve the IEncryptedResource associated with a construct, if available.
+   */
+  public static of(resource: IEnvironmentAware): IEncryptedResource | undefined {
+    if (GrantableResources.isEncryptedResource(resource)) {
+      return resource;
+    }
+
+    return resource instanceof CfnResource ? EncryptedResources.traits.of(resource) : undefined;
+  }
+
+  /**
+   * Register a factory for a specific CloudFormation resource type and scope
+   */
+  public static register(scope: IConstruct, cfnType: string, factory: IEncryptedResourceFactory) {
+    EncryptedResources.traits.register(scope, cfnType, factory, ENCRYPTED_RESOURCE_FACTORY_MAP_SYMBOL);
+  }
+
+  private static traits = new Traits<IEncryptedResource, IEncryptedResourceFactory>(
+    ENCRYPTED_RESOURCE_FACTORY_MAP_SYMBOL,
+    type => DefaultEncryptedResourceFactories.get(type),
+  );
+}
+
+/**
+ * Factory interface for creating IResourceWithPolicyV2 instances from constructs
+ *
+ * Implementations of this interface are registered in the DefaultPolicyFactories registry
+ * and enable automatic resource policy support for CloudFormation resources. When a grant
+ * operation is performed, the factory converts L1 constructs into resources that support
+ * resource-based policies.
+ *
+ * Factories are typically registered during static initialization and associated with
+ * specific CloudFormation resource types (e.g., 'AWS::DynamoDB::Table'). The CDK's grant
+ * system uses these factories to determine whether a resource supports resource policies
+ * and to create the appropriate wrapper when needed.
+ */
+export interface IResourcePolicyFactory {
+  /**
+   * Create an IResourceWithPolicyV2 from a construct
+   * @param resource the construct to be wrapped as an IResourceWithPolicyV2.
+   */
+  forResource(resource: CfnResource): IResourceWithPolicyV2;
+}
+
+/**
+ * Factory interface for creating IEncryptedResource instances from constructs
+ *
+ * Implementations of this interface are registered in the DefaultEncryptedResourceFactories
+ * registry and enable automatic KMS key permission grants for encrypted CloudFormation resources.
+ * When a grant operation is performed on an encrypted resource, the factory converts L1 constructs
+ * into resources that can grant permissions on their associated KMS encryption keys.
+ *
+ * Factories are typically registered during static initialization and associated with specific
+ * CloudFormation resource types (e.g., 'AWS::DynamoDB::Table'). The CDK's grant system uses
+ * these factories to automatically add necessary KMS key permissions when granting access to
+ * encrypted resources.
+ */
+export interface IEncryptedResourceFactory {
+  /**
+   * Create an IEncryptedResource from a construct
+   *
+   * @param resource the construct to be wrapped as an IEncryptedResource.
+   */
+  forResource(resource: CfnResource): IEncryptedResource;
+}
+
+/**
+ * A resource that contains data that can be encrypted, using a KMS key.s
+ */
+export interface IEncryptedResource extends IEnvironmentAware {
+  /**
+   * Gives permissions to a grantable entity to perform actions on the encryption key.
+   */
+  grantOnKey(grantee: IGrantable, ...actions: string[]): GrantOnKeyResult;
+}
+
+/**
  * A resource with a resource policy that can be added to
  */
-export interface IResourceWithPolicy extends cdk.IResource {
+export interface IResourceWithPolicyV2 extends IEnvironmentAware {
   /**
    * Add a statement to the resource's resource policy
    */
   addToResourcePolicy(statement: PolicyStatement): AddToResourcePolicyResult;
+}
+
+/**
+ * Utility methods to check for specific types of grantable resources
+ */
+export class GrantableResources {
+  /**
+   * Whether this resource admits a resource policy.
+   */
+  static isResourceWithPolicy(resource: IEnvironmentAware): resource is IResourceWithPolicyV2 {
+    return (resource as unknown as IResourceWithPolicyV2).addToResourcePolicy !== undefined;
+  }
+
+  /**
+   * Whether this resource holds data that can be encrypted using a KMS key.
+   */
+  static isEncryptedResource(resource: IEnvironmentAware): resource is IEncryptedResource {
+    return (resource as unknown as IEncryptedResource).grantOnKey !== undefined;
+  }
+}
+
+/**
+ * A resource with a resource policy that can be added to
+ *
+ * This interface is maintained for backwards compatibility, but should
+ * not be used in new code. Prefer `IResourceWithPolicyV2` instead.
+ *
+ * @deprecated Implement `IResourceWithPolicyV2` instead.
+ */
+export interface IResourceWithPolicy extends IResourceWithPolicyV2, cdk.IResource {
 }
 
 /**
@@ -392,4 +626,68 @@ export class CompositeDependable implements IDependable {
       },
     });
   }
+}
+
+/**
+ * Default factories for resources with policies
+ */
+export class DefaultPolicyFactories {
+  /**
+   * Get the default factory for a given CloudFormation resource type
+   * @param type the CloudFormation resource type (e.g., 'AWS::DynamoDB::Table')
+   */
+  public static get(type: string): IResourcePolicyFactory | undefined {
+    return DefaultPolicyFactories.map.get(type);
+  }
+
+  /**
+   * Register a default factory for a given CloudFormation resource type
+   * @param type the CloudFormation resource type (e.g., 'AWS::DynamoDB::Table')
+   * @param factory the factory to register for this resource type
+   */
+  public static set(type: string, factory: IResourcePolicyFactory) {
+    DefaultPolicyFactories.map.set(type, factory);
+  }
+
+  /**
+   * Check if a default factory is registered for a given CloudFormation resource type
+   * @param type the CloudFormation resource type (e.g., 'AWS::DynamoDB::Table')
+   */
+  public static has(type: string): boolean {
+    return DefaultPolicyFactories.map.has(type);
+  }
+
+  private static readonly map = new Map<string, IResourcePolicyFactory>();
+}
+
+/**
+ * Default factories for encrypted resources
+ */
+export class DefaultEncryptedResourceFactories {
+  /**
+   * Get the default factory for a given CloudFormation resource type
+   * @param type the CloudFormation resource type (e.g., 'AWS::DynamoDB::Table')
+   */
+  public static get(type: string): IEncryptedResourceFactory | undefined {
+    return DefaultEncryptedResourceFactories.map.get(type);
+  }
+
+  /**
+   * Register a default factory for a given CloudFormation resource type
+   * @param type the CloudFormation resource type (e.g., 'AWS::DynamoDB::Table')
+   * @param factory the factory to register for this resource type
+   */
+  public static set(type: string, factory: IEncryptedResourceFactory) {
+    DefaultEncryptedResourceFactories.map.set(type, factory);
+  }
+
+  /**
+   * Check if a default factory is registered for a given CloudFormation resource type
+   * @param type the CloudFormation resource type (e.g., 'AWS::DynamoDB::Table')
+   */
+  public static has(type: string): boolean {
+    return DefaultEncryptedResourceFactories.map.has(type);
+  }
+
+  private static readonly map = new Map<string, IEncryptedResourceFactory>();
 }

@@ -1,5 +1,6 @@
 import { Template } from '../../assertions';
-import { IVpcEndpointServiceLoadBalancer, VpcEndpointService } from '../../aws-ec2';
+import type { IVpcEndpointServiceLoadBalancer } from '../../aws-ec2';
+import { VpcEndpointService } from '../../aws-ec2';
 import { Stack } from '../../core';
 import { PublicHostedZone, VpcEndpointServiceDomainName } from '../lib';
 
@@ -53,7 +54,7 @@ test('create domain name resource', () => {
             {
               Ref: 'VPCES3AE7D565',
             },
-            '","PrivateDnsName":"my-stuff.aws-cdk.dev"},"physicalResourceId":{"id":"VPCES"},"logApiResponseData":true}',
+            '","PrivateDnsName":"my-stuff.aws-cdk.dev"},"physicalResourceId":{"id":"VPCES"}}',
           ],
         ],
       },
@@ -65,7 +66,7 @@ test('create domain name resource', () => {
             {
               Ref: 'VPCES3AE7D565',
             },
-            '","PrivateDnsName":"my-stuff.aws-cdk.dev"},"physicalResourceId":{"id":"VPCES"},"logApiResponseData":true}',
+            '","PrivateDnsName":"my-stuff.aws-cdk.dev"},"physicalResourceId":{"id":"VPCES"}}',
           ],
         ],
       },
@@ -77,7 +78,7 @@ test('create domain name resource', () => {
             {
               Ref: 'VPCES3AE7D565',
             },
-            '","RemovePrivateDnsName":true},"logApiResponseData":true}',
+            '","RemovePrivateDnsName":true}}',
           ],
         ],
       },
@@ -99,7 +100,7 @@ test('create domain name resource', () => {
             {
               Ref: 'VPCES3AE7D565',
             },
-            '"]},"physicalResourceId":{"id":"fcd2563479244a851a9a59af60831b01"},"logApiResponseData":true}',
+            '"]},"physicalResourceId":{"id":"fcd2563479244a851a9a59af60831b01"}}',
           ],
         ],
       },
@@ -111,7 +112,7 @@ test('create domain name resource', () => {
             {
               Ref: 'VPCES3AE7D565',
             },
-            '"]},"physicalResourceId":{"id":"fcd2563479244a851a9a59af60831b01"},"logApiResponseData":true}',
+            '"]},"physicalResourceId":{"id":"fcd2563479244a851a9a59af60831b01"}}',
           ],
         ],
       },
@@ -198,7 +199,7 @@ test('create domain name resource', () => {
                 ],
               ],
             },
-            '"},"logApiResponseData":true}',
+            '"}}',
           ],
         ],
       },
@@ -230,7 +231,7 @@ test('create domain name resource', () => {
                 ],
               ],
             },
-            '"},"logApiResponseData":true}',
+            '"}}',
           ],
         ],
       },

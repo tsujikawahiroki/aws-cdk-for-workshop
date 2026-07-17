@@ -1,7 +1,7 @@
+import * as cdk from 'aws-cdk-lib';
 import { Template } from 'aws-cdk-lib/assertions';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as s3 from 'aws-cdk-lib/aws-s3';
-import * as cdk from 'aws-cdk-lib';
 import { AccessPoint } from '../lib';
 
 let stack: cdk.Stack;
@@ -45,6 +45,9 @@ test('Can create a valid access point', () => {
     value: accessPoint.virtualHostedUrlForObject('key', {
       regional: false,
     }),
+  });
+  new cdk.CfnOutput(stack, 'S3AccessPointArn', {
+    value: accessPoint.s3AccessPointArn,
   });
 
   expect(Template.fromStack(stack).findOutputs('*')).toEqual(
@@ -95,6 +98,14 @@ test('Can create a valid access point', () => {
                 Ref: 'AWS::URLSuffix',
               },
             ],
+          ],
+        },
+      },
+      S3AccessPointArn: {
+        Value: {
+          'Fn::GetAtt': [
+            'MyObjectLambdaSupportingAccessPointA2D2026E',
+            'Arn',
           ],
         },
       },
@@ -289,50 +300,98 @@ test('Validates the access point name', () => {
     bucket,
     handler,
     accessPointName: 'aa',
-  })).toThrowError(/name must be between 3 and 50 characters long/);
+  })).toThrow(/name must be between 3 and 50 characters long/);
   expect(() => new AccessPoint(stack, 'MyObjectLambda2', {
     bucket,
     handler,
     accessPointName: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-  })).toThrowError(/name must be between 3 and 50 characters long/);
+  })).toThrow(/name must be between 3 and 50 characters long/);
   expect(() => new AccessPoint(stack, 'MyObjectLambda3', {
     bucket,
     handler,
     accessPointName: 'aaaa-s3alias',
-  })).toThrowError(/name cannot end with the suffix -s3alias/);
+  })).toThrow(/name cannot end with the suffix -s3alias/);
   expect(() => new AccessPoint(stack, 'MyObjectLambda4', {
     bucket,
     handler,
     accessPointName: '-aaaaa',
-  })).toThrowError(/name cannot begin or end with a dash/);
+  })).toThrow(/name cannot begin or end with a dash/);
   expect(() => new AccessPoint(stack, 'MyObjectLambda5', {
     bucket,
     handler,
     accessPointName: 'aaaaa-',
-  })).toThrowError(/name cannot begin or end with a dash/);
+  })).toThrow(/name cannot begin or end with a dash/);
   expect(() => new AccessPoint(stack, 'MyObjectLambda6', {
     bucket,
     handler,
     accessPointName: 'Aaaaa',
-  })).toThrowError(/name must begin with a number or lowercase letter and not contain underscores, uppercase letters, or periods/);
+  })).toThrow(/name must begin with a number or lowercase letter and not contain underscores, uppercase letters, or periods/);
   expect(() => new AccessPoint(stack, 'MyObjectLambda7', {
     bucket,
     handler,
     accessPointName: '$aaaaa',
-  })).toThrowError(/name must begin with a number or lowercase letter and not contain underscores, uppercase letters, or periods/);
+  })).toThrow(/name must begin with a number or lowercase letter and not contain underscores, uppercase letters, or periods/);
   expect(() => new AccessPoint(stack, 'MyObjectLambda8', {
     bucket,
     handler,
     accessPointName: 'aaaAaaa',
-  })).toThrowError(/name must begin with a number or lowercase letter and not contain underscores, uppercase letters, or periods/);
+  })).toThrow(/name must begin with a number or lowercase letter and not contain underscores, uppercase letters, or periods/);
   expect(() => new AccessPoint(stack, 'MyObjectLambda9', {
     bucket,
     handler,
     accessPointName: 'aaa_aaa',
-  })).toThrowError(/name must begin with a number or lowercase letter and not contain underscores, uppercase letters, or periods/);
+  })).toThrow(/name must begin with a number or lowercase letter and not contain underscores, uppercase letters, or periods/);
   expect(() => new AccessPoint(stack, 'MyObjectLambda10', {
     bucket,
     handler,
     accessPointName: 'aaa.aaa',
-  })).toThrowError(/name must begin with a number or lowercase letter and not contain underscores, uppercase letters, or periods/);
+  })).toThrow(/name must begin with a number or lowercase letter and not contain underscores, uppercase letters, or periods/);
+});
+
+test('Multiple access points with different configurations on the same bucket', () => {
+  const handler2 = new lambda.Function(stack, 'MyFunction2', {
+    runtime: lambda.Runtime.NODEJS_LATEST,
+    handler: 'index.handler',
+    code: new lambda.InlineCode('foo'),
+  });
+
+  new AccessPoint(stack, 'MyObjectLambda1', {
+    bucket,
+    handler,
+    cloudWatchMetricsEnabled: true,
+    supportsGetObjectPartNumber: true,
+  });
+
+  new AccessPoint(stack, 'MyObjectLambda2', {
+    bucket,
+    handler: handler2,
+    supportsGetObjectRange: true,
+    payload: { foo: 10 },
+  });
+
+  const template = Template.fromStack(stack);
+
+  template.hasResourceProperties('AWS::S3ObjectLambda::AccessPoint', {
+    ObjectLambdaConfiguration: {
+      AllowedFeatures: ['GetObject-PartNumber'],
+      CloudWatchMetricsEnabled: true,
+    },
+  });
+
+  template.hasResourceProperties('AWS::S3ObjectLambda::AccessPoint', {
+    ObjectLambdaConfiguration: {
+      AllowedFeatures: ['GetObject-Range'],
+      TransformationConfigurations: [{
+        Actions: ['GetObject'],
+        ContentTransformation: {
+          AwsLambda: {
+            FunctionPayload: '{"foo":10}',
+          },
+        },
+      }],
+    },
+  });
+
+  template.resourceCountIs('AWS::S3ObjectLambda::AccessPoint', 2);
+  template.resourceCountIs('AWS::S3::AccessPoint', 2);
 });

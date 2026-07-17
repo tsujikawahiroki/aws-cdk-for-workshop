@@ -1,5 +1,5 @@
 {
-  "version": "36.0.0",
+  "version": "54.0.0",
   "testCases": {
     "SNSTopicPolicyInteg/DefaultTest": {
       "stacks": [
@@ -9,5 +9,7 @@
       "assertionStack": "SNSTopicPolicyInteg/DefaultTest/DeployAssert",
       "assertionStackName": "SNSTopicPolicyIntegDefaultTestDeployAssert005CA6BA"
     }
-  }
+  },
+  "enableLookups": true,
+  "minimumCliVersion": "2.1131.0"
 }

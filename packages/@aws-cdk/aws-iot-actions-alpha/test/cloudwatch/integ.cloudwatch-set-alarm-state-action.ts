@@ -1,6 +1,6 @@
-import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import * as iot from '@aws-cdk/aws-iot-alpha';
 import * as cdk from 'aws-cdk-lib';
+import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import * as actions from '../../lib';
 
 const app = new cdk.App();
@@ -12,7 +12,7 @@ class TestStack extends cdk.Stack {
     const metric = new cloudwatch.Metric({
       namespace: 'MyNamespace',
       metricName: 'MyMetric',
-      dimensions: { MyDimension: 'MyDimensionValue' },
+      dimensionsMap: { MyDimension: 'MyDimensionValue' },
     });
     const alarm = new cloudwatch.Alarm(this, 'MyAlarm', {
       metric: metric,

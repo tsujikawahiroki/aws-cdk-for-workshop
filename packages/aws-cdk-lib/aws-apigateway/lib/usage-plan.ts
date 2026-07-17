@@ -1,11 +1,18 @@
-import { Construct } from 'constructs';
-import { IApiKey } from './api-key';
+import type { Construct } from 'constructs';
+import type { IApiKey } from './api-key';
+import type { IApiKeyRef, IUsagePlanRef, UsagePlanReference } from './apigateway.generated';
 import { CfnUsagePlan, CfnUsagePlanKey } from './apigateway.generated';
-import { Method } from './method';
-import { IRestApi } from './restapi';
-import { Stage } from './stage';
+import type { Method } from './method';
+import type { IRestApi } from './restapi';
+import type { Stage } from './stage';
 import { validateDouble, validateInteger } from './util';
-import { FeatureFlags, IResource, Lazy, Names, Resource, Token } from '../../core';
+import type { IResource, Token } from '../../core';
+import { FeatureFlags, Names, Resource } from '../../core';
+import type { IArrayBox } from '../../core/lib/helpers-internal';
+import { Box } from '../../core/lib/helpers-internal';
+import { addConstructMetadata, MethodMetadata } from '../../core/lib/metadata-resource';
+import { noBoxStackTraces } from '../../core/lib/no-box-stack-traces';
+import { propertyInjectable } from '../../core/lib/prop-injectable';
 import { APIGATEWAY_USAGEPLANKEY_ORDERINSENSITIVE_ID } from '../../cx-api';
 
 /**
@@ -159,7 +166,7 @@ export interface AddApiKeyOptions {
 /**
  * A UsagePlan, either managed by this CDK app, or imported.
  */
-export interface IUsagePlan extends IResource {
+export interface IUsagePlan extends IResource, IUsagePlanRef {
   /**
    * Id of the usage plan
    * @attribute
@@ -172,7 +179,7 @@ export interface IUsagePlan extends IResource {
    * @param apiKey the api key to associate with this usage plan
    * @param options options that control the behaviour of this method
    */
-  addApiKey(apiKey: IApiKey, options?: AddApiKeyOptions): void;
+  addApiKey(apiKey: IApiKeyRef, options?: AddApiKeyOptions): void;
 
 }
 
@@ -189,7 +196,7 @@ abstract class UsagePlanBase extends Resource implements IUsagePlan {
    * @param apiKey the api key to associate with this usage plan
    * @param options options that control the behaviour of this method
    */
-  public addApiKey(apiKey: IApiKey, options?: AddApiKeyOptions): void {
+  public addApiKey(apiKey: IApiKeyRef, options?: AddApiKeyOptions): void {
     let id: string;
     const prefix = 'UsagePlanKeyResource';
 
@@ -201,7 +208,7 @@ abstract class UsagePlanBase extends Resource implements IUsagePlan {
     }
 
     const resource = new CfnUsagePlanKey(this, id, {
-      keyId: apiKey.keyId,
+      keyId: apiKey.apiKeyRef.apiKeyId,
       keyType: UsagePlanKeyType.API_KEY,
       usagePlanId: this.usagePlanId,
     });
@@ -210,9 +217,18 @@ abstract class UsagePlanBase extends Resource implements IUsagePlan {
     }
   }
 
+  public get usagePlanRef(): UsagePlanReference {
+    return {
+      usagePlanId: this.usagePlanId,
+    };
+  }
 }
 
+@propertyInjectable
+@noBoxStackTraces
 export class UsagePlan extends UsagePlanBase {
+  /** Uniquely identifies this class. */
+  public static readonly PROPERTY_INJECTION_ID: string = 'aws-cdk-lib.aws-apigateway.UsagePlan';
 
   /**
    * Import an externally defined usage plan using its ARN.
@@ -237,14 +253,18 @@ export class UsagePlan extends UsagePlanBase {
    */
   public readonly usagePlanId: string;
 
-  private readonly apiStages = new Array<UsagePlanPerApiStage>();
+  private readonly apiStages: IArrayBox<UsagePlanPerApiStage>;
 
   constructor(scope: Construct, id: string, props: UsagePlanProps = { }) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
     let resource: CfnUsagePlan;
 
+    this.apiStages = Box.fromArray([], { omitEmpty: false });
+
     resource = new CfnUsagePlan(this, 'Resource', {
-      apiStages: Lazy.any({ produce: () => this.renderApiStages(this.apiStages) }),
+      apiStages: this.apiStages.derive(arr => this.renderApiStages(arr)),
       description: props.description,
       quota: this.renderQuota(props),
       throttle: this.renderThrottle(props.throttle),
@@ -263,17 +283,13 @@ export class UsagePlan extends UsagePlanBase {
 
   /**
    * Adds an apiStage.
-   * @param apiStage
    */
+  @MethodMetadata()
   public addApiStage(apiStage: UsagePlanPerApiStage) {
     this.apiStages.push(apiStage);
   }
 
-  /**
-   *
-   * @param props
-   */
-  private renderApiStages(apiStages: UsagePlanPerApiStage[] | undefined): CfnUsagePlan.ApiStageProperty[] | undefined {
+  private renderApiStages(apiStages: readonly UsagePlanPerApiStage[] | undefined): CfnUsagePlan.ApiStageProperty[] | undefined {
     if (apiStages && apiStages.length > 0) {
       const stages: CfnUsagePlan.ApiStageProperty[] = [];
       apiStages.forEach((apiStage: UsagePlanPerApiStage) => {

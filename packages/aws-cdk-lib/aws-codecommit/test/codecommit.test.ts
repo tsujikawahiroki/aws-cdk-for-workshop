@@ -1,14 +1,28 @@
 import * as fs from 'fs';
 import { join, resolve } from 'path';
-import { Template } from '../../assertions';
+import { Match, Template } from '../../assertions';
 import { Role, ServicePrincipal } from '../../aws-iam';
 import * as kms from '../../aws-kms';
 import { Asset } from '../../aws-s3-assets';
 import { App, Stack } from '../../core';
-import { Code, Repository, RepositoryProps } from '../lib';
+import type { RepositoryProps } from '../lib';
+import { Code, Repository } from '../lib';
 
 describe('codecommit', () => {
   describe('CodeCommit Repositories', () => {
+    test('repository without triggers omits Triggers property', () => {
+      const stack = new Stack();
+
+      new Repository(stack, 'MyRepository', {
+        repositoryName: 'MyRepository',
+      });
+
+      Template.fromStack(stack).hasResourceProperties('AWS::CodeCommit::Repository', {
+        RepositoryName: 'MyRepository',
+        Triggers: Match.absent(),
+      });
+    });
+
     test('add an SNS trigger to repository', () => {
       const stack = new Stack();
 
@@ -39,7 +53,6 @@ describe('codecommit', () => {
           },
         },
       });
-
     });
 
     test('fails when triggers have duplicate names', () => {
@@ -50,7 +63,6 @@ describe('codecommit', () => {
       }).notify('myTrigger');
 
       expect(() => myRepository.notify('myTrigger')).toThrow();
-
     });
 
     test('can be imported using a Repository ARN', () => {
@@ -64,7 +76,6 @@ describe('codecommit', () => {
       // THEN
       expect(stack.resolve(repo.repositoryArn)).toEqual(repositoryArn);
       expect(stack.resolve(repo.repositoryName)).toEqual('my-repo');
-
     });
 
     test('Repository can be initialized with contents from a ZIP file', () => {
@@ -196,7 +207,6 @@ describe('codecommit', () => {
 
       expect(repo.env.account).toEqual('585695036304');
       expect(repo.env.region).toEqual('us-west-2');
-
     });
 
     test('can be imported using just a Repository name (the ARN is deduced)', () => {
@@ -220,7 +230,7 @@ describe('codecommit', () => {
       });
       expect(stack.resolve(repo.repositoryName)).toEqual('my-repo');
 
-      //local name resolution should use stack region
+      // local name resolution should use stack region
       expect(stack.resolve(repo.repositoryCloneUrlHttp)).toEqual({
         'Fn::Join': [
           '',
@@ -244,7 +254,6 @@ describe('codecommit', () => {
           ],
         ],
       });
-
     });
 
     test('grant push', () => {
@@ -265,17 +274,7 @@ describe('codecommit', () => {
         PolicyDocument: {
           Statement: [
             {
-              Action: 'codecommit:GitPull',
-              Effect: 'Allow',
-              Resource: {
-                'Fn::GetAtt': [
-                  'Repo02AC86CF',
-                  'Arn',
-                ],
-              },
-            },
-            {
-              Action: 'codecommit:GitPush',
+              Action: ['codecommit:GitPull', 'codecommit:GitPush'],
               Effect: 'Allow',
               Resource: {
                 'Fn::GetAtt': [
@@ -288,7 +287,6 @@ describe('codecommit', () => {
           Version: '2012-10-17',
         },
       });
-
     });
 
     test('HTTPS (GRC) clone URL', () => {
@@ -309,7 +307,6 @@ describe('codecommit', () => {
           ],
         ],
       });
-
     });
 
     test('specify a kms key', () => {

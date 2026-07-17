@@ -1,15 +1,16 @@
-import * as kms from 'aws-cdk-lib/aws-kms';
-import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
+import type * as kms from 'aws-cdk-lib/aws-kms';
+import type * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import * as cdk from 'aws-cdk-lib/core';
-import { Construct, IConstruct } from 'constructs';
-import { ICluster } from './cluster';
-import { DatabaseOptions } from './database-options';
+import type { IConstruct } from 'constructs';
+import { Construct } from 'constructs';
+import type { ICluster } from './cluster';
+import type { DatabaseOptions } from './database-options';
 import { DatabaseSecret } from './database-secret';
 import { DatabaseQuery } from './private/database-query';
 import { HandlerName } from './private/database-query-provider/handler-name';
-import { UserHandlerProps } from './private/handler-props';
+import type { UserHandlerProps } from './private/handler-props';
 import { UserTablePrivileges } from './private/privileges';
-import { ITable, TableAction } from './table';
+import type { ITable, TableAction } from './table';
 
 /**
  * Properties for configuring a Redshift user.
@@ -30,6 +31,13 @@ export interface UserProps extends DatabaseOptions {
    * @default - the default AWS managed key is used
    */
   readonly encryptionKey?: kms.IKey;
+
+  /**
+   * Characters to not include in the generated password.
+   *
+   * @default '"@/\\\ \''
+   */
+  readonly excludeCharacters?: string;
 
   /**
    * The policy to apply when this resource is removed from the application.
@@ -105,6 +113,9 @@ abstract class UserBase extends Construct implements IUser {
         ...this.databaseProps,
         user: this,
       });
+
+      // The privilege should be granted or revoked when the table exists.
+      this.privileges.node.addDependency(table);
     }
 
     this.privileges.addPrivileges(table, ...actions);
@@ -153,6 +164,7 @@ export class User extends UserBase {
     const secret = new DatabaseSecret(this, 'Secret', {
       username,
       encryptionKey: props.encryptionKey,
+      excludeCharacters: props.excludeCharacters,
     });
     const attachedSecret = secret.attach(props.cluster);
     this.password = attachedSecret.secretValueFromJson('password');

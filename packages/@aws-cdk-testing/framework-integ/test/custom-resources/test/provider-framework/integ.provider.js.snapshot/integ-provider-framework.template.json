@@ -89,7 +89,7 @@
      "S3Bucket": {
       "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
      },
-     "S3Key": "c66233dc0804d5658a2ea2fdf2189b3486234224411bf91660f53f72f6165480.zip"
+     "S3Key": "3fd34b6f315db2f0776d25cd9f1d803c9b73456e59d40260359fb31501865180.zip"
     },
     "Handler": "index.onEvent",
     "Role": {
@@ -98,7 +98,7 @@
       "Arn"
      ]
     },
-    "Runtime": "nodejs18.x"
+    "Runtime": "nodejs24.x"
    },
    "DependsOn": [
     "comamazonawscdkcustomresourcess3fileproviders3fileoneventServiceRoleDefaultPolicy10D24725",
@@ -185,7 +185,7 @@
      "S3Bucket": {
       "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
      },
-     "S3Key": "15197a5512179542fe2cff74af89bb047793c9c4e0b4395f114641a81cd52ae5.zip"
+     "S3Key": "775803ec04ddcc7cbb5479b0d84ac848097d215c16587dc92070925fac5cbf3e.zip"
     },
     "Description": "AWS CDK resource provider framework - onEvent (integ-provider-framework/com.amazonaws.cdk.custom-resources.s3file-provider/s3file-provider)",
     "Environment": {
@@ -199,19 +199,49 @@
      }
     },
     "Handler": "framework.onEvent",
+    "LoggingConfig": {
+     "ApplicationLogLevel": "FATAL",
+     "LogFormat": "JSON"
+    },
     "Role": {
      "Fn::GetAtt": [
       "comamazonawscdkcustomresourcess3fileproviderframeworkonEventServiceRoleABFCDA11",
       "Arn"
      ]
     },
-    "Runtime": "nodejs18.x",
+    "Runtime": "nodejs24.x",
     "Timeout": 900
    },
    "DependsOn": [
     "comamazonawscdkcustomresourcess3fileproviderframeworkonEventServiceRoleDefaultPolicyA61D075B",
     "comamazonawscdkcustomresourcess3fileproviderframeworkonEventServiceRoleABFCDA11"
    ]
+  },
+  "comamazonawscdkcustomresourcess3fileproviderframeworkonEventinlinePolicyAddedToExecutionRole0380B1E60": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": "lambda:GetFunction",
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "comamazonawscdkcustomresourcess3fileproviders3fileonevent48293DE8",
+         "Arn"
+        ]
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "comamazonawscdkcustomresourcess3fileproviderframeworkonEventinlinePolicyAddedToExecutionRole0380B1E60",
+    "Roles": [
+     {
+      "Ref": "comamazonawscdkcustomresourcess3fileproviderframeworkonEventServiceRoleABFCDA11"
+     }
+    ]
+   }
   },
   "file23283EA00": {
    "Type": "Custom::S3File",
@@ -513,7 +543,7 @@
      "S3Bucket": {
       "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
      },
-     "S3Key": "15197a5512179542fe2cff74af89bb047793c9c4e0b4395f114641a81cd52ae5.zip"
+     "S3Key": "775803ec04ddcc7cbb5479b0d84ac848097d215c16587dc92070925fac5cbf3e.zip"
     },
     "Description": "AWS CDK resource provider framework - onEvent (integ-provider-framework/com.amazonaws.cdk.custom-resources.s3assert-provider/s3assert-provider)",
     "Environment": {
@@ -536,19 +566,75 @@
      }
     },
     "Handler": "framework.onEvent",
+    "LoggingConfig": {
+     "ApplicationLogLevel": "FATAL",
+     "LogFormat": "JSON"
+    },
     "Role": {
      "Fn::GetAtt": [
       "comamazonawscdkcustomresourcess3assertproviderframeworkonEventServiceRole34070F2C",
       "Arn"
      ]
     },
-    "Runtime": "nodejs18.x",
+    "Runtime": "nodejs24.x",
     "Timeout": 900
    },
    "DependsOn": [
     "comamazonawscdkcustomresourcess3assertproviderframeworkonEventServiceRoleDefaultPolicyDD1903FC",
     "comamazonawscdkcustomresourcess3assertproviderframeworkonEventServiceRole34070F2C"
    ]
+  },
+  "comamazonawscdkcustomresourcess3assertproviderframeworkonEventinlinePolicyAddedToExecutionRole077C19BE0": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": "lambda:GetFunction",
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "comamazonawscdkcustomresourcess3assertproviders3assertoneventF1EEF783",
+         "Arn"
+        ]
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "comamazonawscdkcustomresourcess3assertproviderframeworkonEventinlinePolicyAddedToExecutionRole077C19BE0",
+    "Roles": [
+     {
+      "Ref": "comamazonawscdkcustomresourcess3assertproviderframeworkonEventServiceRole34070F2C"
+     }
+    ]
+   }
+  },
+  "comamazonawscdkcustomresourcess3assertproviderframeworkonEventinlinePolicyAddedToExecutionRole1E6548A02": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": "lambda:GetFunction",
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "comamazonawscdkcustomresourcess3assertproviders3assertiscomplete6AC08EF9",
+         "Arn"
+        ]
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "comamazonawscdkcustomresourcess3assertproviderframeworkonEventinlinePolicyAddedToExecutionRole1E6548A02",
+    "Roles": [
+     {
+      "Ref": "comamazonawscdkcustomresourcess3assertproviderframeworkonEventServiceRole34070F2C"
+     }
+    ]
+   }
   },
   "comamazonawscdkcustomresourcess3assertproviderframeworkisCompleteServiceRole2C8C7983": {
    "Type": "AWS::IAM::Role",
@@ -650,7 +736,7 @@
      "S3Bucket": {
       "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
      },
-     "S3Key": "15197a5512179542fe2cff74af89bb047793c9c4e0b4395f114641a81cd52ae5.zip"
+     "S3Key": "775803ec04ddcc7cbb5479b0d84ac848097d215c16587dc92070925fac5cbf3e.zip"
     },
     "Description": "AWS CDK resource provider framework - isComplete (integ-provider-framework/com.amazonaws.cdk.custom-resources.s3assert-provider/s3assert-provider)",
     "Environment": {
@@ -670,19 +756,75 @@
      }
     },
     "Handler": "framework.isComplete",
+    "LoggingConfig": {
+     "ApplicationLogLevel": "FATAL",
+     "LogFormat": "JSON"
+    },
     "Role": {
      "Fn::GetAtt": [
       "comamazonawscdkcustomresourcess3assertproviderframeworkisCompleteServiceRole2C8C7983",
       "Arn"
      ]
     },
-    "Runtime": "nodejs18.x",
+    "Runtime": "nodejs24.x",
     "Timeout": 900
    },
    "DependsOn": [
     "comamazonawscdkcustomresourcess3assertproviderframeworkisCompleteServiceRoleDefaultPolicy38CF2774",
     "comamazonawscdkcustomresourcess3assertproviderframeworkisCompleteServiceRole2C8C7983"
    ]
+  },
+  "comamazonawscdkcustomresourcess3assertproviderframeworkisCompleteinlinePolicyAddedToExecutionRole031DB97C4": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": "lambda:GetFunction",
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "comamazonawscdkcustomresourcess3assertproviders3assertoneventF1EEF783",
+         "Arn"
+        ]
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "comamazonawscdkcustomresourcess3assertproviderframeworkisCompleteinlinePolicyAddedToExecutionRole031DB97C4",
+    "Roles": [
+     {
+      "Ref": "comamazonawscdkcustomresourcess3assertproviderframeworkisCompleteServiceRole2C8C7983"
+     }
+    ]
+   }
+  },
+  "comamazonawscdkcustomresourcess3assertproviderframeworkisCompleteinlinePolicyAddedToExecutionRole1C8EBFCC2": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": "lambda:GetFunction",
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "comamazonawscdkcustomresourcess3assertproviders3assertiscomplete6AC08EF9",
+         "Arn"
+        ]
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "comamazonawscdkcustomresourcess3assertproviderframeworkisCompleteinlinePolicyAddedToExecutionRole1C8EBFCC2",
+    "Roles": [
+     {
+      "Ref": "comamazonawscdkcustomresourcess3assertproviderframeworkisCompleteServiceRole2C8C7983"
+     }
+    ]
+   }
   },
   "comamazonawscdkcustomresourcess3assertproviderframeworkonTimeoutServiceRole15F6DFA2": {
    "Type": "AWS::IAM::Role",
@@ -784,7 +926,7 @@
      "S3Bucket": {
       "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
      },
-     "S3Key": "15197a5512179542fe2cff74af89bb047793c9c4e0b4395f114641a81cd52ae5.zip"
+     "S3Key": "775803ec04ddcc7cbb5479b0d84ac848097d215c16587dc92070925fac5cbf3e.zip"
     },
     "Description": "AWS CDK resource provider framework - onTimeout (integ-provider-framework/com.amazonaws.cdk.custom-resources.s3assert-provider/s3assert-provider)",
     "Environment": {
@@ -804,19 +946,75 @@
      }
     },
     "Handler": "framework.onTimeout",
+    "LoggingConfig": {
+     "ApplicationLogLevel": "FATAL",
+     "LogFormat": "JSON"
+    },
     "Role": {
      "Fn::GetAtt": [
       "comamazonawscdkcustomresourcess3assertproviderframeworkonTimeoutServiceRole15F6DFA2",
       "Arn"
      ]
     },
-    "Runtime": "nodejs18.x",
+    "Runtime": "nodejs24.x",
     "Timeout": 900
    },
    "DependsOn": [
     "comamazonawscdkcustomresourcess3assertproviderframeworkonTimeoutServiceRoleDefaultPolicyC7408011",
     "comamazonawscdkcustomresourcess3assertproviderframeworkonTimeoutServiceRole15F6DFA2"
    ]
+  },
+  "comamazonawscdkcustomresourcess3assertproviderframeworkonTimeoutinlinePolicyAddedToExecutionRole01175B1A4": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": "lambda:GetFunction",
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "comamazonawscdkcustomresourcess3assertproviders3assertoneventF1EEF783",
+         "Arn"
+        ]
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "comamazonawscdkcustomresourcess3assertproviderframeworkonTimeoutinlinePolicyAddedToExecutionRole01175B1A4",
+    "Roles": [
+     {
+      "Ref": "comamazonawscdkcustomresourcess3assertproviderframeworkonTimeoutServiceRole15F6DFA2"
+     }
+    ]
+   }
+  },
+  "comamazonawscdkcustomresourcess3assertproviderframeworkonTimeoutinlinePolicyAddedToExecutionRole12A2AB95F": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": "lambda:GetFunction",
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "comamazonawscdkcustomresourcess3assertproviders3assertiscomplete6AC08EF9",
+         "Arn"
+        ]
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "comamazonawscdkcustomresourcess3assertproviderframeworkonTimeoutinlinePolicyAddedToExecutionRole12A2AB95F",
+    "Roles": [
+     {
+      "Ref": "comamazonawscdkcustomresourcess3assertproviderframeworkonTimeoutServiceRole15F6DFA2"
+     }
+    ]
+   }
   },
   "comamazonawscdkcustomresourcess3assertproviderwaiterstatemachineRole39E8529F": {
    "Type": "AWS::IAM::Role",
@@ -885,22 +1083,6 @@
          ]
         }
        ]
-      },
-      {
-       "Action": [
-        "logs:CreateLogDelivery",
-        "logs:CreateLogStream",
-        "logs:DeleteLogDelivery",
-        "logs:DescribeLogGroups",
-        "logs:DescribeResourcePolicies",
-        "logs:GetLogDelivery",
-        "logs:ListLogDeliveries",
-        "logs:PutLogEvents",
-        "logs:PutResourcePolicy",
-        "logs:UpdateLogDelivery"
-       ],
-       "Effect": "Allow",
-       "Resource": "*"
       }
      ],
      "Version": "2012-10-17"
@@ -912,26 +1094,6 @@
      }
     ]
    }
-  },
-  "comamazonawscdkcustomresourcess3assertproviderwaiterstatemachineLogGroup7F17330A": {
-   "Type": "AWS::Logs::LogGroup",
-   "Properties": {
-    "LogGroupName": {
-     "Fn::Join": [
-      "",
-      [
-       "/aws/vendedlogs/states/waiter-state-machine-",
-       {
-        "Ref": "comamazonawscdkcustomresourcess3assertproviderframeworkisComplete63829575"
-       },
-       "-c8f5fa432b7394919f18e8df23f7b79ef142420db6"
-      ]
-     ]
-    },
-    "RetentionInDays": 731
-   },
-   "UpdateReplacePolicy": "Retain",
-   "DeletionPolicy": "Retain"
   },
   "comamazonawscdkcustomresourcess3assertproviderwaiterstatemachineAC25148E": {
    "Type": "AWS::StepFunctions::StateMachine",
@@ -957,22 +1119,6 @@
        "\"}}}"
       ]
      ]
-    },
-    "LoggingConfiguration": {
-     "Destinations": [
-      {
-       "CloudWatchLogsLogGroup": {
-        "LogGroupArn": {
-         "Fn::GetAtt": [
-          "comamazonawscdkcustomresourcess3assertproviderwaiterstatemachineLogGroup7F17330A",
-          "Arn"
-         ]
-        }
-       }
-      }
-     ],
-     "IncludeExecutionData": false,
-     "Level": "ERROR"
     },
     "RoleArn": {
      "Fn::GetAtt": [

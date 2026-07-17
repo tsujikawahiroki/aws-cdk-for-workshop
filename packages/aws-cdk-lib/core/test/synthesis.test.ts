@@ -3,13 +3,20 @@ import * as os from 'os';
 import * as path from 'path';
 import { testDeprecated } from '@aws-cdk/cdk-build-tools';
 import { Construct } from 'constructs';
+import { Template } from '../../assertions';
 import * as cxschema from '../../cloud-assembly-schema';
 import * as cxapi from '../../cx-api';
 import * as cdk from '../lib';
+import { MetadataType } from '../lib/metadata-type';
 import { synthesize } from '../lib/private/synthesis';
 
 function createModernApp() {
-  return new cdk.App();
+  const app = new cdk.App();
+  cdk.Validations.of(app).acknowledge({
+    id: 'CloudFormation-Validate::F0005',
+    reason: 'Invalid template sections',
+  });
+  return app;
 }
 
 describe('synthesis', () => {
@@ -22,8 +29,8 @@ describe('synthesis', () => {
 
     // THEN
     expect(app.synth()).toEqual(session); // same session if we synth() again
-    expect(list(session.directory)).toEqual(['cdk.out', 'manifest.json', 'tree.json']);
-    expect(readJson(session.directory, 'manifest.json').artifacts).toEqual({
+    expect(list(session.directory)).toEqual(expect.arrayContaining(['cdk.out', 'manifest.json', 'tree.json']));
+    expect(readJson(session.directory, 'manifest.json').artifacts).toMatchObject({
       Tree: {
         type: 'cdk:tree',
         properties: { file: 'tree.json' },
@@ -46,7 +53,45 @@ describe('synthesis', () => {
       treeMetadata: false,
     });
     const assembly = app.synth();
-    expect(list(assembly.directory)).toEqual(['cdk.out', 'manifest.json']);
+    expect(list(assembly.directory)).not.toContain('tree.json');
+  });
+
+  test('tree.json constructInfo does not contain metadata', () => {
+    // GIVEN
+    const app = createModernApp();
+
+    // enable analytics flags
+    app.node.setContext(cxapi.ANALYTICS_REPORTING_ENABLED_CONTEXT, true);
+    app.node.setContext(cxapi.ENABLE_ADDITIONAL_METADATA_COLLECTION, true);
+
+    const stack = new cdk.Stack(app, 'Stack');
+    const resource = new class extends cdk.Resource {}(stack, 'MyResource');
+    resource.node.addMetadata(MetadataType.CONSTRUCT, { some: 'data' });
+
+    // WHEN
+    const session = app.synth();
+    const treeJson = readJson(session.directory, 'tree.json');
+
+    // THEN - verify no constructInfo in the tree contains a metadata field
+    const allConstructInfos: any[] = [];
+    collectConstructInfos(treeJson.tree, allConstructInfos);
+
+    for (const info of allConstructInfos) {
+      expect(info).not.toHaveProperty('metadata');
+      // constructInfo should only have fqn and version
+      expect(Object.keys(info).sort()).toEqual(['fqn', 'version']);
+    }
+
+    function collectConstructInfos(node: any, result: any[]) {
+      if (node.constructInfo) {
+        result.push(node.constructInfo);
+      }
+      if (node.children) {
+        for (const child of Object.values(node.children)) {
+          collectConstructInfos(child, result);
+        }
+      }
+    }
   });
 
   test('synthesis respects disabling logicalId metadata', () => {
@@ -79,20 +124,10 @@ describe('synthesis', () => {
     const session = app.synth();
 
     // THEN
-    expect(session.manifest.artifacts?.['one-stack'].metadata).toEqual({
-      '/one-stack': [
-        {
-          type: 'aws:cdk:stack-tags',
-          data: [
-            {
-              key: 'boomTag',
-              value: 'BOOM',
-            },
-          ],
-        },
-      ],
-      // no logicalId entry
-    });
+    const metaDataTypes = Object.values(session.getStackByName('one-stack').metadata)
+      .flatMap((xs) => xs.map(x => x.type));
+
+    expect(metaDataTypes).not.toContain('aws:cdk:logicalId');
   });
 
   test('single empty stack', () => {
@@ -143,6 +178,7 @@ describe('synthesis', () => {
     expect(readJson(session.directory, 'foo.json')).toEqual({ bar: 123 });
     expect(session.manifest).toEqual({
       version: cxschema.Manifest.version(),
+      minimumCliVersion: cxschema.Manifest.cliVersion(),
       artifacts: expect.objectContaining({
         'Tree': {
           type: 'cdk:tree',
@@ -202,6 +238,7 @@ describe('synthesis', () => {
     expect(readJson(session.directory, 'foo.json')).toEqual({ bar: 123 });
     expect(session.manifest).toEqual({
       version: cxschema.Manifest.version(),
+      minimumCliVersion: cxschema.Manifest.cliVersion(),
       artifacts: expect.objectContaining({
         'Tree': {
           type: 'cdk:tree',
@@ -282,6 +319,122 @@ describe('synthesis', () => {
     expect(fingerprint).not.toHaveBeenCalled();
 
     jest.restoreAllMocks();
+  });
+
+  test('when deploy role session tags are configured, required stack bootstrap version is 22', () => {
+    const app = new cdk.App();
+    const stack = new cdk.Stack(app, 'stack', {
+      synthesizer: new cdk.DefaultStackSynthesizer({
+        deployRoleAdditionalOptions: {
+          Tags: [{ Key: 'Departement', Value: 'Engineering' }],
+        },
+      }),
+    });
+
+    const assembly = app.synth();
+    const stackArtifact = assembly.getStackByName('stack');
+
+    expect(stackArtifact.requiresBootstrapStackVersion).toEqual(22);
+
+    const versionRule = stack.node.findChild('CheckBootstrapVersion') as cdk.CfnRule;
+
+    // ugly - but no more than using the snapshot of the resource...
+    const bootstrapVersions = (versionRule._toCloudFormation() as any).Rules[versionRule.logicalId].Assertions[0].Assert['Fn::Not'][0]['Fn::Contains'][0];
+    expect(bootstrapVersions).toContain('21');
+  });
+
+  test('when lookup role session tags are configured, required lookup bootstrap version is 22', () => {
+    const app = new cdk.App();
+    new cdk.Stack(app, 'stack', {
+      synthesizer: new cdk.DefaultStackSynthesizer({
+        lookupRoleAdditionalOptions: {
+          Tags: [{ Key: 'Departement', Value: 'Engineering' }],
+        },
+      }),
+    });
+
+    const assembly = app.synth();
+    const stackArtifact = assembly.getStackByName('stack');
+
+    expect(stackArtifact.lookupRole?.requiresBootstrapStackVersion).toEqual(22);
+  });
+
+  test('when file asset role session tags are configured, required assets bootstrap version is 22', () => {
+    const app = new cdk.App();
+    new cdk.Stack(app, 'stack', {
+      synthesizer: new cdk.DefaultStackSynthesizer({
+        fileAssetPublishingRoleAdditionalOptions: {
+          Tags: [{ Key: 'Departement', Value: 'Engineering' }],
+        },
+      }),
+    });
+
+    const assembly = app.synth();
+    const assetsArtifact = assembly.tryGetArtifact('stack.assets') as cxapi.AssetManifestArtifact;
+
+    expect(assetsArtifact.requiresBootstrapStackVersion).toEqual(22);
+  });
+
+  test('when image asset role session tags are configured, required assets bootstrap version is 22', () => {
+    const app = new cdk.App();
+    new cdk.Stack(app, 'stack', {
+      synthesizer: new cdk.DefaultStackSynthesizer({
+        imageAssetPublishingRoleAdditionalOptions: {
+          Tags: [{ Key: 'Departement', Value: 'Engineering' }],
+        },
+      }),
+    });
+
+    const assembly = app.synth();
+    const assetsArtifact = assembly.tryGetArtifact('stack.assets') as cxapi.AssetManifestArtifact;
+
+    expect(assetsArtifact.requiresBootstrapStackVersion).toEqual(22);
+  });
+
+  test('calling synth multiple times errors if construct tree is mutated', () => {
+    const app = new cdk.App();
+
+    const stages = [
+      {
+        stage: 'PROD',
+      },
+      {
+        stage: 'BETA',
+      },
+    ];
+
+    // THEN - no error the first time synth is called
+    let stack = new cdk.Stack(app, `${stages[0].stage}-Stack`, {});
+    expect(() => {
+      Template.fromStack(stack);
+    }).not.toThrow();
+
+    // THEN - error is thrown since synth was called with mutated stack name
+    stack = new cdk.Stack(app, `${stages[1].stage}-Stack`, {});
+    expect(() => {
+      Template.fromStack(stack);
+    }).toThrow('Synthesis has been called multiple times and the construct tree was modified after the first synthesis');
+  });
+
+  test('metadata gets written to separate file but can still be read', () => {
+    const app = new cdk.App();
+
+    const stack = new cdk.Stack(app, 'SomeStack');
+    for (let i = 0; i < 10; i++) {
+      new cdk.CfnResource(stack, `Resource${i}`, { type: 'Aws::Some::Resource' });
+    }
+
+    const assembly = app.synth();
+
+    const stackArtifact = assembly.getStackByName('SomeStack');
+    expect(stackArtifact.manifest.additionalMetadataFile).toBeDefined();
+
+    expect(stackArtifact.metadata).toEqual(expect.objectContaining({
+      '/SomeStack/Resource0': expect.arrayContaining([{
+        data: 'Resource0',
+        type: 'aws:cdk:logicalId',
+      }]),
+    }));
   });
 });
 
